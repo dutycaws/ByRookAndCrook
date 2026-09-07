@@ -18,6 +18,7 @@
     <nav aria-label="Tavern areas">
       <a href="/garden" class:active={page.url.pathname === '/garden'}>Garden</a>
       <a href="/ingredients" class:active={page.url.pathname === '/ingredients'}>Ingredients</a>
+      <a href="/brewery" class:active={page.url.pathname === '/brewery'}>Brewery</a>
     </nav>
 
     <div class="account">

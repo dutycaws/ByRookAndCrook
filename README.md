@@ -2,6 +2,6 @@
 
 A cozy tavern simulator built with SvelteKit and Supabase.
 
-The first vertical slice is implemented: a provisioned player can sign in, create one tavern save, inspect a responsive hex garden, harvest a mature crop through an atomic database command, and find the resulting ingredient batch after navigation, reload, sign-out, and a second browser session.
+The first connected MVP loop is implemented: a provisioned player can sign in, create a tavern, harvest a mature crop, brew one quality-scored beverage per tavern day, earn a matching social card, and retain the full result through navigation, reload, sign-out, and another browser session. SvelteKit owns the web flow; Supabase Auth, row-level security, and transactional RPCs own identity and durable game state.
 
-See [the development runbook](docs/development.md) for local setup, fixture accounts, the demo path, tests, and deployment notes. The implementation contract and acceptance matrix live in [the garden harvest plan](docs/plans/garden-harvest-vertical-slice.md).
+See [the development runbook](docs/development.md) for local setup, fixture accounts, the demo path, tests, and deployment notes. The implementation contracts live in the [garden harvest plan](docs/plans/garden-harvest-vertical-slice.md) and [brewery slice record](docs/plans/brewery-vertical-slice.md).

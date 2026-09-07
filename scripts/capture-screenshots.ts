@@ -12,6 +12,8 @@ const browser = await chromium.launch();
 try {
   await mkdir(outputDirectory, { recursive: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const pageErrors: string[] = [];
+  page.on('pageerror', (cause) => pageErrors.push(cause.message));
 
   await page.goto(`${appUrl}/login`);
   await page.getByLabel('Email').fill(player.email);
@@ -34,7 +36,44 @@ try {
   await page.getByRole('heading', { name: 'Fennel' }).waitFor();
   await page.screenshot({ path: `${outputDirectory}/ingredients.png`, fullPage: true });
 
-  console.info(`Wrote garden and ingredient screenshots to ${outputDirectory}.`);
+  await page.getByRole('link', { name: 'Open brewery' }).click();
+  await page.getByRole('heading', { name: "Prepare today's infusion" }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/brewery-setup.png`, fullPage: true });
+
+  await page.getByRole('button', { name: 'Begin 30-second brew' }).click();
+  await page.getByRole('heading', { name: 'Stir the wort' }).waitFor();
+  await page.waitForFunction(() => {
+    const timer = document.querySelector('.brew-progress-heading strong');
+    return timer !== null && timer.textContent !== '30s';
+  });
+  await page.getByLabel('Stirring speed').evaluate((control) => {
+    const slider = control as HTMLInputElement;
+    slider.value = '50';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.getByText('Perfect', { exact: true }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/brewery-active.png`, fullPage: true });
+
+  const snapshot = await player.client.rpc('get_tavern_snapshot');
+  if (snapshot.error) throw snapshot.error;
+  const activeSession = (snapshot.data as unknown as { brewery: { activeSession: { id: string } | null } })
+    .brewery.activeSession;
+  if (!activeSession) throw new Error('Expected an active brew session while capturing screenshots.');
+  const backdated = await player.admin
+    .from('brew_sessions')
+    .update({ started_at: new Date(Date.now() - 31_000).toISOString() })
+    .eq('id', activeSession.id);
+  if (backdated.error) throw backdated.error;
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Bottle this brew' }).click();
+  await page.getByRole('heading', { name: 'Honest Mead' }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/brewery-result.png`, fullPage: true });
+
+  if (pageErrors.length > 0) throw new Error(`Browser errors while capturing screenshots: ${pageErrors.join('; ')}`);
+
+  console.info(`Wrote garden, ingredient, and brewery screenshots to ${outputDirectory}.`);
 } finally {
   await browser.close();
   await player.admin.auth.admin.deleteUser(player.userId);

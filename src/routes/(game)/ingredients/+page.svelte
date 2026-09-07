@@ -28,7 +28,10 @@
         <p class="eyebrow">Persisted in the ledger</p>
         <h2 id="inventory-title">Harvested batches</h2>
       </div>
-      <a class="secondary-link compact" href="/garden">Return to garden</a>
+      <div class="panel-actions">
+        <a class="secondary-link compact" href="/garden">Return to garden</a>
+        <a class="secondary-link compact" href="/brewery">Open brewery</a>
+      </div>
     </div>
 
     {#if data.snapshot}

@@ -9,6 +9,196 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      beverages: {
+        Row: {
+          brew_session_id: string
+          created_at: string
+          id: string
+          ingredient_batch_id: string
+          name: string
+          quality_index: number
+          rules_version: string
+          save_id: string
+        }
+        Insert: {
+          brew_session_id: string
+          created_at?: string
+          id?: string
+          ingredient_batch_id: string
+          name: string
+          quality_index: number
+          rules_version: string
+          save_id: string
+        }
+        Update: {
+          brew_session_id?: string
+          created_at?: string
+          id?: string
+          ingredient_batch_id?: string
+          name?: string
+          quality_index?: number
+          rules_version?: string
+          save_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "beverages_save_id_brew_session_id_fkey"
+            columns: ["save_id", "brew_session_id"]
+            isOneToOne: true
+            referencedRelation: "brew_sessions"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "beverages_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "beverages_save_id_ingredient_batch_id_fkey"
+            columns: ["save_id", "ingredient_batch_id"]
+            isOneToOne: false
+            referencedRelation: "ingredient_batches"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
+      brew_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          day_number: number
+          duration_seconds: number
+          good_ticks: number | null
+          id: string
+          ingredient_batch_id: string
+          ingredient_brew_bonus: number
+          ingredient_quality_index: number
+          perfect_ticks: number | null
+          quality_index: number | null
+          rules_version: string
+          save_id: string
+          started_at: string
+          status: string
+          stir_score: number | null
+          total_ticks: number | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          day_number: number
+          duration_seconds?: number
+          good_ticks?: number | null
+          id?: string
+          ingredient_batch_id: string
+          ingredient_brew_bonus: number
+          ingredient_quality_index: number
+          perfect_ticks?: number | null
+          quality_index?: number | null
+          rules_version: string
+          save_id: string
+          started_at?: string
+          status?: string
+          stir_score?: number | null
+          total_ticks?: number | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          day_number?: number
+          duration_seconds?: number
+          good_ticks?: number | null
+          id?: string
+          ingredient_batch_id?: string
+          ingredient_brew_bonus?: number
+          ingredient_quality_index?: number
+          perfect_ticks?: number | null
+          quality_index?: number | null
+          rules_version?: string
+          save_id?: string
+          started_at?: string
+          status?: string
+          stir_score?: number | null
+          total_ticks?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brew_sessions_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "brew_sessions_save_id_ingredient_batch_id_fkey"
+            columns: ["save_id", "ingredient_batch_id"]
+            isOneToOne: false
+            referencedRelation: "ingredient_batches"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
+      craft_actions: {
+        Row: {
+          action_id: string
+          actor_id: string
+          command_kind: string
+          committed_revision: number
+          created_at: string
+          input_expected_revision: number
+          input_good_ticks: number | null
+          input_perfect_ticks: number | null
+          input_total_ticks: number | null
+          result: Json
+          save_id: string
+          subject_id: string | null
+        }
+        Insert: {
+          action_id: string
+          actor_id: string
+          command_kind: string
+          committed_revision: number
+          created_at?: string
+          input_expected_revision: number
+          input_good_ticks?: number | null
+          input_perfect_ticks?: number | null
+          input_total_ticks?: number | null
+          result: Json
+          save_id: string
+          subject_id?: string | null
+        }
+        Update: {
+          action_id?: string
+          actor_id?: string
+          command_kind?: string
+          committed_revision?: number
+          created_at?: string
+          input_expected_revision?: number
+          input_good_ticks?: number | null
+          input_perfect_ticks?: number | null
+          input_total_ticks?: number | null
+          result?: Json
+          save_id?: string
+          subject_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "craft_actions_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "craft_actions_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_actions: {
         Row: {
           action_id: string
@@ -134,6 +324,7 @@ export type Database = {
         Row: {
           bake_bonus: number
           brew_bonus: number
+          consumed_quantity: number
           created_at: string
           id: string
           plant_key: string
@@ -147,6 +338,7 @@ export type Database = {
         Insert: {
           bake_bonus: number
           brew_bonus: number
+          consumed_quantity?: number
           created_at?: string
           id?: string
           plant_key: string
@@ -160,6 +352,7 @@ export type Database = {
         Update: {
           bake_bonus?: number
           brew_bonus?: number
+          consumed_quantity?: number
           created_at?: string
           id?: string
           plant_key?: string
@@ -228,9 +421,62 @@ export type Database = {
         }
         Relationships: []
       }
+      social_cards: {
+        Row: {
+          card_key: string
+          created_at: string
+          display_name: string
+          gold_multiplier: number
+          id: string
+          relationship_gain: number
+          save_id: string
+          source_beverage_id: string
+          tier: string
+        }
+        Insert: {
+          card_key: string
+          created_at?: string
+          display_name: string
+          gold_multiplier: number
+          id?: string
+          relationship_gain: number
+          save_id: string
+          source_beverage_id: string
+          tier: string
+        }
+        Update: {
+          card_key?: string
+          created_at?: string
+          display_name?: string
+          gold_multiplier?: number
+          id?: string
+          relationship_gain?: number
+          save_id?: string
+          source_beverage_id?: string
+          tier?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_cards_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_cards_save_id_source_beverage_id_fkey"
+            columns: ["save_id", "source_beverage_id"]
+            isOneToOne: true
+            referencedRelation: "beverages"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
       tavern_saves: {
         Row: {
           created_at: string
+          current_day: number
+          day_minigame_completed: boolean
           id: string
           revision: number
           rules_version: string
@@ -239,6 +485,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          current_day?: number
+          day_minigame_completed?: boolean
           id?: string
           revision?: number
           rules_version?: string
@@ -247,6 +495,8 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          current_day?: number
+          day_minigame_completed?: boolean
           id?: string
           revision?: number
           rules_version?: string
@@ -260,6 +510,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      advance_tavern_day: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      complete_brew: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_good_ticks: number
+          p_perfect_ticks: number
+          p_save_id: string
+          p_session_id: string
+          p_total_ticks: number
+        }
+        Returns: Json
+      }
       create_tavern: { Args: never; Returns: Json }
       get_tavern_snapshot: { Args: never; Returns: Json }
       harvest_crop: {
@@ -267,6 +537,15 @@ export type Database = {
           p_action_id: string
           p_cell_id: string
           p_expected_revision: number
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      start_brew: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_ingredient_batch_id: string
           p_save_id: string
         }
         Returns: Json

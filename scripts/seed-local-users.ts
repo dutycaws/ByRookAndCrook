@@ -1,14 +1,26 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+
+const environmentFile = fileURLToPath(new URL('../.env', import.meta.url));
+if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `pnpm env:local` first.');
+process.loadEnvFile(environmentFile);
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing ${name}. Run \`pnpm env:local\` first.`);
+  return value;
+}
 
 const DEFAULT_USERS = [
   {
-    email: process.env.LOCAL_PILOT_ONE_EMAIL ?? 'keeper.one@example.test',
-    password: process.env.LOCAL_PILOT_ONE_PASSWORD ?? 'RookAndCrook-local-1!'
+    email: required('LOCAL_PILOT_ONE_EMAIL'),
+    password: required('LOCAL_PILOT_ONE_PASSWORD')
   },
   {
-    email: process.env.LOCAL_PILOT_TWO_EMAIL ?? 'keeper.two@example.test',
-    password: process.env.LOCAL_PILOT_TWO_PASSWORD ?? 'RookAndCrook-local-2!'
+    email: required('LOCAL_PILOT_TWO_EMAIL'),
+    password: required('LOCAL_PILOT_TWO_PASSWORD')
   }
 ];
 

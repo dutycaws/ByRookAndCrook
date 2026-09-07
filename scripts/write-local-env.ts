@@ -1,6 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+const environmentFile = fileURLToPath(new URL('../.env', import.meta.url));
+
+if (existsSync(environmentFile)) process.loadEnvFile(environmentFile);
+
+function generatedPassword(name: string, rotate: boolean): string {
+  if (!rotate && process.env[name]) return process.env[name];
+  return randomBytes(24).toString('base64url');
+}
 
 function localStatus(): Record<string, string> {
   const output = execFileSync('supabase', ['status', '-o', 'env'], {
@@ -25,16 +35,19 @@ if (!['127.0.0.1', 'localhost'].includes(apiUrl.hostname) || apiUrl.port !== '57
 
 if (!status.PUBLISHABLE_KEY) throw new Error('Local Supabase publishable key is unavailable.');
 
+const rotate = process.argv.includes('--rotate');
 const environment = [
   `PUBLIC_SUPABASE_URL=${apiUrl.toString().replace(/\/$/, '')}`,
   `PUBLIC_SUPABASE_PUBLISHABLE_KEY=${status.PUBLISHABLE_KEY}`,
   '',
-  'LOCAL_PILOT_ONE_EMAIL=keeper.one@example.test',
-  'LOCAL_PILOT_ONE_PASSWORD=RookAndCrook-local-1!',
-  'LOCAL_PILOT_TWO_EMAIL=keeper.two@example.test',
-  'LOCAL_PILOT_TWO_PASSWORD=RookAndCrook-local-2!',
+  `LOCAL_PILOT_ONE_EMAIL=${process.env.LOCAL_PILOT_ONE_EMAIL ?? 'keeper.one@example.test'}`,
+  `LOCAL_PILOT_ONE_PASSWORD=${generatedPassword('LOCAL_PILOT_ONE_PASSWORD', rotate)}`,
+  `LOCAL_PILOT_TWO_EMAIL=${process.env.LOCAL_PILOT_TWO_EMAIL ?? 'keeper.two@example.test'}`,
+  `LOCAL_PILOT_TWO_PASSWORD=${generatedPassword('LOCAL_PILOT_TWO_PASSWORD', rotate)}`,
+  `LOCAL_TEST_USER_PASSWORD=${generatedPassword('LOCAL_TEST_USER_PASSWORD', rotate)}`,
   ''
 ].join('\n');
 
-writeFileSync(fileURLToPath(new URL('../.env', import.meta.url)), environment, { mode: 0o600 });
-console.info(`Wrote .env for ${apiUrl.origin}.`);
+writeFileSync(environmentFile, environment, { mode: 0o600 });
+chmodSync(environmentFile, 0o600);
+console.info(`Wrote ${rotate ? 'rotated ' : ''}local credentials to the ignored .env file for ${apiUrl.origin}.`);

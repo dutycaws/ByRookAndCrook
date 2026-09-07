@@ -1,4 +1,4 @@
-name: Garden harvest slice
+name: Tavern MVP slices
 
 on:
   pull_request:
@@ -41,6 +41,9 @@ jobs:
           pnpm env:local
           pnpm db:reset:local
           pnpm fixtures:users:local
+
+      - name: Audit secret placement
+        run: pnpm secrets:audit
 
       - name: Check generated database types
         run: pnpm db:types:check

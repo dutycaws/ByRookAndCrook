@@ -1,11 +1,20 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
 import {
+  parseAdvanceDayReceipt,
+  parseCompleteBrewReceipt,
   parseReceipt,
   parseSnapshot,
+  parseStartBrewReceipt,
+  type AdvanceDayCommand,
+  type AdvanceDayReceipt,
+  type CompleteBrewCommand,
+  type CompleteBrewReceipt,
   type GameSnapshot,
   type HarvestCommand,
-  type HarvestReceipt
+  type HarvestReceipt,
+  type StartBrewCommand,
+  type StartBrewReceipt
 } from '$lib/game/contracts';
 
 export class GameServiceError extends Error {
@@ -74,4 +83,66 @@ export async function harvestCrop(
     durationMs: Math.round(performance.now() - startedAt)
   });
   return receipt;
+}
+
+export async function startBrew(
+  client: SupabaseClient<Database>,
+  command: StartBrewCommand
+): Promise<StartBrewReceipt> {
+  const { data, error } = await client.rpc('start_brew', {
+    p_save_id: command.saveId,
+    p_ingredient_batch_id: command.ingredientBatchId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseStartBrewReceipt(data);
+}
+
+export async function completeBrew(
+  client: SupabaseClient<Database>,
+  command: CompleteBrewCommand
+): Promise<CompleteBrewReceipt> {
+  const startedAt = performance.now();
+  const { data, error } = await client.rpc('complete_brew', {
+    p_save_id: command.saveId,
+    p_session_id: command.sessionId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision,
+    p_perfect_ticks: command.perfectTicks,
+    p_good_ticks: command.goodTicks,
+    p_total_ticks: command.totalTicks
+  });
+
+  if (error) {
+    const mapped = mapDatabaseError(error);
+    console.info('complete_brew', {
+      actionId: command.actionId,
+      outcome: mapped.code,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    throw mapped;
+  }
+
+  const receipt = parseCompleteBrewReceipt(data);
+  console.info('complete_brew', {
+    actionId: receipt.actionId,
+    outcome: 'committed',
+    revision: receipt.committedRevision,
+    durationMs: Math.round(performance.now() - startedAt)
+  });
+  return receipt;
+}
+
+export async function advanceDay(
+  client: SupabaseClient<Database>,
+  command: AdvanceDayCommand
+): Promise<AdvanceDayReceipt> {
+  const { data, error } = await client.rpc('advance_tavern_day', {
+    p_save_id: command.saveId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseAdvanceDayReceipt(data);
 }
