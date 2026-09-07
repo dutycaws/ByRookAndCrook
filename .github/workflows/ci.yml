@@ -1,0 +1,78 @@
+name: Garden harvest slice
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      DO_NOT_TRACK: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.114.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start and rebuild local Supabase
+        run: |
+          pnpm db:start
+          pnpm env:local
+          pnpm db:reset:local
+          pnpm fixtures:users:local
+
+      - name: Check generated database types
+        run: pnpm db:types:check
+
+      - name: Check application
+        run: pnpm check
+
+      - name: Test database
+        run: pnpm test:db
+
+      - name: Test real RPC concurrency
+        run: pnpm test:integration
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test browser journey
+        run: pnpm test:e2e
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            playwright-report/
+
+      - name: Stop local Supabase
+        if: always()
+        run: pnpm db:stop

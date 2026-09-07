@@ -1,0 +1,50 @@
+{
+  "name": "by-rook-and-crook",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "node build",
+    "prepare": "svelte-kit sync",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:db": "DO_NOT_TRACK=1 supabase test db",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "db:start": "DO_NOT_TRACK=1 supabase start",
+    "db:stop": "DO_NOT_TRACK=1 supabase stop",
+    "db:reset:local": "DO_NOT_TRACK=1 supabase db reset --local",
+    "db:status": "DO_NOT_TRACK=1 supabase status",
+    "db:types": "DO_NOT_TRACK=1 supabase gen types typescript --local --schema public",
+    "db:types:check": "tsx scripts/check-database-types.ts",
+    "env:local": "tsx scripts/write-local-env.ts",
+    "fixtures:users:local": "tsx scripts/seed-local-users.ts",
+    "screenshots": "tsx scripts/capture-screenshots.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.6",
+    "@supabase/supabase-js": "2.115.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@sveltejs/adapter-node": "5.5.7",
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.20.0",
+    "svelte": "5.57.0",
+    "svelte-check": "4.3.6",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  },
+  "packageManager": "pnpm@11.19.0"
+}
