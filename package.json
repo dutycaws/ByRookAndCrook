@@ -15,7 +15,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:db": "DO_NOT_TRACK=1 supabase test db",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "vitest run tests/integration --reporter=default --reporter=junit --outputFile.junit=test-results/integration/junit.xml",
     "test:e2e": "playwright test",
     "db:start": "DO_NOT_TRACK=1 supabase start",
     "db:stop": "DO_NOT_TRACK=1 supabase stop",

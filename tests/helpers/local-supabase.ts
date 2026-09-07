@@ -64,7 +64,11 @@ export async function createTestPlayer(prefix: string): Promise<{
     auth: { persistSession: false, autoRefreshToken: false }
   });
   const { error: signInError } = await client.auth.signInWithPassword({ email, password });
-  if (signInError) throw signInError;
+  if (signInError) {
+    const { error: cleanupError } = await admin.auth.admin.deleteUser(created.user.id);
+    if (cleanupError) throw new Error('Test player sign-in and cleanup failed.');
+    throw new Error(`Test player sign-in failed (${signInError.status ?? 'unknown'} / ${signInError.code ?? 'unknown'}).`);
+  }
 
   return { client, admin, userId: created.user.id, email, password };
 }

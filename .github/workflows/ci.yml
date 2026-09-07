@@ -51,11 +51,22 @@ jobs:
       - name: Check application
         run: pnpm check
 
+      - name: Test diagnostic redaction
+        run: pnpm exec vitest run tests/unit
+
       - name: Test database
         run: pnpm test:db
 
       - name: Test real RPC concurrency
         run: pnpm test:integration
+
+      - name: Upload integration failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-evidence
+          if-no-files-found: ignore
+          path: test-results/integration/
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
