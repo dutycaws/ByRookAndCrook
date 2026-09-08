@@ -10,6 +10,8 @@ export default defineConfig({
     strictPort: true
   },
   test: {
+    // RPC suites include local Auth password hashing and concurrent requests.
+    testTimeout: 15000,
     include: ['tests/unit/**/*.test.ts', 'tests/integration/**/*.test.ts']
   }
 });

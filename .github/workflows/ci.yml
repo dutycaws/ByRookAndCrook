@@ -51,6 +51,9 @@ jobs:
       - name: Check application
         run: pnpm check
 
+      - name: Validate versioned NPC content
+        run: pnpm npc:content:check
+
       - name: Test diagnostic redaction
         run: pnpm exec vitest run tests/unit
 

@@ -27,7 +27,11 @@
     "fixtures:users:local": "tsx scripts/seed-local-users.ts",
     "credentials:local": "tsx scripts/show-local-credentials.ts",
     "secrets:audit": "tsx scripts/audit-local-secrets.ts",
-    "screenshots": "tsx scripts/capture-screenshots.ts"
+    "npc:content:check": "tsx scripts/npc-content.ts",
+    "npc:content:migration": "tsx scripts/npc-content.ts",
+    "npc:eval:live": "tsx scripts/evaluate-npc-dialogue.ts --live",
+    "screenshots": "tsx scripts/capture-screenshots.ts",
+    "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.6",

@@ -1,10 +1,20 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
-const candidates = ['.env', '.env.local', 'supabase/.env']
+function environmentFiles(directory:string, prefix=''): string[] {
+  return readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
+    const name=prefix+entry.name;
+    if(entry.isDirectory()) {
+      if(['node_modules','.git','.codex','.agents','.svelte-kit','build','artifacts','test-results','playwright-report','.temp'].includes(entry.name))return [];
+      return environmentFiles(`${directory}/${entry.name}`,`${name}/`);
+    }
+    return /^\.env(?:\..+)?$/.test(entry.name)&&entry.name!=='.env.example'?[name]:[];
+  });
+}
+const candidates = environmentFiles(projectRoot)
   .map((name) => ({ name, path: fileURLToPath(new URL(`../${name}`, import.meta.url)) }))
   .filter(({ path }) => existsSync(path));
 
@@ -23,22 +33,28 @@ for (const candidate of candidates) {
 const primaryEnvironment = candidates.find(({ name }) => name === '.env');
 if (primaryEnvironment) process.loadEnvFile(primaryEnvironment.path);
 
-const secretNames = [
+const secretNames = new Set([
   'LOCAL_PILOT_ONE_PASSWORD',
   'LOCAL_PILOT_TWO_PASSWORD',
   'LOCAL_TEST_USER_PASSWORD',
-  'OPENAI_API_KEY'
-];
+  'OPENAI_API_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  ...[...(primaryEnvironment?readFileSync(primaryEnvironment.path,'utf8'):'').matchAll(/^(?:export\s+)?([A-Z_][A-Z_0-9]*)\s*=/gm)]
+    .map(match=>match[1]).filter(name=>!name.startsWith('PUBLIC_')&&/(?:KEY|TOKEN|SECRET|PASSWORD)$/.test(name))
+]);
+const sourceFiles=execFileSync('git',['ls-files','--cached','--others','--exclude-standard','-z'],{cwd:projectRoot,encoding:'utf8'}).split('\0').filter(Boolean);
 
 for (const name of secretNames) {
   const value = process.env[name];
   if (!value) continue;
 
-  const trackedMatch = spawnSync('git', ['grep', '-F', '--quiet', '--', value], {
-    cwd: projectRoot,
-    stdio: 'ignore'
-  });
-  if (trackedMatch.status === 0) throw new Error(`${name} appears in a tracked file.`);
+  // Read tracked and new source files without putting secret values in process arguments.
+  for(const source of sourceFiles) {
+    const path=`${projectRoot}/${source}`;
+    if(existsSync(path)&&statSync(path).isFile()&&readFileSync(path).includes(Buffer.from(value))) {
+      throw new Error(`${name} appears in source file ${source}.`);
+    }
+  }
 }
 
 execFileSync('git', ['status', '--short', '--ignored', ...candidates.map(({ path }) => relative(projectRoot, path))], {

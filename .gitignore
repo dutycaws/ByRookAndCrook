@@ -148,6 +148,7 @@ build/
 # Playwright
 playwright-report/
 test-results/
+artifacts/npc-evals/
 
 # Supabase local state
 supabase/.branches/

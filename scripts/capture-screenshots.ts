@@ -71,9 +71,18 @@ try {
   await page.getByRole('heading', { name: 'Honest Mead' }).waitFor();
   await page.screenshot({ path: `${outputDirectory}/brewery-result.png`, fullPage: true });
 
+  await page.getByRole('link', { name: 'Serve a drink at the bar' }).click();
+  await page.getByLabel('Social card').selectOption({ index: 1 });
+  await page.screenshot({ path: `${outputDirectory}/bar.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
+  await page.getByRole('status').filter({ hasText: 'Earned 14 gold' }).waitFor();
+  await page.screenshot({ path: `${outputDirectory}/bar-result.png`, fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: `${outputDirectory}/bar-mobile.png`, fullPage: true });
+
   if (pageErrors.length > 0) throw new Error(`Browser errors while capturing screenshots: ${pageErrors.join('; ')}`);
 
-  console.info(`Wrote garden, ingredient, and brewery screenshots to ${outputDirectory}.`);
+  console.info(`Wrote garden, ingredient, brewery, and bar screenshots to ${outputDirectory}.`);
 } finally {
   await browser.close();
   await player.admin.auth.admin.deleteUser(player.userId);

@@ -55,4 +55,4 @@ See the [local MVP runbook](../development.md) for setup, commands, screenshots,
 
 ## Next boundary
 
-The next coherent slice is serving: choose a persisted beverage, apply its quality and social-card modifier to a guest interaction, and atomically persist payment and relationship progress. NPC dialogue, LLM orchestration, authored story arcs, deck loadouts, and broader day simulation still need their own contracts and acceptance paths.
+The [patron serving slice](patron-serving-vertical-slice.md) now consumes a persisted beverage and optional card and atomically persists payment, relationship changes, and draft story progression. NPC dialogue, LLM orchestration, complete authored story arcs, deck loadouts, and broader day simulation still need their own contracts and acceptance paths.

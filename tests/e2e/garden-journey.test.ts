@@ -157,6 +157,17 @@ test('a harvested ingredient becomes a persistent brew, social card, and complet
     await expect(page.getByText('Legendary · 1 unit')).toBeVisible();
 
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
+    await page.getByRole('link', { name: 'Serve a drink at the bar' }).click();
+    await expect(page.getByRole('heading', { name: 'The bar', exact: true })).toBeVisible();
+    await page.getByLabel('Social card').selectOption({ index: 1 });
+    await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
+    await expect(page.getByRole('status')).toContainText('Earned 14 gold');
+    await expect(page.getByLabel('Tavern gold')).toContainText('14 gold');
+    await expect(page.getByRole('heading', { name: 'No drinks ready to serve' })).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel('Tavern gold')).toContainText('14 gold');
+    await expect(page.getByText('Relationship +8 · Story 0', { exact: false })).toBeVisible();
+    await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('button', { name: 'Rest and begin next day' }).click();
     await expect(page.getByText('Tavern day 2 · Daily craft')).toBeVisible();
     await expect(page.getByRole('heading', { name: "Prepare today's infusion" })).toBeVisible();

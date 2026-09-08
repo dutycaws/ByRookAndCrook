@@ -199,6 +199,93 @@ export type Database = {
           },
         ]
       }
+      dialogue_turns: {
+        Row: {
+          actor_id: string
+          beverage_id: string | null
+          calls: number
+          card_id: string | null
+          checkpoints: Json
+          completed_at: string | null
+          content_version: string
+          created_at: string
+          day: number
+          error_code: string | null
+          fence: string
+          id: string
+          input_sequence: number
+          lease_until: string
+          message: string
+          patron_key: string
+          result: Json | null
+          rule_version: string
+          save_id: string
+          source_revision: number
+          status: string
+        }
+        Insert: {
+          actor_id: string
+          beverage_id?: string | null
+          calls?: number
+          card_id?: string | null
+          checkpoints?: Json
+          completed_at?: string | null
+          content_version?: string
+          created_at?: string
+          day: number
+          error_code?: string | null
+          fence?: string
+          id: string
+          input_sequence: number
+          lease_until: string
+          message: string
+          patron_key: string
+          result?: Json | null
+          rule_version?: string
+          save_id: string
+          source_revision: number
+          status: string
+        }
+        Update: {
+          actor_id?: string
+          beverage_id?: string | null
+          calls?: number
+          card_id?: string | null
+          checkpoints?: Json
+          completed_at?: string | null
+          content_version?: string
+          created_at?: string
+          day?: number
+          error_code?: string | null
+          fence?: string
+          id?: string
+          input_sequence?: number
+          lease_until?: string
+          message?: string
+          patron_key?: string
+          result?: Json | null
+          rule_version?: string
+          save_id?: string
+          source_revision?: number
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dialogue_turns_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "dialogue_turns_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_actions: {
         Row: {
           action_id: string
@@ -394,6 +481,84 @@ export type Database = {
           },
         ]
       }
+      patron_catalog: {
+        Row: {
+          arc_steps: string[]
+          arc_title: string
+          description: string
+          display_name: string
+          icon: string
+          initial_relationship: number
+          patron_key: string
+          prices: number[]
+          rules_version: string
+          title: string
+        }
+        Insert: {
+          arc_steps: string[]
+          arc_title: string
+          description: string
+          display_name: string
+          icon: string
+          initial_relationship: number
+          patron_key: string
+          prices: number[]
+          rules_version: string
+          title: string
+        }
+        Update: {
+          arc_steps?: string[]
+          arc_title?: string
+          description?: string
+          display_name?: string
+          icon?: string
+          initial_relationship?: number
+          patron_key?: string
+          prices?: number[]
+          rules_version?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      patron_states: {
+        Row: {
+          arc_progress: number
+          patron_key: string
+          relationship: number
+          save_id: string
+          updated_at: string
+        }
+        Insert: {
+          arc_progress?: number
+          patron_key: string
+          relationship: number
+          save_id: string
+          updated_at?: string
+        }
+        Update: {
+          arc_progress?: number
+          patron_key?: string
+          relationship?: number
+          save_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patron_states_patron_key_fkey"
+            columns: ["patron_key"]
+            isOneToOne: false
+            referencedRelation: "patron_catalog"
+            referencedColumns: ["patron_key"]
+          },
+          {
+            foreignKeyName: "patron_states_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       plant_catalog: {
         Row: {
           base_bake_bonus: number
@@ -420,6 +585,96 @@ export type Database = {
           rules_version?: string
         }
         Relationships: []
+      }
+      serving_events: {
+        Row: {
+          action_id: string
+          actor_id: string
+          arc_change: number
+          beverage_id: string
+          card_id: string | null
+          committed_revision: number
+          created_at: string
+          day_number: number
+          gold_earned: number
+          input_expected_revision: number
+          patron_key: string
+          relationship_change: number
+          result: Json
+          rules_version: string
+          save_id: string
+        }
+        Insert: {
+          action_id: string
+          actor_id: string
+          arc_change: number
+          beverage_id: string
+          card_id?: string | null
+          committed_revision: number
+          created_at?: string
+          day_number: number
+          gold_earned: number
+          input_expected_revision: number
+          patron_key: string
+          relationship_change: number
+          result: Json
+          rules_version: string
+          save_id: string
+        }
+        Update: {
+          action_id?: string
+          actor_id?: string
+          arc_change?: number
+          beverage_id?: string
+          card_id?: string | null
+          committed_revision?: number
+          created_at?: string
+          day_number?: number
+          gold_earned?: number
+          input_expected_revision?: number
+          patron_key?: string
+          relationship_change?: number
+          result?: Json
+          rules_version?: string
+          save_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "serving_events_patron_key_fkey"
+            columns: ["patron_key"]
+            isOneToOne: false
+            referencedRelation: "patron_catalog"
+            referencedColumns: ["patron_key"]
+          },
+          {
+            foreignKeyName: "serving_events_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "serving_events_save_id_beverage_id_fkey"
+            columns: ["save_id", "beverage_id"]
+            isOneToOne: true
+            referencedRelation: "beverages"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "serving_events_save_id_card_id_fkey"
+            columns: ["save_id", "card_id"]
+            isOneToOne: true
+            referencedRelation: "social_cards"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "serving_events_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       social_cards: {
         Row: {
@@ -477,6 +732,7 @@ export type Database = {
           created_at: string
           current_day: number
           day_minigame_completed: boolean
+          gold: number
           id: string
           revision: number
           rules_version: string
@@ -487,6 +743,7 @@ export type Database = {
           created_at?: string
           current_day?: number
           day_minigame_completed?: boolean
+          gold?: number
           id?: string
           revision?: number
           rules_version?: string
@@ -497,6 +754,7 @@ export type Database = {
           created_at?: string
           current_day?: number
           day_minigame_completed?: boolean
+          gold?: number
           id?: string
           revision?: number
           rules_version?: string
@@ -531,12 +789,64 @@ export type Database = {
         Returns: Json
       }
       create_tavern: { Args: never; Returns: Json }
+      dialogue_begin: {
+        Args: {
+          p_actor: string
+          p_beverage?: string
+          p_card?: string
+          p_message: string
+          p_patron: string
+          p_sequence: number
+          p_turn: string
+        }
+        Returns: Json
+      }
+      dialogue_checkpoint: {
+        Args: {
+          p_actor: string
+          p_fence: string
+          p_stage: string
+          p_turn: string
+          p_value?: Json
+        }
+        Returns: undefined
+      }
+      dialogue_complete: {
+        Args: { p_actor: string; p_fence: string; p_turn: string }
+        Returns: Json
+      }
+      dialogue_context: {
+        Args: {
+          p_actor: string
+          p_category?: string
+          p_query?: string
+          p_turn: string
+        }
+        Returns: Json
+      }
+      dialogue_status: {
+        Args: { p_cancel?: boolean; p_turn: string }
+        Returns: Json
+      }
+      get_bar_snapshot: { Args: never; Returns: Json }
+      get_npc_journal: { Args: { p_patron: string }; Returns: Json }
       get_tavern_snapshot: { Args: never; Returns: Json }
       harvest_crop: {
         Args: {
           p_action_id: string
           p_cell_id: string
           p_expected_revision: number
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      serve_beverage: {
+        Args: {
+          p_action_id?: string
+          p_beverage_id: string
+          p_card_id?: string
+          p_expected_revision?: number
+          p_patron_key: string
           p_save_id: string
         }
         Returns: Json

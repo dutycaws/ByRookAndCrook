@@ -11,7 +11,9 @@
 
 <main class="login-shell">
   <section class="login-card" aria-labelledby="login-title">
-    <div class="sigil" aria-hidden="true">♜</div>
+    <div class="sigil" aria-hidden="true">
+      <img src="/raven.svg" alt="" width="64" height="64" />
+    </div>
     <p class="eyebrow">The keeper's ledger</p>
     <h1 id="login-title">By Rook <span>&amp;</span> Crook</h1>
     <p class="lede">The garden waits beyond the old courtyard wall.</p>

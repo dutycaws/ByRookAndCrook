@@ -211,6 +211,7 @@
                 {pending ? 'Closing the ledger…' : 'Rest and begin next day'}
               </button>
             </form>
+            <a class="secondary-link" href="/bar">Serve a drink at the bar →</a>
           </div>
         {:else if session}
           <div class="brew-progress-heading">

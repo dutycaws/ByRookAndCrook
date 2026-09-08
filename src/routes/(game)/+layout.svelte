@@ -8,7 +8,9 @@
 <div class="game-shell">
   <header class="game-header">
     <a class="brand" href="/garden" aria-label="By Rook and Crook garden">
-      <span class="brand-mark" aria-hidden="true">♜</span>
+      <span class="brand-mark" aria-hidden="true">
+        <img src="/raven.svg" alt="" width="30" height="30" />
+      </span>
       <span>
         <small>THE</small>
         <strong>Rook &amp; Crook</strong>
@@ -16,6 +18,7 @@
     </a>
 
     <nav aria-label="Tavern areas">
+      <a href="/bar" class:active={page.url.pathname === '/bar'}>Bar</a>
       <a href="/garden" class:active={page.url.pathname === '/garden'}>Garden</a>
       <a href="/ingredients" class:active={page.url.pathname === '/ingredients'}>Ingredients</a>
       <a href="/brewery" class:active={page.url.pathname === '/brewery'}>Brewery</a>

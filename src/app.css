@@ -662,9 +662,8 @@ input:focus-visible {
 }
 
 .sigil {
-  color: var(--gold-bright);
-  font-size: 50px;
-  line-height: 1;
+  display: grid;
+  place-items: center;
 }
 
 .login-card h1 {
@@ -1025,6 +1024,45 @@ input:focus-visible {
   font-size: 24px;
 }
 
+.bar-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.patron-panel, .serving-panel, .serving-history { padding: 30px; }
+.bar-layout h2, .serving-history h2 { font-family: 'Cinzel', serif; font-size: 22px; color: var(--gold-bright); margin: 8px 0 14px; }
+.bar-layout h3 { font-family: 'Cinzel', serif; font-size: 17px; color: var(--gold-bright); }
+.gold-purse { padding: 14px 22px; border: 1px solid var(--border); color: var(--gold-bright); white-space: nowrap; }
+.patron-picker { display: grid; gap: 12px; margin: 24px 0; }
+.patron-picker button, .pour-options label { display: flex; align-items: center; gap: 14px; padding: 16px; color: var(--ink); background: #20180d; border: 1px solid var(--border); text-align: left; cursor: pointer; }
+.patron-picker button.selected, .pour-options label.selected { border-color: var(--gold); background: #302313; }
+.patron-picker button:disabled { cursor: default; }
+.patron-picker strong, .patron-picker small, .pour-options strong, .pour-options small { display: block; }
+.patron-picker small, .pour-options small, .serving-history small { color: #c1aa79; }
+.patron-icon { font-size: 30px; }
+.patron-story { border-top: 1px solid var(--border); padding-top: 22px; }
+.relationship-meter { display: block; margin: 24px 0; }
+.relationship-meter strong { float: right; }
+.relationship-meter meter { display: block; width: 100%; height: 16px; margin-top: 8px; accent-color: var(--green); }
+.story-chapter { padding: 20px; border-left: 2px solid var(--gold); background: #20180d; }
+.story-chapter h3 { margin: 8px 0; }
+.serving-panel fieldset { padding: 0; border: 0; margin: 24px 0; min-width: 0; }
+.serving-panel legend { margin-bottom: 12px; }
+.pour-options { display: grid; gap: 10px; }
+.pour-options input { accent-color: var(--gold); }
+.card-choice { display: block; margin-top: 26px; }
+.card-choice select { display: block; width: 100%; padding: 12px; margin-top: 10px; border: 1px solid var(--border); color: var(--ink); background: #20180d; font: inherit; }
+select:focus-visible { outline: 3px solid #efcf75; outline-offset: 3px; }
+.pour-summary { margin: 20px 0; padding: 4px 16px; border: 1px solid var(--border); }
+.serving-history { margin-top: 24px; }
+.serving-history ol { list-style: none; padding: 0; }
+.serving-history li { padding: 20px 0; border-top: 1px solid var(--border); }
+.serving-history small { display: block; margin-top: 5px; }
+.serve-effects { color: var(--gold-bright); }
+
+@media (max-width: 1000px) {
+  .game-header { grid-template-columns: auto 1fr auto; padding-inline: 16px; }
+  .game-header nav { justify-content: center; }
+  .game-header nav a { min-width: 70px; padding-inline: 10px; }
+  .account > span { display: none; }
+}
+
 @media (max-width: 800px) {
   .game-header {
     grid-template-columns: 1fr auto;
@@ -1040,7 +1078,9 @@ input:focus-visible {
   }
 
   .game-header nav a {
-    min-width: 92px;
+    min-width: 0;
+    flex: 1;
+    padding-inline: 8px;
   }
 
   .account > span {
@@ -1048,6 +1088,7 @@ input:focus-visible {
   }
 
   .garden-layout,
+  .bar-layout,
   .brewery-layout {
     grid-template-columns: 1fr;
   }
@@ -1058,6 +1099,8 @@ input:focus-visible {
 }
 
 @media (max-width: 520px) {
+  .game-header nav { gap: 3px; }
+  .game-header nav a { padding-inline: 5px; font-size: 10px; letter-spacing: 0.06em; }
   .page-shell {
     width: min(100% - 24px, 1120px);
     padding-top: 30px;
@@ -1073,6 +1116,7 @@ input:focus-visible {
   }
 
   .garden-panel,
+  .patron-panel, .serving-panel, .serving-history,
   .inventory-panel,
   .brew-panel {
     padding: 18px;
@@ -1107,3 +1151,22 @@ input:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+/* Conversation and journal: preserve the tavern's existing paper/panel language. */
+.npc-dialogue,.close-tavern { margin-top: 1.5rem; padding: 1.5rem; }
+.npc-dialogue h2,.close-tavern h2 { font-family: 'Cinzel',serif; font-size: 1.35rem; color: var(--gold-bright); margin-bottom: 1rem; }
+.npc-dialogue h3 { font-size: 1.15rem; margin-block: .4rem; }
+.intention-steps { list-style: decimal; padding-left: 1.25rem; margin-block: .7rem; }
+.intention-steps .completed { color: var(--muted); }
+.npc-intention { padding: 1rem; background: #241d1740; border-radius: .65rem; margin-block: 1rem; }
+.npc-transcript { max-height: 28rem; overflow-y: auto; padding: .25rem .75rem; border-block: 1px solid #92765655; }
+.npc-exchange { padding-block: .75rem; border-bottom: 1px solid #92765633; }
+.npc-exchange p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.npc-exchange strong { display: block; color: var(--gold, #d1b36b); }
+.keeper-line { margin-left: 1.25rem; }
+.npc-dialogue fieldset { border: 0; padding: 0; margin-block: 1rem; }
+.npc-dialogue textarea { display: block; width: 100%; resize: vertical; min-height: 6rem; padding: .8rem; background: #211b17; color: #f3e7d4; border: 1px solid #927656; border-radius: .5rem; font: inherit; }
+.dialogue-hospitality { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: .75rem; }
+.dialogue-hospitality label { min-width: 0; }
+.dialogue-hospitality select { display: block; width: 100%; padding: .65rem; background: #211b17; color: #f3e7d4; border: 1px solid #927656; border-radius: .4rem; }
+.npc-news li { margin-block: .6rem; overflow-wrap: anywhere; }
+@media(max-width:600px){.dialogue-hospitality{grid-template-columns:1fr}.npc-dialogue,.close-tavern{padding:1rem}}

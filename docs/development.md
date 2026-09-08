@@ -1,10 +1,10 @@
 # Local MVP development runbook
 
-This repository contains two connected SvelteKit and Supabase vertical slices for By Rook & Crook. Their durable path is:
+This repository contains four connected SvelteKit and Supabase vertical slices for By Rook & Crook. Their durable path is:
 
-> sign in → start a tavern → harvest a mature crop → choose the ingredient in the brewery → stir for 30 seconds → bottle the beverage → earn a quality-based social card → begin the next tavern day
+> sign in → start a tavern → optionally harvest/brew/serve → converse and agree on intentions → close the tavern → discover overnight consequences
 
-The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres row-level security, and six public database functions. The browser never writes game tables directly. `create_tavern()` provisions one save and twelve cells, `get_tavern_snapshot()` reads one ownership-filtered game snapshot, and the harvest and craft commands validate and commit their outcomes atomically.
+The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres row-level security, and ownership-filtered public database functions. The browser never writes game tables directly. `create_tavern()` provisions one save and twelve cells. `get_tavern_snapshot()` and `get_bar_snapshot()` read ownership-filtered state; harvest, craft, and serving commands commit their outcomes atomically.
 
 ## Verified local toolchain
 
@@ -40,9 +40,9 @@ Open `http://127.0.0.1:3000/login`. The local Supabase services use project-spec
 | Studio | `http://127.0.0.1:57323` |
 | Mailpit | `http://127.0.0.1:57324` |
 
-`pnpm env:local` obtains the local API URL and publishable key from the CLI, generates local passwords, and writes everything to the gitignored `.env`. It refuses any host or port outside this repository's local stack. Runtime configuration uses only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`; no administrative key enters the SvelteKit runtime or browser bundle.
+`pnpm env:local` obtains the local API URL and publishable key from the CLI, generates local passwords, and writes everything to the gitignored `.env`. It refuses any host or port outside this repository's local stack. The browser uses only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Dialogue's server runtime additionally uses `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`; these are never imported into client modules. `env:local` preserves custom OpenAI/provider configuration while refreshing local database credentials.
 
-`.env` is the repository's sole project-managed secret file and is written with owner-only permissions. `.env.example` contains variable names and non-secret placeholders only. Supabase CLI may generate local container credentials under its ignored `supabase/.temp/` runtime directory; application code does not read that directory. Run `pnpm secrets:audit` to verify there are no more than two project-managed secret files, each is ignored and permission-restricted, and configured secret values do not occur in tracked files. Use `pnpm env:local -- --rotate` to rotate all generated local passwords.
+`.env` is the repository's sole project-managed secret file and is written with owner-only permissions. `.env.example` contains variable names and non-secret placeholders only. Supabase CLI may generate local container credentials under its ignored `supabase/.temp/` runtime directory; application code does not read that directory. Run `pnpm secrets:audit` to verify there are no more than two project-managed secret files, each is ignored and permission-restricted, and configured secret values do not occur in tracked or new source files. Use `pnpm env:local -- --rotate` to rotate all generated local passwords.
 
 ## Local pilot accounts
 
@@ -65,11 +65,12 @@ Public sign-up is disabled. Hosted pilot accounts must be provisioned outside th
 5. Open **Ingredients** and verify the two-unit fennel batch.
 6. Open **Brewery**, choose the fennel, and begin the daily brew. Keep the slider in the green sweet spot for the 30-second timer, then bottle it.
 7. Verify the beverage name and quality. A Potable or better beverage also creates a **Pour Ale** social card; its relationship and gold effects rise with beverage quality.
-8. Reload or sign into the same account in another browser. The consumed ingredient unit, bottled beverage, earned card, and completed day remain.
-9. Submit **Rest and begin next day**. Day two allows one new brew while retaining cellar history.
-10. Sign into the other pilot account to see an independent onboarding state.
+8. Open **Bar** or **Serve a drink at the bar**. Choose Lira or Torvin, your beverage, and optionally a Pour Ale card. Serve it to receive gold and change trust/overnight hospitality. Legacy chapter progress remains historical; subsequent pours do not advance or undo it.
+9. Reload or sign into the same account in another browser. The gold, relationship, intentions, transcript and serving journal persist. The bottle and any played card are no longer available.
+10. In **Bar**, ask about a quest or suggest a plan. The conversation form optionally includes a drink/card. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
+11. Sign into the other pilot account to see an independent onboarding state.
 
-The current reference captures are [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [brew setup](screenshots/brewery-setup.png), [active stirring](screenshots/brewery-active.png), and [brew result](screenshots/brewery-result.png). With the dev server running, regenerate them using `pnpm screenshots`; the script provisions and removes its own user.
+Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar selection](screenshots/bar.png), [serving result](screenshots/bar-result.png), and [mobile bar](screenshots/bar-mobile.png). With the dev server running, regenerate them using `pnpm screenshots`; the script provisions and removes its own user.
 
 The starter crops are finite. Starting an existing tavern never refills harvested cells. Use the explicit local reset when you need the original demonstration state.
 
@@ -91,10 +92,13 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `pnpm db:types` | Print TypeScript definitions generated from the migrated local public schema. |
 | `pnpm db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
 | `pnpm check` | Run Svelte and TypeScript diagnostics. |
-| `pnpm test:db` | Run 118 pgTAP assertions for garden and brewery rules, constraints, ownership, exact-once receipts, rollback, and grants. |
+| `pnpm test:db` | Run 230 pgTAP assertions for garden, brewery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
 | `pnpm test:integration` | Use real Auth and parallel RPC requests to test initialization, harvest and craft replay, locking, isolation, rewards, and denied direct writes. |
-| `pnpm test:e2e` | Run the persistent garden and brewery journeys in desktop and mobile Chromium. |
-| `pnpm screenshots` | Capture the garden, ingredient, brew setup, stirring, and result views against the running app. |
+| `pnpm test:e2e` | Run 20 desktop/mobile browser cases, including dialogue recovery, atomic hospitality and overnight intentions. |
+| `pnpm npc:content:check` | Validate editable character sheets against their published migration. |
+| `pnpm npc:content:migration --migration=202609080013_character_revision.sql` | Generate a new publication after bumping the content version; choose a timestamp later than every existing migration. |
+| `pnpm npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |
+| `pnpm screenshots` | Capture garden, ingredient, brewery, and desktop/mobile bar views against the running app. |
 
 The complete local acceptance sequence is:
 
@@ -118,13 +122,15 @@ Integration and browser tests create unique users and remove them after each run
 
 Every harvest or craft command carries the save ID, expected revision, and a client-generated action UUID. Commands also carry only the cell, ingredient, brew session, or bounded stirring telemetry they require. The database derives the player from `auth.uid()`, locks the owned save before checking the action receipt, and calculates canonical outcomes from saved state. An identical retry returns the original receipt; reuse with different input conflicts; two commands for one revision cannot both commit.
 
-The harvest transaction clears the crop, creates the ingredient batch, advances the revision, and writes its receipt together. Starting a brew creates one session for the current tavern day. Completing it consumes one ingredient unit, freezes the stirring score and quality, creates the beverage and optional social card, marks the daily craft complete, advances the revision, and writes its receipt in one transaction. Advancing the day requires a completed daily craft and reopens the minigame exactly once.
+The harvest transaction clears the crop, creates the ingredient batch, advances the revision, and writes its receipt together. Starting a brew creates one session for the current tavern day. Completing it consumes one ingredient unit, freezes the stirring score and quality, creates the beverage and optional social card, marks the daily craft complete, advances the revision, and writes its receipt in one transaction. Advancing the day rejects an active brew or live dialogue lease, resolves one NPC step each and reopens the minigame exactly once. Craft completion is optional.
 
 The garden and brewery keep an unresolved command in component state after a connection or unexpected server failure. Retrying reuses its action UUID and exact payload. A validation, conflict, or eligibility error refreshes the authoritative snapshot. Server diagnostics record the action ID, outcome code, committed revision when available, and duration; they do not record credentials or session tokens.
 
 The server enforces the 30-second brew duration. The client samples stirring speed every 250 ms, with 42–58 as the perfect band and 30–70 as the wider good band. The submitted counts are range checked and affect a six-point stirring score. Final quality combines the saved ingredient quality with that score and applies the saved brew bonus threshold. Reloading an active brew preserves its timer but discards prior in-memory samples, so missing samples lower its final score. This is acceptable for the pilot; durable event sampling or anti-cheat validation belongs in a later online-competition design.
 
-Quality uses the shared seven-tier scale from Repugnant through Resplendent. Potable and Decent results earn a fine Pour Ale card, Great earns superior, and Legendary or Resplendent earns exceptional. The database stores both the reward tier and its concrete relationship/gold effects so later serving can consume a stable result.
+Quality uses the shared seven-tier scale from Repugnant through Resplendent. Potable and Decent results earn a fine Pour Ale card, Great earns superior, and Legendary or Resplendent earns exceptional. Serving consumes one bottle and an optional card, applies the patron's quality-specific price and the card's stored multiplier/relationship bonus, and persists the actual deltas in `serving_events`. A serving receipt also marks those items consumed; the brewery keeps their production history.
+
+The bar keeps the entire unresolved command frozen after unknown outcomes. A retry cannot change recipient or inventory selection. A competing command returns a conflict and refreshes current stock. Read-only patron defaults work for existing saves; no reset or new tavern is required. See the [serving implementation record](plans/patron-serving-vertical-slice.md) for prices, card semantics, and draft story rules. Free-text dialogue is implemented; see the [consolidated technical specification](npc-dialogue.md) and [evaluation cases](evaluations/npc-dialogue.md).
 
 ## Database changes
 
@@ -140,6 +146,59 @@ pnpm test:integration
 
 Versioned catalog rows and starter content belong in migrations so a blank hosted database receives them. Local identities and disposable failure scenarios stay in fixture or test code.
 
+To upgrade an existing local save without deleting player data, run `DO_NOT_TRACK=1 supabase migration up --local`, then regenerate/check database types. Reserve resets for an explicitly disposable demonstration or clean CI database.
+
 ## Hosted deployment
 
-These slices have been verified locally and have not been deployed. A hosted pilot needs a Node-compatible SvelteKit host, a separate Supabase project, production values for the two public environment variables, allowed site/redirect URLs in Supabase Auth, migration application through a controlled deployment job, and securely provisioned pilot accounts. Run ownership, sign-in, harvest, brew, reward, day transition, reload, and second-session smoke tests after deployment. Never run the local reset or fixture scripts against hosted data.
+These slices have been verified locally and have not been deployed. A hosted pilot needs a Node-compatible SvelteKit host, a separate Supabase project, production values for the two public environment variables and the server-only Supabase/OpenAI credentials, allowed site/redirect URLs in Supabase Auth, migration application through a controlled deployment job, and securely provisioned pilot accounts. Run ownership, sign-in, harvest, brew, reward, day transition, reload, and second-session smoke tests after deployment. Never run the local reset or fixture scripts against hosted data.
+
+## Dialogue configuration and recovery
+
+Verified interface captures: [desktop dialogue and journal](screenshots/npc-dialogue.png), [mobile dialogue and journal](screenshots/npc-dialogue-mobile.png).
+
+Keep credentials in the Git-ignored root `.env` with mode `0600`. Add `OPENAI_API_KEY` directly there, never to public-prefixed variables or chat. `pnpm env:local` supplies the local `SUPABASE_SERVICE_ROLE_KEY` and preserves the provider key, custom model choices and other configuration. Restart the dev server after editing environment values if it has not reloaded them.
+
+| Setting | Default / behavior |
+| --- | --- |
+| `NPC_PROVIDER` | `openai`; `local` explicitly returns not implemented. |
+| `NPC_CONTEXT_MODEL` | `gpt-5.6-luna`: investigation, review, memory. |
+| `NPC_CHARACTER_MODEL` | `gpt-5.6-terra`: deliberation and response. |
+| `NPC_MAX_CALLS` | 8; may reduce the app cap, never exceed the database cap. |
+| `NPC_INVESTIGATION_ROUNDS` | 2; clamped to 1–2. |
+| `NPC_DEADLINE_MS` | 90000; clamped to 1000–90000, below the 120-second database lease. |
+
+Only a trusted database operator may change the operational limits in `private.npc_rules`: six new turns/minute, 100 processing attempts/player/UTC day, 400 provider-call reservations/player/UTC day. Rules do not accept quota overrides from the browser. Provider usage/latency lives in stage checkpoints; sanitized IDs/error codes appear in server logs. Narrative evidence is private and should not be copied into public diagnostics.
+
+Use **Check reply** after an unknown network result. **Retry the same message** keeps the entire request and resumes saved stages. **Cancel unfinished message** remains available while the reply is generating. It fences late requests and unlocks the day only after cancellation is confirmed. If the reply already committed, the UI reports the saved reply instead; if cancellation cannot be confirmed, use Check reply or cancel again. Completed retries return the saved result. A changed revision/day or unavailable NPC requires a fresh message. The status response disables retry after a rejected rewrite or exhausted unfinished turn; a fully checkpointed turn can still complete without more model calls. Persistent consistency failures should be cancelled and rephrased; replaying the same failed review does not request unlimited rewrites. A failed or expired turn never permanently prevents closing. Provider charges are not exactly-once when a network execution is uncertain; game effects are.
+
+The live script records timestamped reports in ignored `artifacts/npc-evals/`; Playwright artifacts use `test-results/`. CI never invokes the live script. The browser test server uses a non-secret sentinel key only to render the form while all provider-bound dialogue requests are intercepted by the test harness. Unit and RPC fixtures are never imported by the production runtime.
+
+## Editing and publishing character content
+
+Edit `supabase/content/npcs.json`. The provenance field distinguishes prototype names/premises from new authored pilot details. Facts need stable IDs and explicit disclosure thresholds; skills and difficulty use 0–4; default plans end with attempt/abandon; terminal targets and character-loss warnings are authored explicitly.
+
+For a published revision, change the top-level content version (for example, `npc-v2`) and generate a later migration:
+
+```sh
+pnpm npc:content:migration --migration=202609080013_character_revision.sql
+pnpm npc:content:check
+DO_NOT_TRACK=1 supabase migration up --local
+```
+
+Choose a filename later than every existing migration. Review the generated migration before applying. The database inserts immutable version rows before changing the current selector. It rejects overwrites and unknown version references. Existing characters retain their pinned version, preserving historical evidence and outcome rules; create a disposable new save to try revised content. Migrating existing characters to a newer authored version requires a separate explicit compatibility migration.
+
+Prompt source and its version are in `src/lib/server/dialogue/prompts.ts`; structured provider-neutral schemas are alongside it. Bump the prompt version and rerun fixture/live evaluations when changing behavior. Database rule changes belong in additive migrations with a new version rather than rewriting a released ruleset.
+
+A lost initial reservation response can leave a processing lease even though no model call started. Use status/cancel, or wait for the 120-second lease to expire; the integration suite verifies this recovery path. The keeper may view both journals, but NPC investigation cannot read another character’s private dialogue or private events.
+
+
+### Inspecting dialogue context and plan precedence
+
+New stage checkpoints include `inputContext`: payload character count, context version, source IDs, recent exchange IDs and a canonical digest. The `decision.contextWindow` contains the exact evidence shared by deliberation, speech and review, including across retries. JSONB key ordering does not change the digest. `npc-context-v1` preserves whole exchanges; its core limit is 30,000 characters and every model payload is capped at 40,000 characters. Large optional context drops oldest exchanges first, then oldest tool results, with omission counts recorded.
+
+A `CONTEXT_BUDGET` failure consumes no new provider reservation for the rejected stage and applies no game effects. The keeper can cancel or close the day. Inspect authored-sheet size and saved mandatory context if it recurs; increasing provider token output limits does not fix an oversized input. Do not remove source qualifications or overwrite historical turns to force a prompt to fit.
+
+Prompt `npc-prompts-v5` makes `effectiveIntention` authoritative over the previous plan in quest context and treats reviewer corrections as subordinate to the validated decision. A failed second review still rejects the entire turn. Both successful and failed live reports remain in ignored `artifacts/npc-evals/` for review.
+
+
+Run `pnpm npc:eval:review` for the opt-in six-case consistency-review calibration. It checks accepted plan changes, conditional assistance and future commitments against deliberate old-plan, same-night and fabricated-outcome contradictions. This sends six live review calls using the configured context model and writes a timestamped report under `artifacts/npc-evals/review-*.json`; it does not create or change player saves. A pass is agreement with the authored expected classifications, not a claim of perfect review accuracy.
