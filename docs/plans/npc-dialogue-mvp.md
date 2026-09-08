@@ -70,7 +70,7 @@ Migration `202609080012_dialogue_context_budget.sql` records context-budget erro
 A live run exposed a reviewer confusing the pre-turn combat plan with Lira's accepted diplomacy plan. The turn stopped without committing. Prompt v4 and explicit `effectiveIntention` now establish which plan governs speech and review; the failed run remains part of the evaluation record.
 
 
-The v4 live run exposed reviewer false positives even after the plan precedence was explicit. Prompt v5 distinguishes actual contradictions from precautionary/style advice and already-conditional statements. `pnpm npc:eval:review` adds six authored calibration cases so accepted plans and deliberate contradictions can be checked directly.
+The v4 live run exposed reviewer false positives even after the plan precedence was explicit. Prompt v5 distinguishes actual contradictions from precautionary/style advice and already-conditional statements. `npm run npc:eval:review` adds six authored calibration cases so accepted plans and deliberate contradictions can be checked directly.
 
 
 This follow-up is verified locally: 230 SQL assertions, 25 dialogue unit/RPC tests and ten dialogue browser cases passed, along with the application check, production build, database lint/types, content check and secret audit. Final live acceptance on prompt v5 passed eight dialogue cases and all six authored reviewer calibration cases. The evaluation document retains the preceding failed runs and their corrective findings.

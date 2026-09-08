@@ -1,3 +1,3 @@
 -- Game content and starter garden data are installed by migrations so hosted
 -- environments receive the same rules. Local pilot users are created by
--- `pnpm fixtures:users:local` after the local stack starts.
+-- `npm run fixtures:users:local` after the local stack starts.

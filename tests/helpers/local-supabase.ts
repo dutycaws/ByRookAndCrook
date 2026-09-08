@@ -5,7 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../src/lib/database.types';
 
 const environmentFile = fileURLToPath(new URL('../../.env', import.meta.url));
-if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `pnpm env:local` first.');
+if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `npm run env:local` first.');
 process.loadEnvFile(environmentFile);
 
 export interface LocalSupabase {
@@ -52,7 +52,7 @@ export async function createTestPlayer(prefix: string): Promise<{
   });
   const email = `${prefix}-${crypto.randomUUID()}@example.test`;
   const password = process.env.LOCAL_TEST_USER_PASSWORD;
-  if (!password) throw new Error('Missing LOCAL_TEST_USER_PASSWORD. Run `pnpm env:local` first.');
+  if (!password) throw new Error('Missing LOCAL_TEST_USER_PASSWORD. Run `npm run env:local` first.');
   const { data: created, error: createError } = await admin.auth.admin.createUser({
     email,
     password,

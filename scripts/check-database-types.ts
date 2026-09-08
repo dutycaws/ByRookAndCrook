@@ -24,7 +24,7 @@ const committed = readFileSync(typeFile, 'utf8');
 
 if (normalize(generated) !== normalize(committed)) {
   console.error('src/lib/database.types.ts does not match the local database schema.');
-  console.error('Run `pnpm db:types > src/lib/database.types.ts` and commit the result.');
+  console.error('Run `npm run --silent db:types > src/lib/database.types.ts` and commit the result.');
   process.exitCode = 1;
 } else {
   console.info('Generated database types match the committed file.');

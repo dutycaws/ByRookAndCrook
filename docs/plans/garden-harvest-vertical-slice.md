@@ -242,19 +242,19 @@ Use pgTAP for database rules, ownership, and rollback assertions. Use separate d
 Define and document these project scripts during implementation, then run them from the repository root. They are planned scripts, not commands available in the current empty repository:
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm db:start
-pnpm db:reset:local
-pnpm fixtures:users:local
-pnpm db:types:check
-pnpm check
-pnpm test:db
-pnpm test:integration
-pnpm test:e2e
-pnpm build
+npm ci
+npm run db:start
+npm run db:reset:local
+npm run fixtures:users:local
+npm run db:types:check
+npm run check
+npm run test:db
+npm run test:integration
+npm run test:e2e
+npm run build
 ```
 
-`db:start` starts the local Supabase stack; `db:reset:local` explicitly resets only its disposable database; `test:db` runs the CLI's pgTAP runner; `db:types:check` regenerates types to a temporary file and compares them with the committed file. The fixture script creates isolated local accounts. Integration/E2E scripts must manage their own fixtures and app lifecycle. CI needs a compatible Node/pnpm toolchain, Docker, the pinned Supabase CLI, and Playwright browser dependencies. Preserve screenshots/traces for failed browser cases.
+`db:start` starts the local Supabase stack; `db:reset:local` explicitly resets only its disposable database; `test:db` runs the CLI's pgTAP runner; `db:types:check` regenerates types to a temporary file and compares them with the committed file. The fixture script creates isolated local accounts. Integration/E2E scripts must manage their own fixtures and app lifecycle. CI needs a compatible Node/npm toolchain, Docker, the pinned Supabase CLI, and Playwright browser dependencies. Preserve screenshots/traces for failed browser cases.
 
 The runbook must state exact verified tool versions, environment variable names, setup order, local fixture credentials, reset effects, and all script meanings. Use `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY` for runtime configuration; keep the local fixture administrative credential isolated. Log action ID, outcome code, committed revision, and duration for harvest diagnostics without recording passwords or session tokens.
 

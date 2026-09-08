@@ -16,7 +16,7 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } }
   ],
   webServer: {
-    command: 'pnpm dev',
+    command: 'npm run dev',
     // Dialogue journeys intercept provider-bound HTTP requests with test-only fixtures.
     // This non-secret sentinel enables the form in CI without granting provider access.
     env: { OPENAI_API_KEY: 'unused-playwright-fixture-sentinel', NPC_PROVIDER: 'openai' },

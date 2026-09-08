@@ -1,5 +1,7 @@
 # CI initialization failure remediation
 
+Historical commands and tool versions below record the original incident. For current npm setup and execution, use [the development runbook](../development.md).
+
 Status: diagnostic remediation and initialization contract implemented; original failure investigation remains open.
 
 ## Evidence
@@ -90,7 +92,7 @@ Where a database fix is required, add deterministic coverage for its confirmed f
 ### 5. Validate and close
 
 - Run the targeted regression, then the full integration suite with normal parallelism and no automatic retries.
-- Run `pnpm test:db`, `pnpm check`, `pnpm db:types:check`, `pnpm secrets:audit`, `pnpm test:e2e`, and `pnpm build` on the final candidate.
+- Run `npm run test:db`, `npm run check`, `npm run db:types:check`, `npm run secrets:audit`, `npm run test:e2e`, and `npm run build` on the final candidate.
 - Validate both a clean disposable database and an additive upgrade if SQL changes are needed.
 - With the current serving work included, the baseline is 160 database assertions, seven integration tests, and ten desktop/mobile browser tests; update expected counts for any new tests. The failed commit itself had four integration tests.
 - Push the final candidate through PR CI and verify browser tests and the build actually execute and pass. Link the successful run and record the diagnosed cause and correction here.

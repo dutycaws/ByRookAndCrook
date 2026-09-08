@@ -4,12 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 
 const environmentFile = fileURLToPath(new URL('../.env', import.meta.url));
-if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `pnpm env:local` first.');
+if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `npm run env:local` first.');
 process.loadEnvFile(environmentFile);
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing ${name}. Run \`pnpm env:local\` first.`);
+  if (!value) throw new Error(`Missing ${name}. Run \`npm run env:local\` first.`);
   return value;
 }
 

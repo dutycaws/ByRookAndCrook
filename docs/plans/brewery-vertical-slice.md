@@ -49,7 +49,7 @@ The UI retains an unresolved start, completion, or day-transition command after 
 - `supabase/tests/brewery.test.sql`: 58 pgTAP assertions for schema constraints, time enforcement, score/name thresholds, consumption, provenance, rewards, day transitions, exact replay, changed-input conflict, RLS, grants, foreign ownership, and invalid telemetry.
 - `tests/integration/brewery-rpc.test.ts`: real Auth clients prove parallel identical replay, competing-command serialization, service-backed elapsed-time setup, reward persistence, day advancement, isolation, and denied direct writes.
 - `tests/e2e/garden-journey.test.ts`: desktop and mobile Chromium run the connected harvest-to-brew path, verify the reduced pantry quantity, reload the beverage/card, and open day two.
-- `pnpm check`, `pnpm db:types:check`, and `pnpm build` verify the Svelte/TypeScript contract and generated Supabase schema types.
+- `npm run check`, `npm run db:types:check`, and `npm run build` verify the Svelte/TypeScript contract and generated Supabase schema types.
 
 See the [local MVP runbook](../development.md) for setup, commands, screenshots, and the reproducible demonstration.
 

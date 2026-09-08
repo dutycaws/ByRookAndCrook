@@ -22,7 +22,7 @@ Offline CI uses injected deterministic providers in test code. Production has no
 
 ## Live cases
 
-Run `pnpm npc:eval:live` with the server-side key configured. Optional `--patron=lira` or `--patron=torvin` limits the run. Each character uses a disposable local save. The command makes real, billable API requests and deletes its own users afterward. It records output, decisions, retrieved source IDs, stage selection, token usage, latency and sanitized failures under ignored `artifacts/npc-evals/`. Timestamped reports survive Playwright's cleanup of `test-results/`.
+Run `npm run npc:eval:live` with the server-side key configured. Optional `-- --patron=lira` or `-- --patron=torvin` limits the run. Each character uses a disposable local save. The command makes real, billable API requests and deletes its own users afterward. It records output, decisions, retrieved source IDs, stage selection, token usage, latency and sanitized failures under ignored `artifacts/npc-evals/`. Timestamped reports survive Playwright's cleanup of `test-results/`.
 
 | Character / message | Expected behavior |
 | --- | --- |
@@ -79,7 +79,7 @@ Context `npc-context-v1` preserves whole exchanges, pins the decision's evidence
 
 Two exploratory live runs exposed reviewer errors rather than committed game corruption: the reviewer first substituted an old combat plan for the accepted diplomacy plan, then rejected already-valid conditional/future wording. The affected Lira turn stopped after its permitted rewrite in each run. Preserve these reports when comparing future prompts: `2026-09-08T03-35-33.392Z.json` and `2026-09-08T03-38-06.638Z.json`, both under `artifacts/npc-evals/`. They are part of the evaluation record, not excluded samples.
 
-Prompt v5 explicitly prioritizes `effectiveIntention` and accepts replies when no concrete violation remains. The new six-case review calibration passed all authored classifications: three valid plan/conditional/future statements were accepted and three contradictory/completed/same-night statements were rejected. Report: `artifacts/npc-evals/review-2026-09-08T03-41-00.512Z.json`. Run with `pnpm npc:eval:review`; no player save is involved.
+Prompt v5 explicitly prioritizes `effectiveIntention` and accepts replies when no concrete violation remains. The new six-case review calibration passed all authored classifications: three valid plan/conditional/future statements were accepted and three contradictory/completed/same-night statements were rejected. Report: `artifacts/npc-evals/review-2026-09-08T03-41-00.512Z.json`. Run with `npm run npc:eval:review`; no player save is involved.
 
 The final full run on prompt v5 completed all eight cases. Root inspected replies, validated decisions, memory attribution and context fingerprints. Lira's scouting/diplomacy agreement matched the journal, the victory rumor stayed unconfirmed, the privacy request was refused, and Torvin retained his own motives and correctly attributed the keeper's promise. Deliberation, speech and review fingerprints matched within each turn.
 

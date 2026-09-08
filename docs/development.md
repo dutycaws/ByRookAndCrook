@@ -9,26 +9,26 @@ The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres ro
 ## Verified local toolchain
 
 - Node.js 22.20.0
-- pnpm 11.19.0
+- npm 11.18.0
 - Supabase CLI 2.114.0
 - Docker Engine with Compose support
 - Playwright 1.63.0 with Chromium
 
-The JavaScript package versions and pnpm version are pinned in `package.json` and `pnpm-lock.yaml`. Supabase CLI is intentionally a host prerequisite because it manages the local Docker stack.
+The JavaScript package versions and npm version are pinned in `package.json` and `package-lock.json`. The project enforces compatible Node and npm versions through `.npmrc`; dependency install scripts require explicit approval in `package.json` (`esbuild` is approved; the optional macOS `fsevents` install script remains disabled). Use `npm ci` for a checkout and `npm install <package>` when adding dependencies, committing the resulting `package-lock.json`. Supabase CLI is intentionally a host prerequisite because it manages the local Docker stack.
 
 ## First-time setup
 
-Run these commands from the repository root:
+Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Then run these commands from the repository root:
 
 ```sh
-pnpm install --frozen-lockfile
-pnpm db:start
-pnpm env:local
-pnpm db:reset:local
-pnpm fixtures:users:local
-pnpm secrets:audit
-pnpm exec playwright install chromium
-pnpm dev
+npm ci
+npm run db:start
+npm run env:local
+npm run db:reset:local
+npm run fixtures:users:local
+npm run secrets:audit
+npm exec -- playwright install chromium
+npm run dev
 ```
 
 Open `http://127.0.0.1:3000/login`. The local Supabase services use project-specific ports so they can coexist with another local stack:
@@ -40,16 +40,16 @@ Open `http://127.0.0.1:3000/login`. The local Supabase services use project-spec
 | Studio | `http://127.0.0.1:57323` |
 | Mailpit | `http://127.0.0.1:57324` |
 
-`pnpm env:local` obtains the local API URL and publishable key from the CLI, generates local passwords, and writes everything to the gitignored `.env`. It refuses any host or port outside this repository's local stack. The browser uses only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Dialogue's server runtime additionally uses `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`; these are never imported into client modules. `env:local` preserves custom OpenAI/provider configuration while refreshing local database credentials.
+`npm run env:local` obtains the local API URL and publishable key from the CLI, generates local passwords, and writes everything to the gitignored `.env`. It refuses any host or port outside this repository's local stack. The browser uses only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Dialogue's server runtime additionally uses `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`; these are never imported into client modules. `env:local` preserves custom OpenAI/provider configuration while refreshing local database credentials.
 
-`.env` is the repository's sole project-managed secret file and is written with owner-only permissions. `.env.example` contains variable names and non-secret placeholders only. Supabase CLI may generate local container credentials under its ignored `supabase/.temp/` runtime directory; application code does not read that directory. Run `pnpm secrets:audit` to verify there are no more than two project-managed secret files, each is ignored and permission-restricted, and configured secret values do not occur in tracked or new source files. Use `pnpm env:local -- --rotate` to rotate all generated local passwords.
+`.env` is the repository's sole project-managed secret file and is written with owner-only permissions. `.env.example` contains variable names and non-secret placeholders only. Supabase CLI may generate local container credentials under its ignored `supabase/.temp/` runtime directory; application code does not read that directory. Run `npm run secrets:audit` to verify there are no more than two project-managed secret files, each is ignored and permission-restricted, and configured secret values do not occur in tracked or new source files. Use `npm run env:local -- --rotate` to rotate all generated local passwords.
 
 ## Local pilot accounts
 
-`pnpm fixtures:users:local` creates or refreshes two confirmed development users. Their emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
+`npm run fixtures:users:local` creates or refreshes two confirmed development users. Their emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
 
 ```sh
-pnpm credentials:local
+npm run credentials:local
 ```
 
 The fixture script asks the local CLI for a short-lived administrative connection, verifies `127.0.0.1:57321`, and refuses a hosted target. The credentials can be overridden with `LOCAL_PILOT_ONE_EMAIL`, `LOCAL_PILOT_ONE_PASSWORD`, `LOCAL_PILOT_TWO_EMAIL`, and `LOCAL_PILOT_TWO_PASSWORD` in `.env`.
@@ -70,7 +70,7 @@ Public sign-up is disabled. Hosted pilot accounts must be provisioned outside th
 10. In **Bar**, ask about a quest or suggest a plan. The conversation form optionally includes a drink/card. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
 11. Sign into the other pilot account to see an independent onboarding state.
 
-Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar selection](screenshots/bar.png), [serving result](screenshots/bar-result.png), and [mobile bar](screenshots/bar-mobile.png). With the dev server running, regenerate them using `pnpm screenshots`; the script provisions and removes its own user.
+Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar selection](screenshots/bar.png), [serving result](screenshots/bar-result.png), and [mobile bar](screenshots/bar-mobile.png). With the dev server running, regenerate them using `npm run screenshots`; the script provisions and removes its own user.
 
 The starter crops are finite. Starting an existing tavern never refills harvested cells. Use the explicit local reset when you need the original demonstration state.
 
@@ -78,42 +78,42 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm dev` | Start the SvelteKit development server on port 3000. |
-| `pnpm build` | Create the adapter-node production build. |
-| `pnpm preview` | Run the built Node server. |
-| `pnpm db:start` | Start this repository's local Supabase stack. |
-| `pnpm db:stop` | Stop the local stack without deleting its database volume. |
-| `pnpm db:status` | Show local endpoints and service state. |
-| `pnpm env:local` | Safely write `.env` from this local stack. |
-| `pnpm credentials:local` | Print the two local pilot credentials from the ignored `.env` file. |
-| `pnpm secrets:audit` | Verify secret-file count, Git ignore coverage, and absence of configured secrets in tracked files. |
-| `pnpm db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
-| `pnpm fixtures:users:local` | Create or refresh the two local pilot identities. |
-| `pnpm db:types` | Print TypeScript definitions generated from the migrated local public schema. |
-| `pnpm db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
-| `pnpm check` | Run Svelte and TypeScript diagnostics. |
-| `pnpm test:db` | Run 230 pgTAP assertions for garden, brewery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
-| `pnpm test:integration` | Use real Auth and parallel RPC requests to test initialization, harvest and craft replay, locking, isolation, rewards, and denied direct writes. |
-| `pnpm test:e2e` | Run 20 desktop/mobile browser cases, including dialogue recovery, atomic hospitality and overnight intentions. |
-| `pnpm npc:content:check` | Validate editable character sheets against their published migration. |
-| `pnpm npc:content:migration --migration=202609080013_character_revision.sql` | Generate a new publication after bumping the content version; choose a timestamp later than every existing migration. |
-| `pnpm npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |
-| `pnpm screenshots` | Capture garden, ingredient, brewery, and desktop/mobile bar views against the running app. |
+| `npm run dev` | Start the SvelteKit development server on port 3000. |
+| `npm run build` | Create the adapter-node production build. |
+| `npm run preview` | Run the built Node server. |
+| `npm run db:start` | Start this repository's local Supabase stack. |
+| `npm run db:stop` | Stop the local stack without deleting its database volume. |
+| `npm run db:status` | Show local endpoints and service state. |
+| `npm run env:local` | Safely write `.env` from this local stack. |
+| `npm run credentials:local` | Print the two local pilot credentials from the ignored `.env` file. |
+| `npm run secrets:audit` | Verify secret-file count, Git ignore coverage, and absence of configured secrets in tracked files. |
+| `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
+| `npm run fixtures:users:local` | Create or refresh the two local pilot identities. |
+| `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
+| `npm run db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
+| `npm run check` | Run Svelte and TypeScript diagnostics. |
+| `npm run test:db` | Run 230 pgTAP assertions for garden, brewery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
+| `npm run test:integration` | Use real Auth and parallel RPC requests to test initialization, harvest and craft replay, locking, isolation, rewards, and denied direct writes. |
+| `npm run test:e2e` | Run 20 desktop/mobile browser cases, including dialogue recovery, atomic hospitality and overnight intentions. |
+| `npm run npc:content:check` | Validate editable character sheets against their published migration. |
+| `npm run npc:content:migration -- --migration=202609080013_character_revision.sql` | Generate a new publication after bumping the content version; choose a timestamp later than every existing migration. |
+| `npm run npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |
+| `npm run screenshots` | Capture garden, ingredient, brewery, and desktop/mobile bar views against the running app. |
 
 The complete local acceptance sequence is:
 
 ```sh
-pnpm db:start
-pnpm env:local
-pnpm db:reset:local
-pnpm fixtures:users:local
-pnpm secrets:audit
-pnpm db:types:check
-pnpm check
-pnpm test:db
-pnpm test:integration
-pnpm test:e2e
-pnpm build
+npm run db:start
+npm run env:local
+npm run db:reset:local
+npm run fixtures:users:local
+npm run secrets:audit
+npm run db:types:check
+npm run check
+npm run test:db
+npm run test:integration
+npm run test:e2e
+npm run build
 ```
 
 Integration and browser tests create unique users and remove them after each run. Playwright starts the app when port 3000 is free and preserves traces and screenshots for failures under `test-results/` and `playwright-report/`.
@@ -137,11 +137,11 @@ The bar keeps the entire unresolved command frozen after unknown outcomes. A ret
 Add schema or game-rule changes as new files in `supabase/migrations/`. Then run:
 
 ```sh
-pnpm db:reset:local
-pnpm db:types > src/lib/database.types.ts
-pnpm db:types:check
-pnpm test:db
-pnpm test:integration
+npm run db:reset:local
+npm run --silent db:types > src/lib/database.types.ts
+npm run db:types:check
+npm run test:db
+npm run test:integration
 ```
 
 Versioned catalog rows and starter content belong in migrations so a blank hosted database receives them. Local identities and disposable failure scenarios stay in fixture or test code.
@@ -156,7 +156,7 @@ These slices have been verified locally and have not been deployed. A hosted pil
 
 Verified interface captures: [desktop dialogue and journal](screenshots/npc-dialogue.png), [mobile dialogue and journal](screenshots/npc-dialogue-mobile.png).
 
-Keep credentials in the Git-ignored root `.env` with mode `0600`. Add `OPENAI_API_KEY` directly there, never to public-prefixed variables or chat. `pnpm env:local` supplies the local `SUPABASE_SERVICE_ROLE_KEY` and preserves the provider key, custom model choices and other configuration. Restart the dev server after editing environment values if it has not reloaded them.
+Keep credentials in the Git-ignored root `.env` with mode `0600`. Add `OPENAI_API_KEY` directly there, never to public-prefixed variables or chat. `npm run env:local` supplies the local `SUPABASE_SERVICE_ROLE_KEY` and preserves the provider key, custom model choices and other configuration. Restart the dev server after editing environment values if it has not reloaded them.
 
 | Setting | Default / behavior |
 | --- | --- |
@@ -180,8 +180,8 @@ Edit `supabase/content/npcs.json`. The provenance field distinguishes prototype 
 For a published revision, change the top-level content version (for example, `npc-v2`) and generate a later migration:
 
 ```sh
-pnpm npc:content:migration --migration=202609080013_character_revision.sql
-pnpm npc:content:check
+npm run npc:content:migration -- --migration=202609080013_character_revision.sql
+npm run npc:content:check
 DO_NOT_TRACK=1 supabase migration up --local
 ```
 
@@ -201,4 +201,4 @@ A `CONTEXT_BUDGET` failure consumes no new provider reservation for the rejected
 Prompt `npc-prompts-v5` makes `effectiveIntention` authoritative over the previous plan in quest context and treats reviewer corrections as subordinate to the validated decision. A failed second review still rejects the entire turn. Both successful and failed live reports remain in ignored `artifacts/npc-evals/` for review.
 
 
-Run `pnpm npc:eval:review` for the opt-in six-case consistency-review calibration. It checks accepted plan changes, conditional assistance and future commitments against deliberate old-plan, same-night and fabricated-outcome contradictions. This sends six live review calls using the configured context model and writes a timestamped report under `artifacts/npc-evals/review-*.json`; it does not create or change player saves. A pass is agreement with the authored expected classifications, not a claim of perfect review accuracy.
+Run `npm run npc:eval:review` for the opt-in six-case consistency-review calibration. It checks accepted plan changes, conditional assistance and future commitments against deliberate old-plan, same-night and fabricated-outcome contradictions. This sends six live review calls using the configured context model and writes a timestamped report under `artifacts/npc-evals/review-*.json`; it does not create or change player saves. A pass is agreement with the authored expected classifications, not a claim of perfect review accuracy.

@@ -19,49 +19,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.19.0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22.20.0
-          cache: pnpm
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Select npm version
+        run: |
+          npm install --global npm@11.18.0
+          node --version
+          npm --version
 
       - uses: supabase/setup-cli@v1
         with:
           version: 2.114.0
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Start and rebuild local Supabase
         run: |
-          pnpm db:start
-          pnpm env:local
-          pnpm db:reset:local
-          pnpm fixtures:users:local
+          npm run db:start
+          npm run env:local
+          npm run db:reset:local
+          npm run fixtures:users:local
 
       - name: Audit secret placement
-        run: pnpm secrets:audit
+        run: npm run secrets:audit
 
       - name: Check generated database types
-        run: pnpm db:types:check
+        run: npm run db:types:check
 
       - name: Check application
-        run: pnpm check
+        run: npm run check
 
       - name: Validate versioned NPC content
-        run: pnpm npc:content:check
+        run: npm run npc:content:check
 
       - name: Test diagnostic redaction
-        run: pnpm exec vitest run tests/unit
+        run: npm exec -- vitest run tests/unit
 
       - name: Test database
-        run: pnpm test:db
+        run: npm run test:db
 
       - name: Test real RPC concurrency
-        run: pnpm test:integration
+        run: npm run test:integration
 
       - name: Upload integration failure evidence
         if: failure()
@@ -72,13 +75,13 @@ jobs:
           path: test-results/integration/
 
       - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        run: npm exec -- playwright install --with-deps chromium
 
       - name: Test browser journey
-        run: pnpm test:e2e
+        run: npm run test:e2e
 
       - name: Build application
-        run: pnpm build
+        run: npm run build
 
       - name: Upload browser failure evidence
         if: failure()
@@ -92,4 +95,4 @@ jobs:
 
       - name: Stop local Supabase
         if: always()
-        run: pnpm db:stop
+        run: npm run db:stop
