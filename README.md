@@ -6,4 +6,12 @@ The connected MVP supports harvesting, brewing, social cards, serving and persis
 
 See the [development runbook](docs/development.md) for setup, secrets and tests, the [NPC technical specification](docs/npc-dialogue.md) for architecture, and the [evaluation cases](docs/evaluations/npc-dialogue.md) for fixture and live acceptance. Editable character sheets are in [npcs.json](supabase/content/npcs.json).
 
+For ordinary local human testing, configure the required `OPENAI_API_KEY` in the ignored root `.env`, then run:
+
+```sh
+npm run brac-app:dev
+```
+
+It runs the local test gates, prepares this repository's Supabase stack and migrations, provisions pilot users, then serves the app at `http://127.0.0.1:3000/login`. Ctrl+C stops the app and the managed local stack while preserving saves. The [development runbook](docs/development.md) covers prerequisites, credentials, and recovery.
+
 Implementation records: [garden](docs/plans/garden-harvest-vertical-slice.md), [brewery](docs/plans/brewery-vertical-slice.md), [serving](docs/plans/patron-serving-vertical-slice.md), [NPC dialogue](docs/plans/npc-dialogue-mvp.md). Cooking and renewable gardening remain future slices; the local-model adapter is explicitly unimplemented.

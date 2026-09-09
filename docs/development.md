@@ -12,26 +12,26 @@ The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres ro
 - npm 11.18.0
 - Supabase CLI 2.114.0
 - Docker Engine with Compose support
+- Linux `flock` from `util-linux` (the launcher’s advisory session lock)
 - Playwright 1.63.0 with Chromium
 
 The JavaScript package versions and npm version are pinned in `package.json` and `package-lock.json`. The project enforces compatible Node and npm versions through `.npmrc`; dependency install scripts require explicit approval in `package.json` (`esbuild` is approved; the optional macOS `fsevents` install script remains disabled). Use `npm ci` for a checkout and `npm install <package>` when adding dependencies, committing the resulting `package-lock.json`. Supabase CLI is intentionally a host prerequisite because it manages the local Docker stack.
 
-## First-time setup
+## First-time setup and normal local startup
 
-Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Then run these commands from the repository root:
+Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI and Docker Engine with Compose support as host prerequisites; the launcher checks for them and never installs or changes host tools automatically.
+
+Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. This command does not make a billable provider request to validate the key.
+
+Then use the normal human-testing command from the repository root:
 
 ```sh
-npm ci
-npm run db:start
-npm run env:local
-npm run db:reset:local
-npm run fixtures:users:local
-npm run secrets:audit
-npm exec -- playwright install chromium
-npm run dev
+npm run brac-app:dev
 ```
 
-Open `http://127.0.0.1:3000/login`. The local Supabase services use project-specific ports so they can coexist with another local stack:
+The launcher runs preflight and unit tests, starts or reuses this repository's Supabase stack, refreshes the local environment, applies pending migrations with `supabase migration up --local`, provisions pilot users, runs database and RPC integration tests, then starts Vite with hot reload. Open `http://127.0.0.1:3000/login`. It uses real local authentication, migrations, RPCs, and persistent services to keep local behavior close to the future hosted application; production builds remain a CI and `npm run build` check.
+
+The local Supabase services use project-specific ports so they can coexist with another local stack:
 
 | Service | Address |
 | --- | --- |
@@ -40,9 +40,15 @@ Open `http://127.0.0.1:3000/login`. The local Supabase services use project-spec
 | Studio | `http://127.0.0.1:57323` |
 | Mailpit | `http://127.0.0.1:57324` |
 
-`npm run env:local` obtains the local API URL and publishable key from the CLI, generates local passwords, and writes everything to the gitignored `.env`. It refuses any host or port outside this repository's local stack. The browser uses only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Dialogue's server runtime additionally uses `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`; these are never imported into client modules. `env:local` preserves custom OpenAI/provider configuration while refreshing local database credentials.
+The ignored root `.env` is authoritative for project variables: its values override inherited shell settings, while inherited settings fill values absent from the file. `npm run env:local` obtains the local API URL and publishable key from the CLI, generates local passwords, and writes everything to `.env`. It refuses any host or port outside this repository's local stack. The launcher reloads the generated file before passing environment to later commands, so refreshed Supabase URLs and keys replace stale shell values. The browser uses only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`. Dialogue's server runtime additionally uses `SUPABASE_SERVICE_ROLE_KEY` and `OPENAI_API_KEY`; these are never imported into client modules. `env:local` preserves custom OpenAI/provider configuration while refreshing local database credentials.
 
 `.env` is the repository's sole project-managed secret file and is written with owner-only permissions. `.env.example` contains variable names and non-secret placeholders only. Supabase CLI may generate local container credentials under its ignored `supabase/.temp/` runtime directory; application code does not read that directory. Run `npm run secrets:audit` to verify there are no more than two project-managed secret files, each is ignored and permission-restricted, and configured secret values do not occur in tracked or new source files. Use `npm run env:local -- --rotate` to rotate all generated local passwords.
+
+The launcher uses a Linux `flock` advisory session lock to permit only one active session for this repository. Its helper releases the lock automatically if the supervisor dies and closes stdin. On Ctrl+C, SIGTERM, startup failure after stack adoption, or an unexpected app exit, it stops the app and this repository's adopted Supabase stack while preserving volumes and leaving other stacks alone. It never resets data or rotates passwords automatically. Forced termination can prevent cleanup, so if project-stack cleanup fails, recover with:
+
+```sh
+DO_NOT_TRACK=1 supabase stop --project-id by-rook-and-crook
+```
 
 ## Local pilot accounts
 
@@ -78,6 +84,7 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 
 | Command | Purpose |
 | --- | --- |
+| `npm run brac-app:dev` | Run the supervised local human-testing session: preflight, units, local stack, migration, fixtures, database/RPC gates, and Vite at `127.0.0.1:3000`. Ctrl+C preserves data while stopping the app and adopted project stack. |
 | `npm run dev` | Start the SvelteKit development server on port 3000. |
 | `npm run build` | Create the adapter-node production build. |
 | `npm run preview` | Run the built Node server. |
@@ -92,6 +99,8 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
 | `npm run db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
 | `npm run check` | Run Svelte and TypeScript diagnostics. |
+| `npm run test:unit` | Run the focused unit-test suite. |
+| `npm run test` | Run the existing full Vitest suite. |
 | `npm run test:db` | Run pgTAP assertions for garden, brewery, bakery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
 | `npm run test:integration` | Use real Auth and RPC requests to test initialization, harvest, shared daily crafting, replay, locking, isolation, rewards, and denied direct writes. |
 | `npm run test:e2e` | Run desktop/mobile browser journeys, including Bakery persistence, dialogue recovery, atomic hospitality, overnight intentions, and visual layout bounds. |
@@ -100,7 +109,7 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |
 | `npm run screenshots` | Capture garden, ingredient, brewery, and desktop/mobile bar views against the running app. |
 
-The complete local acceptance sequence is:
+For a complete CI-like acceptance pass, including browser coverage and a production build, use:
 
 ```sh
 npm run db:start
@@ -116,7 +125,7 @@ npm run test:e2e
 npm run build
 ```
 
-Integration and browser tests create unique users and remove them after each run. Playwright starts the app when port 3000 is free and preserves traces and screenshots for failures under `test-results/` and `playwright-report/`.
+Integration and browser tests create unique users and remove them after each run when cleanup succeeds. An interrupted RPC test can leave disposable test users; do not automatically delete them. Playwright starts the app when port 3000 is free and preserves traces and screenshots for failures under `test-results/` and `playwright-report/`.
 
 ## Command, transaction, and recovery behavior
 
@@ -148,7 +157,7 @@ npm run test:integration
 
 Versioned catalog rows and starter content belong in migrations so a blank hosted database receives them. Local identities and disposable failure scenarios stay in fixture or test code.
 
-To upgrade an existing local save without deleting player data, run `DO_NOT_TRACK=1 supabase migration up --local`, then regenerate/check database types. Reserve resets for an explicitly disposable demonstration or clean CI database.
+To upgrade an existing local save without deleting player data, run `DO_NOT_TRACK=1 supabase migration up --local`, then regenerate/check database types. Migrations can transform existing saves, so review and back up data you care about before applying a new migration. Reserve resets for an explicitly disposable demonstration or clean CI database.
 
 ## Hosted deployment
 

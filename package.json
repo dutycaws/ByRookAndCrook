@@ -9,11 +9,13 @@
   },
   "scripts": {
     "dev": "vite dev",
+    "brac-app:dev": "node --import tsx scripts/brac-app-dev.ts",
     "build": "vite build",
     "preview": "node build",
     "prepare": "svelte-kit sync",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
     "test:db": "DO_NOT_TRACK=1 supabase test db",
     "test:integration": "vitest run tests/integration --reporter=default --reporter=junit --outputFile.junit=test-results/integration/junit.xml",
     "test:e2e": "playwright test",
