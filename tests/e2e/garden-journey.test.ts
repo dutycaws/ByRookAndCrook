@@ -18,6 +18,23 @@ test('harvest persists across routes, reloads, and browser sessions', async ({ p
     await page.getByRole('button', { name: 'Start tavern' }).click();
     await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
 
+    const hexGeometry = await page.locator('.hex-cell').evaluateAll((cells) => {
+      const byKey = new Map(
+        cells.map((cell) => [cell.getAttribute('data-layout-key'), cell.getBoundingClientRect()])
+      );
+      const c1 = byKey.get('c1')!;
+      const c2 = byKey.get('c2')!;
+      const c4 = byKey.get('c4')!;
+      return {
+        sameRowGap: c2.left - c1.right,
+        diagonalTopDelta: Math.abs(c4.top - (c2.top + c2.height * 0.75)),
+        diagonalXDelta: Math.abs(c4.left + c4.width / 2 - c2.left)
+      };
+    });
+    expect(Math.abs(hexGeometry.sameRowGap)).toBeLessThanOrEqual(1);
+    expect(hexGeometry.diagonalTopDelta).toBeLessThanOrEqual(1);
+    expect(hexGeometry.diagonalXDelta).toBeLessThanOrEqual(1);
+
     await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
     await expect(page.getByText('🍯 +1 from a neighboring hive')).toBeVisible();
     await page.getByRole('button', { name: 'Harvest crop' }).click();
