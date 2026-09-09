@@ -108,7 +108,7 @@
     return async ({ result, update }) => {
       pending = false;
       if (result.type === 'error') {
-        transportError = 'The start response was lost. Retry to check the same ledger entry.';
+        transportError = 'The start response was lost. Retry the same brew to check its result.';
         return;
       }
       if (result.type === 'success') startActionId = null;
@@ -132,7 +132,7 @@
     return async ({ result, update }) => {
       pending = false;
       if (result.type === 'error') {
-        transportError = 'The bottling response was lost. Retry to check the same ledger entry.';
+        transportError = 'The bottling response was lost. Retry bottling to check its result.';
         return;
       }
       if (result.type === 'success') completionActionId = null;
@@ -152,7 +152,7 @@
     return async ({ result, update }) => {
       pending = false;
       if (result.type === 'error') {
-        transportError = 'The day transition response was lost. Retry the same ledger entry.';
+        transportError = 'The day transition response was lost. Retry resting to check its result.';
         return;
       }
       if (result.type === 'success') advanceActionId = null;
@@ -174,7 +174,7 @@
       <p>Stir the wort for thirty seconds. Ingredient quality and a steady hand shape the result.</p>
     </div>
     {#if data.snapshot}
-      <div class="revision-badge">Ledger {data.snapshot.save.revision}</div>
+      <div class="revision-badge">{data.snapshot.ingredients.length} pantry batch{data.snapshot.ingredients.length === 1 ? '' : 'es'}</div>
     {/if}
   </div>
 
@@ -215,7 +215,7 @@
             {/if}
             <form method="POST" action="?/advance" use:enhance={enhanceAdvance}>
               <button class="primary-button" type="submit" disabled={pending}>
-                {pending ? 'Closing the ledger…' : 'Rest and begin next day'}
+                {pending ? 'Closing the tavern…' : 'Rest and begin next day'}
               </button>
             </form>
             <a class="secondary-link" href="/bar">Serve a drink at the bar →</a>
@@ -317,7 +317,7 @@
 
       <aside class="brew-ledger">
         <section class="detail-card">
-          <p class="eyebrow">Cellar ledger</p>
+          <p class="eyebrow">Cellar inventory</p>
           <h2>Bottled mead</h2>
           {#if data.snapshot.brewery.beverages.length === 0}
             <p class="muted">No finished batches yet.</p>

@@ -62,14 +62,15 @@ test('harvested ingredients become persistent food through the reload-safe baker
     await expect(page.getByRole('heading', { name: 'Resplendent Hearth Loaf' })).toBeVisible();
     await page.getByRole('link', { name: 'Offer food at the bar' }).click();
     await expect(page.getByRole('radio', { name: 'Resplendent Hearth Loaf Resplendent' })).toBeChecked();
-    await expect(page.getByLabel('Choose your intent')).toContainText('Insight');
+    const intentCards = page.getByRole('group', { name: 'Choose your intent' });
+    await expect(intentCards).toContainText('Insight');
     await expect(page.getByLabel('Offer hospitality')).toContainText('Food · Resplendent Hearth Loaf');
-    await expect(page.getByLabel('Choose your intent')).toHaveValue('');
+    await expect(intentCards.getByRole('button', { name: /Plain No added intent/ })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByLabel('Offer hospitality')).toHaveValue('');
     await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
     await expect(page.getByRole('status')).toContainText('Earned');
     await expect(page.getByRole('heading', { name: 'No hospitality ready to serve' })).toBeVisible();
-    await expect(page.getByLabel('Choose your intent')).toContainText('Insight');
+    await expect(intentCards).toContainText('Insight');
     expect(errors).toEqual([]);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

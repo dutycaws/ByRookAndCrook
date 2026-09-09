@@ -47,7 +47,7 @@
     return async ({ result, update }) => {
       pending = false;
       if (result.type === 'error') {
-        transportError = 'The harvest outcome is unknown. Retry to check the same ledger entry.';
+        transportError = 'The harvest outcome is unknown. Retry the same harvest to check its result.';
         return;
       }
 
@@ -79,13 +79,11 @@
   {:else}
     <div class="page-title-row">
       <div>
-        <p class="eyebrow">Courtyard · rules {data.snapshot.save.rulesVersion}</p>
+        <p class="eyebrow">Courtyard · Tavern day {data.snapshot.save.currentDay}</p>
         <h1>The garden</h1>
         <p>Select a plot to inspect the crop and its harvest.</p>
       </div>
-      <div class="revision-badge" title="Current saved game revision">
-        Ledger {data.snapshot.save.revision}
-      </div>
+      <div class="revision-badge">{data.snapshot.cells.filter((cell) => cell.kind === 'plant' && cell.harvestable).length} ready</div>
     </div>
 
     <div class="garden-layout">
@@ -111,7 +109,7 @@
               disabled={!selected.harvestable || pending}
             >
               {pending
-                ? 'Writing the ledger…'
+                ? 'Gathering…'
                 : pendingCommand && (transportError || form?.pendingAction)
                   ? 'Retry harvest'
                   : 'Harvest crop'}

@@ -1,6 +1,6 @@
 # Local MVP development runbook
 
-This repository contains four connected SvelteKit and Supabase vertical slices for By Rook & Crook. Their durable path is:
+This repository contains connected SvelteKit and Supabase vertical slices for By Rook & Crook. Their durable path is:
 
 > sign in → start a tavern → optionally harvest/brew/serve → converse and agree on intentions → close the tavern → discover overnight consequences
 
@@ -70,7 +70,7 @@ Public sign-up is disabled. Hosted pilot accounts must be provisioned outside th
 10. In **Bar**, ask about a quest or suggest a plan. Choose an optional intent card to characterize your words and, independently, optional food or drink. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew or bake must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
 11. Sign into the other pilot account to see an independent onboarding state.
 
-Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar selection](screenshots/bar.png), [serving result](screenshots/bar-result.png), and [mobile bar](screenshots/bar-mobile.png). With the dev server running, regenerate them using `npm run screenshots`; the script provisions and removes its own user.
+Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar at 1,672 pixels](screenshots/bar-1672.png), [bar at 1,440 pixels](screenshots/bar-1440.png), [tablet bar](screenshots/bar-768.png), [mobile bar](screenshots/bar-390.png), [serving result](screenshots/bar-result.png), and the [annotated before/after comparison](screenshots/bar-comparison.png). See the [concept-art UI specification](design/concept-ui-spec.md) and [asset manifest](design/asset-manifest.md) for the composition, breakpoints, provenance, and maintenance rules. With the dev server running, regenerate the route captures using `npm run screenshots`; the script provisions and removes its own user.
 
 The starter crops are finite. Starting an existing tavern never refills harvested cells. Use the explicit local reset when you need the original demonstration state.
 
@@ -94,7 +94,7 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run check` | Run Svelte and TypeScript diagnostics. |
 | `npm run test:db` | Run pgTAP assertions for garden, brewery, bakery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
 | `npm run test:integration` | Use real Auth and RPC requests to test initialization, harvest, shared daily crafting, replay, locking, isolation, rewards, and denied direct writes. |
-| `npm run test:e2e` | Run desktop/mobile browser journeys, including Bakery persistence, dialogue recovery, atomic hospitality and overnight intentions. |
+| `npm run test:e2e` | Run desktop/mobile browser journeys, including Bakery persistence, dialogue recovery, atomic hospitality, overnight intentions, and visual layout bounds. |
 | `npm run npc:content:check` | Validate editable character sheets against their published migration. |
 | `npm run npc:content:migration -- --migration=202609080013_character_revision.sql` | Generate a new publication after bumping the content version; choose a timestamp later than every existing migration. |
 | `npm run npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |

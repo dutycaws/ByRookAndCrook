@@ -46,7 +46,7 @@ test('a lost serving response retries the frozen command and persists into a new
       await expect(other.locator('.serving-history li')).toHaveCount(1);
       await other.getByRole('button', { name: 'Torvin Ashbeard Dwarven Merchant' }).click();
       await expect(other.getByText('28 / 100', { exact: true })).toBeVisible();
-      await expect(other.getByText('Where their story began')).toBeVisible();
+      await expect(other.getByText(/Secure a fair future for the heartstone/).first()).toBeVisible();
     } finally { await context.close(); }
     expect(errors).toEqual([]);
   } finally { await player.admin.auth.admin.deleteUser(player.userId); }

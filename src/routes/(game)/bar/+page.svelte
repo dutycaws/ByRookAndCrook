@@ -4,11 +4,14 @@
   import { qualityLabel } from '$lib/game/contracts';
   import type { ServeCommand } from '$lib/game/serving';
   import NpcDialogue from '$lib/components/NpcDialogue.svelte';
+  import BarStatusRail from '$lib/components/tavern/BarStatusRail.svelte';
+  import GuestInspector from '$lib/components/tavern/GuestInspector.svelte';
+  import TavernScene from '$lib/components/tavern/TavernScene.svelte';
   import type { PatronKey } from '$lib/game/dialogue';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
-  let patronKey = $state('lira');
+  let patronKey = $state<PatronKey>('lira');
   let itemSelection = $state('');
   let legacyCardId = $state('');
   let pending = $state(false);
@@ -94,56 +97,30 @@
   <meta name="description" content="Welcome the regulars, pour your finest mead, and follow their stories." />
 </svelte:head>
 
-<main class="page-shell">
-  <div class="page-title-row">
-    <div>
-      <p class="eyebrow">The common room · Day {data.snapshot?.save.currentDay ?? '—'}</p>
-      <h1>The bar</h1>
-      <p>A familiar face. A carefully made drink. A story waiting to unfold.</p>
-    </div>
-    {#if data.snapshot}<div class="gold-purse" aria-label="Tavern gold">🪙 <strong>{data.snapshot.save.gold} gold</strong></div>{/if}
-  </div>
-
+<main class="bar-page">
   {#if !data.snapshot}
-    <section class="empty-state panel">
+    <section class="empty-state panel bar-empty-state">
       <h2>Open the doors</h2><p>Start your tavern in the garden, then bring your first brew to the bar.</p>
       <a class="primary-button inline-button" href="/garden">Start your tavern</a>
     </section>
   {:else}
-    <div class="bar-layout">
-      <section class="panel patron-panel" aria-labelledby="regulars-title">
-        <p class="eyebrow">A seat by the fire</p><h2 id="regulars-title">Tonight's regulars</h2>
-        <div class="patron-picker" role="group" aria-label="Choose a patron">
-          {#each data.snapshot.patrons as guest (guest.key)}
-            <button type="button" class:selected={patronKey === guest.key} aria-pressed={patronKey === guest.key}
-              disabled={!hydrated || pending || !!unresolved} onclick={() => patronKey = guest.key}>
-              <span class="patron-icon" aria-hidden="true">{guest.icon}</span>
-              <span><strong>{guest.name}</strong><small>{guest.title}</small></span>
-            </button>
-          {/each}
-        </div>
-        {#if patron}
-          <article class="patron-story">
-            <p class="eyebrow">{patron.title}</p><h2>{patron.name}</h2>
-            <p>{patron.description}</p>
-            <label class="relationship-meter">Relationship <strong>{patron.relationship} / 100</strong>
-              <meter min="0" max="100" value={patron.relationship}>{patron.relationship}</meter>
-            </label>
-            <div class="story-chapter">
-              <p class="eyebrow">{patron.arcProgress === patron.arcTotal ? 'Previously resolved' : patron.arcProgress ? `Legacy chapter ${patron.arcProgress} of ${patron.arcTotal}` : 'Where their story began'}</p>
-              <h3>{patron.arcTitle}</h3><p>{patron.story}</p>
-              <p class="muted">The journal below follows current intentions. Hospitality affects trust and overnight readiness.</p>
-            </div>
-          </article>
-        {/if}
-      </section>
+    {#if patron && data.journals[patron.key]}
+      <div class="tavern-dashboard">
+        <BarStatusRail day={data.snapshot.save.currentDay} gold={data.snapshot.save.gold} drinks={data.snapshot.beverages.length} foods={data.snapshot.foods.length} recent={data.snapshot.history.length} />
+        <TavernScene {patron} journal={data.journals[patron.key]} day={data.snapshot.save.currentDay} />
+        <GuestInspector patrons={data.snapshot.patrons} selected={patron} journal={data.journals[patron.key]} stock={data.snapshot}
+          disabled={!hydrated || pending || !!unresolved} onselect={(key)=>patronKey=key} />
+        {#key patron.key}<NpcDialogue patronKey={patron.key as PatronKey} name={patron.name} journal={data.journals[patron.key]} stock={data.snapshot} unavailable={data.dialogueUnavailable}/>{/key}
+      </div>
+    {/if}
 
+    <div class="bar-utilities">
       <section class="panel serving-panel" aria-labelledby="pour-title">
-        <p class="eyebrow">From your cellar</p><h2 id="pour-title">Make a little hospitality</h2>
+        <p class="eyebrow">From your cellar</p><h2 id="pour-title">Serve food or drink</h2>
         {#if data.snapshot.beverages.length === 0 && data.snapshot.foods.length === 0 && !unresolved}
-          <div class="empty-state"><span aria-hidden="true">🍽️</span><h3>No hospitality ready to serve</h3>
+          <div class="empty-state compact-empty"><h3>No hospitality ready to serve</h3>
             <p>Brew a drink or bake some food before offering it at the bar.</p>
-            <a class="primary-button inline-button" href="/brewery">Visit the brewery</a>
+            <div class="empty-actions"><a class="secondary-link compact" href="/brewery">Visit the brewery</a><a class="secondary-link compact" href="/bakery">Visit the bakery</a></div>
           </div>
         {:else}
           <form method="POST" action="?/serve" use:enhance={enhanceServe}>
@@ -167,55 +144,32 @@
                 <label class="card-choice">Legacy Pour Ale entitlement <span class="muted">Optional · usable once with a drink</span>
                   <select bind:value={legacyCardId}>
                     <option value="">Save legacy entitlement</option>
-                    {#each data.snapshot.legacyCards as reward (reward.id)}
-                    <option value={reward.id}>{reward.displayName} · {reward.tier} · +{reward.relationshipGain} relationship · ×{reward.goldMultiplier} gold</option>
-                    {/each}
+                    {#each data.snapshot.legacyCards as reward (reward.id)}<option value={reward.id}>{reward.displayName} · {reward.tier} · +{reward.relationshipGain} relationship · ×{reward.goldMultiplier} gold</option>{/each}
                   </select>
                 </label>
               {/if}
             </fieldset>
-            {#if item && patron}
-              <div class="pour-summary">
-                <p>{patron.name} pays <strong>{patron.prices[item.qualityIndex]} gold</strong> for this quality.</p>
-                {#if legacyCard}<p>{legacyCard.displayName}: payment ×{legacyCard.goldMultiplier}, relationship +{legacyCard.relationshipGain}. This legacy entitlement is used with the drink.</p>{/if}
-              </div>
-            {/if}
-            <button class="primary-button full-button" disabled={!hydrated || pending || (!item && !unresolved) || data.journals[patronKey]?.availability!=='present'}>
-              {pending ? 'Serving…' : unresolved ? 'Retry the same serving' : `Serve to ${patron?.name ?? 'patron'}`}
-            </button>
+            {#if item && patron}<div class="pour-summary"><p>{patron.name} pays <strong>{patron.prices[item.qualityIndex]} gold</strong> for this quality.</p>{#if legacyCard}<p>{legacyCard.displayName}: payment ×{legacyCard.goldMultiplier}, relationship +{legacyCard.relationshipGain}. This legacy entitlement is used with the drink.</p>{/if}</div>{/if}
+            <button class="primary-button full-button" disabled={!hydrated || pending || (!item && !unresolved) || data.journals[patronKey]?.availability!=='present'}>{pending ? 'Serving…' : unresolved ? 'Retry the same serving' : `Serve to ${patron?.name ?? 'patron'}`}</button>
           </form>
         {/if}
         {#if localError}
-          <p class="form-message error" role="alert">{localError}</p>
-          {#if !unresolved}<button class="text-button" disabled={pending} onclick={refreshBar}>Refresh bar</button>{/if}
+          <p class="form-message error" role="alert">{localError}</p>{#if !unresolved}<button class="text-button" disabled={pending} onclick={refreshBar}>Refresh bar</button>{/if}
         {:else if form?.message}
-          <div class="form-message" class:error={!('success' in form && form.success)} role={'success' in form ? 'status' : 'alert'}>
-            <p>{form.message}</p>
-            {#if 'receipt' in form && form.receipt}<p>{form.receipt.storyEvent}</p>{/if}
-          </div>
+          <div class="form-message" class:error={!('success' in form && form.success)} role={'success' in form ? 'status' : 'alert'}><p>{form.message}</p>{#if 'receipt' in form && form.receipt}<p>{form.receipt.storyEvent}</p>{/if}</div>
         {/if}
       </section>
-    </div>
 
-    {#if patron && data.journals[patron.key]}
-      {#key patron.key}<NpcDialogue patronKey={patron.key as PatronKey} name={patron.name} journal={data.journals[patron.key]} stock={data.snapshot} unavailable={data.dialogueUnavailable}/>{/key}
-    {/if}
-    <section class="panel close-tavern">
-      <h2>Close the tavern</h2><p>Your regulars will follow their intentions overnight. You can close without crafting today.</p>
-      <form method="POST" action="?/close" use:enhance={enhanceClose}><button class="primary-button" disabled={!hydrated||pending}>{pending?'Closing…':'Close and begin next day'}</button></form>
-    </section>
-    <section class="panel serving-history" aria-labelledby="history-title">
-      <p class="eyebrow">The keeper's journal</p><h2 id="history-title">Recent hospitality</h2>
-      {#if data.snapshot.history.length === 0}<p class="muted">Your first pour will begin the journal.</p>
-      {:else}<ol>
-        {#each data.snapshot.history as event (event.actionId)}
-          <li>
-            <div><strong>{event.itemName ?? event.beverageName} → {event.patronName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}{event.cardId ? ' · Legacy entitlement used' : ''}</small></div>
-            <p class="serve-effects">+{event.goldEarned} gold · Relationship {signed(event.relationshipChange)} · Story {signed(event.arcChange)}</p>
-            <p>{event.storyEvent}</p>
-          </li>
-        {/each}
-      </ol>{/if}
-    </section>
+      <section class="panel close-tavern">
+        <p class="eyebrow">End the evening</p><h2>Close the tavern</h2><p>Your regulars will follow their intentions overnight. You can close without crafting today.</p>
+        <form method="POST" action="?/close" use:enhance={enhanceClose}><button class="primary-button full-button" disabled={!hydrated||pending}>{pending?'Closing…':'Close and begin next day'}</button></form>
+      </section>
+
+      <section class="panel serving-history" aria-labelledby="history-title">
+        <p class="eyebrow">The keeper's journal</p><h2 id="history-title">Recent hospitality</h2>
+        {#if data.snapshot.history.length === 0}<p class="muted">Your first serving will begin the journal.</p>
+        {:else}<ol>{#each data.snapshot.history as event (event.actionId)}<li><div><strong>{event.itemName ?? event.beverageName} → {event.patronName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}{event.cardId ? ' · Legacy entitlement used' : ''}</small></div><p class="serve-effects">+{event.goldEarned} gold · Relationship {signed(event.relationshipChange)} · Story {signed(event.arcChange)}</p><p>{event.storyEvent}</p></li>{/each}</ol>{/if}
+      </section>
+    </div>
   {/if}
 </main>

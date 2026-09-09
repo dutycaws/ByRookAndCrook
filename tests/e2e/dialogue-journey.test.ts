@@ -28,7 +28,7 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
       else await route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(result)});
     });
     await page.getByLabel('Your message').fill('I thank you and advise you to scout, then negotiate.');
-    await page.getByLabel('Choose your intent').selectOption({index:1});
+    await page.getByRole('group', {name:'Choose your intent'}).getByRole('button').nth(1).click();
     await page.getByLabel('Offer hospitality').selectOption({index:1});
     await page.getByRole('button', {name:'Speak',exact:true}).click();
     await expect(page.getByRole('button',{name:'Check reply'})).toBeEnabled();
@@ -38,7 +38,7 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await expect(page.getByLabel('Tavern gold')).toContainText('45 gold');
     await expect(page.locator('.serving-history li')).toHaveCount(1);
     await expect(page.getByLabel('Your message')).toHaveValue('');
-    await expect(page.getByLabel('Choose your intent')).toHaveValue('');
+    await expect(page.getByRole('button',{name:/Plain No added intent/})).toHaveAttribute('aria-pressed','true');
     await expect(page.getByLabel('Offer hospitality')).toHaveValue('');
     await page.reload();
     await expect(page.locator('.npc-exchange')).toHaveCount(1);
@@ -96,7 +96,7 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
         ?route.fulfill({status:503,contentType:'application/json',body:'{"message":"Injected cancellation outage"}'})
         :route.continue());
       await page.getByLabel('Your message').fill('How is the quest going?');
-      await page.getByLabel('Choose your intent').selectOption({index:1});
+      await page.getByRole('group', {name:'Choose your intent'}).getByRole('button').nth(1).click();
       await page.getByLabel('Offer hospitality').selectOption({index:1});
       await page.getByRole('button',{name:'Speak',exact:true}).click();
       await reached;

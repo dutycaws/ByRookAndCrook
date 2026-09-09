@@ -25,7 +25,7 @@
   <section class="panel inventory-panel" aria-labelledby="inventory-title">
     <div class="panel-heading">
       <div>
-        <p class="eyebrow">Persisted in the ledger</p>
+        <p class="eyebrow">From your garden</p>
         <h2 id="inventory-title">Harvested batches</h2>
       </div>
       <div class="panel-actions">

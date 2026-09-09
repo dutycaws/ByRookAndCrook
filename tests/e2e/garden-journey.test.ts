@@ -9,6 +9,15 @@ async function login(page: Page, email: string, password: string) {
   await expect(page).toHaveURL(/\/garden$/);
 }
 
+async function openKeeperMenu(page: Page) {
+  await page.getByLabel('Keeper menu').click();
+}
+
+async function openPantry(page: Page) {
+  await openKeeperMenu(page);
+  await page.getByRole('link', { name: 'Open pantry', exact: true }).click();
+}
+
 test('harvest persists across routes, reloads, and browser sessions', async ({ page, browser }) => {
   const player = await createTestPlayer('journey');
   let secondContext: BrowserContext | undefined;
@@ -52,6 +61,7 @@ test('harvest persists across routes, reloads, and browser sessions', async ({ p
     await secondPage.goto('/ingredients');
     await expect(secondPage.getByText('Legendary · 2 units')).toBeVisible();
 
+    await openKeeperMenu(page);
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page).toHaveURL(/\/login$/);
     await secondPage.reload();
@@ -171,12 +181,12 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Honest Mead' })).toBeVisible();
-    await page.getByRole('link', { name: 'Ingredients', exact: true }).click();
+    await openPantry(page);
     await expect(page.getByText('Legendary · 1 unit')).toBeVisible();
 
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('link', { name: 'Serve a drink at the bar' }).click();
-    await expect(page.getByRole('heading', { name: 'The bar', exact: true })).toBeVisible();
+    await expect(page.locator('.tavern-scene')).toBeVisible();
     await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
     await expect(page.getByRole('status')).toContainText('Earned 12 gold');
     await expect(page.getByLabel('Tavern gold')).toContainText('12 gold');

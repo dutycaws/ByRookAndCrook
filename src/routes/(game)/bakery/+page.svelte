@@ -130,7 +130,7 @@
       return async ({ result, update }) => {
         pending = false;
         if (result.type === 'error' || result.type === 'failure' && result.status >= 500) {
-          transportError = 'The response was lost. Retry to check the same bakery ledger entry.';
+          transportError = 'The response was lost. Retry the same bakery action to check its result.';
           return;
         }
         unresolved = null;
@@ -159,7 +159,7 @@
       <h1>The bakery</h1>
       <p>Fold the dough, score the loaf three times, then watch the oven’s narrow sweet spot.</p>
     </div>
-    {#if data.snapshot}<div class="revision-badge">Ledger {data.snapshot.save.revision}</div>{/if}
+    {#if data.snapshot}<div class="revision-badge">{data.snapshot.ingredients.length} pantry batch{data.snapshot.ingredients.length === 1 ? '' : 'es'}</div>{/if}
   </div>
 
   {#if !data.snapshot}
@@ -301,7 +301,7 @@
       </section>
 
       <aside class="bakery-ledger">
-        <section class="detail-card"><p class="eyebrow">Pantry ledger</p><h2>Finished bread</h2>
+        <section class="detail-card"><p class="eyebrow">Bakery inventory</p><h2>Finished bread</h2>
           {#if data.snapshot.bakery.foods.length === 0}<p class="muted">No finished loaves yet.</p>
           {:else}<ul class="bake-history">{#each data.snapshot.bakery.foods as food (food.id)}
             <li><span aria-hidden="true">🥖</span><div><strong>{food.name}</strong>

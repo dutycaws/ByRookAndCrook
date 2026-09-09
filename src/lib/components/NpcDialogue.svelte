@@ -14,6 +14,14 @@
   let canRetry=$state(true);
   let operation=0;
   let posting:AbortController|undefined;
+  let selectedIntent=$derived(stock.intentCards.find(card=>card.id===intentCardId));
+  let selectedOffering=$derived(offeringSelection
+    ? [...stock.beverages,...stock.foods].find(item=>`${item.kind}:${item.id}`===offeringSelection)
+    : undefined);
+
+  function intentMark(cardKey:string) {
+    return ({charm:'CH',insight:'IN',flirt:'FL',rumor:'RU',intimidate:'IM'} as Record<string,string>)[cardKey] ?? cardKey.slice(0,2).toUpperCase();
+  }
 
   async function acceptStatus(body:any, completedNotice='Your last reply was saved.') {
     failure=false;
@@ -97,46 +105,86 @@
   }
 </script>
 
-<section class="panel npc-dialogue" aria-labelledby="conversation-heading">
-  <p class="eyebrow">A seat and a conversation</p><h2 id="conversation-heading">Talk with {name}</h2>
-  <div class="npc-intention">
-    <p class="eyebrow">{journal.availability==='present'?'Current intention':journal.availability==='dead'?'In memory':'Departed'} · {journal.questStatus}</p>
-    {#if journal.intention}<h3>{journal.intention.goal}</h3><p>{journal.intention.motivation}</p>{/if}
-    {#if journal.questStatus==='active'}<p>Readiness: {journal.preparation===2?'well prepared':journal.preparation===1?'some preparation':'unprepared'} · Risk: {journal.risk}</p>{/if}
-    {#if journal.questStatus==='active'&&journal.intention}
-      <ol class="intention-steps" aria-label="Intended daily steps">
-        {#each journal.intention.steps as step,index}<li class:completed={index<journal.nextStep}>
-          {index<journal.nextStep?'Done':index===journal.nextStep?'Next outing':'Later'}:
-          {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
-        </li>{/each}
-      </ol>
-    {/if}
-    {#if journal.warning}<p class="form-message error" role="note">{journal.warning}</p>{/if}
-  </div>
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex (The overflow transcript must be keyboard-scrollable.) -->
-  <div class="npc-transcript" role="region" aria-label="Conversation history" tabindex="0">
-    {#if journal.turns.length===0}<p class="muted">Ask about their plans, share advice, or simply get to know them.</p>{/if}
-    {#each journal.turns as turn (turn.id)}
-      <article class="npc-exchange"><p class="eyebrow">Day {turn.day}</p><p class="keeper-line"><strong>You</strong> {turn.message}</p><p><strong>{name}</strong> {turn.reply}</p></article>
-    {/each}
-  </div>
-  {#if journal.availability!=='present'}<p>This character's story has lasting consequences. Their conversations remain in your journal.</p>
+<section class="npc-dialogue" aria-labelledby="conversation-heading">
+  <h2 id="conversation-heading" class="sr-only">Talk with {name}</h2>
+
+  {#if journal.availability!=='present'}
+    <div class="dialogue-unavailable"><p class="eyebrow">{journal.availability==='dead'?'In memory':'Departed'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
   {:else}
-    {#if unavailable}<p class="form-message" role="note">{unavailable}</p>{/if}
-    <form onsubmit={send}>
-      <fieldset disabled={!hydrated||busy||!!frozen||!!unavailable}>
-        <label for="npc-message">Your message</label>
-        <textarea id="npc-message" rows="3" maxlength="2000" required bind:value={message} placeholder="How is your quest going?"></textarea>
-        <div class="dialogue-hospitality">
-          <label>Choose your intent<select bind:value={intentCardId}><option value="">No intent card</option>{#each stock.intentCards as card}<option value={card.id}>{card.displayName} · {card.description}</option>{/each}</select></label>
-          <label>Offer hospitality<select bind:value={offeringSelection}><option value="">No food or drink</option>{#each stock.beverages as beverage}<option value={`beverage:${beverage.id}`}>Drink · {beverage.name}</option>{/each}{#each stock.foods as food}<option value={`food:${food.id}`}>Food · {food.name}</option>{/each}</select></label>
+    {#if unavailable}<p class="form-message dialogue-provider-notice" role="note">{unavailable}</p>{/if}
+    <form onsubmit={send} class="dialogue-composer">
+      <fieldset disabled={!hydrated||busy||!!unavailable}>
+        <legend class="sr-only">Compose your message to {name}</legend>
+        <div class="composer-row">
+          <div class="keeper-seal" aria-hidden="true"><img src="/raven.svg" alt="" /><span>Keeper</span></div>
+          <div class="parchment-input">
+            <label for="npc-message" class="sr-only">Your message</label>
+            <textarea id="npc-message" rows="2" maxlength="2000" required disabled={!!frozen} bind:value={message} placeholder="Say something…"></textarea>
+            <div class="selection-summary" aria-live="polite">
+              <span>{selectedIntent ? `Intent: ${selectedIntent.displayName}` : 'Speaking plainly'}</span>
+              {#if selectedOffering}<span>Offering: {selectedOffering.name}</span>{/if}
+            </div>
+          </div>
+          <button class="composer-send" aria-label={busy?'Considering your words…':frozen?'Retry the same message':'Speak'} disabled={!hydrated||busy||!!unavailable||!!frozen&&!canRetry||(!frozen&&!message.trim())}>
+            <span>{busy?'Thinking…':frozen?'Retry':'Send'}</span><small>{frozen?'Same message':'Enter'}</small>
+          </button>
         </div>
-        {#if intentCardId || offeringSelection}<p class="muted">Your chosen intent guides how {name} reads the message. Hospitality is a separate offer. Selected inventory is used only when the reply is saved.</p>{/if}
+
+        <div class="composer-tools">
+          <section class="intent-tool" aria-labelledby="intent-tool-title">
+            <div class="tool-label"><p class="eyebrow" id="intent-tool-title">Choose your intent</p><span>Characterizes your words</span></div>
+            <div class="intent-card-tray" role="group" aria-labelledby="intent-tool-title">
+              <button type="button" class="intent-card plain" class:selected={intentCardId===''} aria-pressed={intentCardId===''} disabled={!!frozen} onclick={()=>intentCardId=''}>
+                <strong>Plain</strong><small>No added intent</small>
+              </button>
+              {#each stock.intentCards as card (card.id)}
+                <button type="button" class="intent-card intent-{card.cardKey}" class:selected={intentCardId===card.id} aria-pressed={intentCardId===card.id} disabled={!!frozen} onclick={()=>intentCardId=intentCardId===card.id?'':card.id}>
+                  <span class="intent-mark" aria-hidden="true">{intentMark(card.cardKey)}</span>
+                  <strong>{card.displayName}</strong><small>{card.description}</small>
+                </button>
+              {/each}
+            </div>
+          </section>
+
+          <label class="hospitality-tool">
+            <span><strong>Food &amp; drink</strong><small>Optional, separate from intent</small></span>
+            <select bind:value={offeringSelection} aria-label="Offer hospitality" disabled={!!frozen}>
+              <option value="">No food or drink</option>
+              {#each stock.beverages as beverage}<option value={`beverage:${beverage.id}`}>Drink · {beverage.name}</option>{/each}
+              {#each stock.foods as food}<option value={`food:${food.id}`}>Food · {food.name}</option>{/each}
+            </select>
+          </label>
+        </div>
       </fieldset>
-      <button class="primary-button" disabled={!hydrated||busy||!!unavailable||!!frozen&&!canRetry||(!frozen&&!message.trim())}>{busy?'Considering your words…':frozen?'Retry the same message':'Speak'}</button>
-      {#if frozen}<button type="button" class="text-button" disabled={busy} onclick={()=>recover(frozen!.turnId)}>Check reply</button><button type="button" class="text-button" disabled={cancelling} onclick={cancel}>{cancelling?'Cancelling…':'Cancel unfinished message'}</button>{/if}
+      {#if frozen}<div class="recovery-actions"><button type="button" class="text-button" disabled={busy} onclick={()=>recover(frozen!.turnId)}>Check reply</button><button type="button" class="text-button" disabled={cancelling} onclick={cancel}>{cancelling?'Cancelling…':'Cancel unfinished message'}</button></div>{/if}
     </form>
   {/if}
-  {#if notice}<p class="form-message" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
-  {#if journal.events.length}<div class="npc-news"><p class="eyebrow">News and remembered events</p><ul>{#each journal.events as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
+  {#if notice}<p class="form-message dialogue-notice" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
+
+  <details class="dialogue-journal">
+    <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questStatus}</small></summary>
+    <div class="journal-drawer">
+      <section class="npc-intention">
+        <p class="eyebrow">{journal.availability==='present'?'Current intention':journal.availability==='dead'?'In memory':'Departed'} · {journal.questStatus}</p>
+        {#if journal.intention}<h3>{journal.intention.goal}</h3><p>{journal.intention.motivation}</p>{/if}
+        {#if journal.questStatus==='active'}<p>Readiness: {journal.preparation===2?'well prepared':journal.preparation===1?'some preparation':'unprepared'} · Risk: {journal.risk}</p>{/if}
+        {#if journal.questStatus==='active'&&journal.intention}
+          <ol class="intention-steps" aria-label="Intended daily steps">
+            {#each journal.intention.steps as step,index}<li class:completed={index<journal.nextStep}>
+              {index<journal.nextStep?'Done':index===journal.nextStep?'Next outing':'Later'}: {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
+            </li>{/each}
+          </ol>
+        {/if}
+        {#if journal.warning}<p class="form-message error" role="note">{journal.warning}</p>{/if}
+      </section>
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (The overflow transcript must be keyboard-scrollable.) -->
+      <div class="npc-transcript" role="region" aria-label="Conversation history" tabindex="0">
+        {#if journal.turns.length===0}<p class="muted">Ask about their plans, share advice, or simply get to know them.</p>{/if}
+        {#each journal.turns as turn (turn.id)}
+          <article class="npc-exchange"><p class="eyebrow">Day {turn.day}</p><p class="keeper-line"><strong>You</strong> {turn.message}</p><p><strong>{name}</strong> {turn.reply}</p></article>
+        {/each}
+      </div>
+      {#if journal.events.length}<div class="npc-news"><p class="eyebrow">News and remembered events</p><ul>{#each journal.events as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
+    </div>
+  </details>
 </section>
