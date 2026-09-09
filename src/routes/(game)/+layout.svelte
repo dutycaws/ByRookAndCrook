@@ -22,6 +22,7 @@
       <a href="/garden" class:active={page.url.pathname === '/garden'}>Garden</a>
       <a href="/ingredients" class:active={page.url.pathname === '/ingredients'}>Ingredients</a>
       <a href="/brewery" class:active={page.url.pathname === '/brewery'}>Brewery</a>
+      <a href="/bakery" class:active={page.url.pathname === '/bakery'}>Bakery</a>
     </nav>
 
     <div class="account">

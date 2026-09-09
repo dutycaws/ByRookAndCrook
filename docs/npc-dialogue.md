@@ -91,7 +91,7 @@ Quality-specific prices are preserved. Historical Pour Ale rewards remain labele
 
 ## Overnight rules and permanent consequences
 
-Closing is allowed without crafting. An active brew or unexpired processing conversation blocks closure; failed/expired turns do not. One eligible step resolves per present NPC, including characters the keeper did not speak to.
+Closing is allowed without crafting. An active brew, active bake, or unexpired processing conversation blocks closure; failed/expired turns do not. Baking must finish even after its ideal oven window, and an overbaked loaf can always be removed. One eligible step resolves per present NPC, including characters the keeper did not speak to.
 
 - Preparation adds one, capped at two. Wait moves to the next step.
 - Attempt chance is `clamp(10,90,50 + 10*(skill-difficulty) + 10*preparation + 5*hospitality)`.

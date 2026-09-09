@@ -188,7 +188,14 @@
   {:else}
     <div class="brewery-layout">
       <section class="brew-panel panel" aria-labelledby="brew-title">
-        {#if data.snapshot.save.dayMinigameCompleted}
+        {#if data.snapshot.save.dailyCraftKind === 'bake'}
+          <div class="empty-state">
+            <span aria-hidden="true">🥖</span>
+            <h2 id="brew-title">Today’s craft is in the bakery</h2>
+            <p>Only one brew or bake may use the tavern kitchen each day.</p>
+            <a class="primary-button inline-button" href="/bakery">Return to the bakery</a>
+          </div>
+        {:else if data.snapshot.save.dayMinigameCompleted}
           <div class="brew-result" aria-live="polite">
             <span class="large-icon" aria-hidden="true">🍺</span>
             <p class="eyebrow">Day {data.snapshot.save.currentDay} craft complete</p>

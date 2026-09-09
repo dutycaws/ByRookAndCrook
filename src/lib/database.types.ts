@@ -9,6 +9,144 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      bake_actions: {
+        Row: {
+          action_id: string
+          actor_id: string
+          command_kind: string
+          committed_revision: number
+          created_at: string
+          input_expected_revision: number
+          input_value: number | null
+          result: Json
+          save_id: string
+          subject_id: string
+        }
+        Insert: {
+          action_id: string
+          actor_id: string
+          command_kind: string
+          committed_revision: number
+          created_at?: string
+          input_expected_revision: number
+          input_value?: number | null
+          result: Json
+          save_id: string
+          subject_id: string
+        }
+        Update: {
+          action_id?: string
+          actor_id?: string
+          command_kind?: string
+          committed_revision?: number
+          created_at?: string
+          input_expected_revision?: number
+          input_value?: number | null
+          result?: Json
+          save_id?: string
+          subject_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bake_actions_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "bake_actions_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bake_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          day_number: number
+          fold_count: number
+          fold_points: number
+          id: string
+          ingredient_bake_bonus: number
+          ingredient_batch_id: string
+          ingredient_quality_index: number
+          oven_elapsed_ms: number | null
+          oven_started_at: string | null
+          quality_index: number | null
+          recipe_key: string
+          rules_version: string
+          save_id: string
+          score_count: number
+          score_points: number
+          status: string
+          technique_score: number | null
+          timing_band: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          day_number: number
+          fold_count?: number
+          fold_points?: number
+          id?: string
+          ingredient_bake_bonus: number
+          ingredient_batch_id: string
+          ingredient_quality_index: number
+          oven_elapsed_ms?: number | null
+          oven_started_at?: string | null
+          quality_index?: number | null
+          recipe_key: string
+          rules_version: string
+          save_id: string
+          score_count?: number
+          score_points?: number
+          status?: string
+          technique_score?: number | null
+          timing_band?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          day_number?: number
+          fold_count?: number
+          fold_points?: number
+          id?: string
+          ingredient_bake_bonus?: number
+          ingredient_batch_id?: string
+          ingredient_quality_index?: number
+          oven_elapsed_ms?: number | null
+          oven_started_at?: string | null
+          quality_index?: number | null
+          recipe_key?: string
+          rules_version?: string
+          save_id?: string
+          score_count?: number
+          score_points?: number
+          status?: string
+          technique_score?: number | null
+          timing_band?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bake_sessions_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bake_sessions_save_id_ingredient_batch_id_fkey"
+            columns: ["save_id", "ingredient_batch_id"]
+            isOneToOne: false
+            referencedRelation: "ingredient_batches"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
       beverages: {
         Row: {
           brew_session_id: string
@@ -327,42 +465,65 @@ export type Database = {
       }
       foods: {
         Row: {
+          bake_session_id: string | null
           created_at: string
           day_number: number
           id: string
+          ingredient_batch_id: string | null
           name: string
           quality_index: number
           recipe_key: string
+          rules_version: string
           save_id: string
           source_action_id: string
         }
         Insert: {
+          bake_session_id?: string | null
           created_at?: string
           day_number: number
           id?: string
+          ingredient_batch_id?: string | null
           name: string
           quality_index: number
           recipe_key: string
+          rules_version?: string
           save_id: string
           source_action_id: string
         }
         Update: {
+          bake_session_id?: string | null
           created_at?: string
           day_number?: number
           id?: string
+          ingredient_batch_id?: string | null
           name?: string
           quality_index?: number
           recipe_key?: string
+          rules_version?: string
           save_id?: string
           source_action_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "foods_save_id_bake_session_id_fkey"
+            columns: ["save_id", "bake_session_id"]
+            isOneToOne: false
+            referencedRelation: "bake_sessions"
+            referencedColumns: ["save_id", "id"]
+          },
           {
             foreignKeyName: "foods_save_id_fkey"
             columns: ["save_id"]
             isOneToOne: false
             referencedRelation: "tavern_saves"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "foods_save_id_ingredient_batch_id_fkey"
+            columns: ["save_id", "ingredient_batch_id"]
+            isOneToOne: false
+            referencedRelation: "ingredient_batches"
+            referencedColumns: ["save_id", "id"]
           },
         ]
       }
@@ -794,6 +955,7 @@ export type Database = {
           id: string
           save_id: string
           source_beverage_id: string | null
+          source_food_id: string | null
           source_key: string
           source_kind: string
           tier: string
@@ -805,6 +967,7 @@ export type Database = {
           id?: string
           save_id: string
           source_beverage_id?: string | null
+          source_food_id?: string | null
           source_key: string
           source_kind: string
           tier: string
@@ -816,6 +979,7 @@ export type Database = {
           id?: string
           save_id?: string
           source_beverage_id?: string | null
+          source_food_id?: string | null
           source_key?: string
           source_kind?: string
           tier?: string
@@ -840,6 +1004,13 @@ export type Database = {
             columns: ["save_id", "source_beverage_id"]
             isOneToOne: false
             referencedRelation: "beverages"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "intent_cards_save_id_source_food_id_fkey"
+            columns: ["save_id", "source_food_id"]
+            isOneToOne: false
+            referencedRelation: "foods"
             referencedColumns: ["save_id", "id"]
           },
         ]
@@ -1094,6 +1265,7 @@ export type Database = {
         Row: {
           created_at: string
           current_day: number
+          daily_craft_kind: string | null
           day_minigame_completed: boolean
           gold: number
           id: string
@@ -1105,6 +1277,7 @@ export type Database = {
         Insert: {
           created_at?: string
           current_day?: number
+          daily_craft_kind?: string | null
           day_minigame_completed?: boolean
           gold?: number
           id?: string
@@ -1116,6 +1289,7 @@ export type Database = {
         Update: {
           created_at?: string
           current_day?: number
+          daily_craft_kind?: string | null
           day_minigame_completed?: boolean
           gold?: number
           id?: string
@@ -1136,6 +1310,24 @@ export type Database = {
           p_action_id: string
           p_expected_revision: number
           p_save_id: string
+        }
+        Returns: Json
+      }
+      begin_bake_oven: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_save_id: string
+          p_session_id: string
+        }
+        Returns: Json
+      }
+      complete_bake: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_save_id: string
+          p_session_id: string
         }
         Returns: Json
       }
@@ -1192,6 +1384,16 @@ export type Database = {
         Args: { p_cancel?: boolean; p_turn: string }
         Returns: Json
       }
+      fold_bake: {
+        Args: {
+          p_action_id: string
+          p_distance: number
+          p_expected_revision: number
+          p_save_id: string
+          p_session_id: string
+        }
+        Returns: Json
+      }
       get_bar_snapshot: { Args: never; Returns: Json }
       get_npc_journal: { Args: { p_patron: string }; Returns: Json }
       get_tavern_snapshot: { Args: never; Returns: Json }
@@ -1201,6 +1403,16 @@ export type Database = {
           p_cell_id: string
           p_expected_revision: number
           p_save_id: string
+        }
+        Returns: Json
+      }
+      score_bake: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_length: number
+          p_save_id: string
+          p_session_id: string
         }
         Returns: Json
       }
@@ -1223,6 +1435,15 @@ export type Database = {
           p_item_kind: string
           p_legacy_card_id?: string
           p_patron_key: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      start_bake: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_ingredient_batch_id: string
           p_save_id: string
         }
         Returns: Json

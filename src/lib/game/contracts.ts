@@ -92,6 +92,7 @@ export interface IntentCard {
   description: string;
   tier: CardTier;
   sourceBeverageId?: string | null;
+  sourceFoodId?: string | null;
   createdAt?: string;
 }
 
@@ -101,7 +102,42 @@ export interface Food {
   recipeKey: string;
   qualityIndex: QualityIndex;
   dayNumber: number;
+  bakeSessionId?: string | null;
+  ingredientBatchId?: string | null;
+  rulesVersion?: string;
   createdAt: string;
+}
+
+export type BakeStatus = 'folding' | 'scoring' | 'ready' | 'baking';
+
+export interface BakeSession {
+  id: string;
+  ingredientBatchId: string;
+  plantKey: string;
+  plantName: string;
+  icon: string;
+  ingredientQualityIndex: QualityIndex;
+  ingredientBakeBonus: number;
+  recipeKey: 'herb-loaf';
+  rulesVersion: 'bake-v1';
+  status: BakeStatus;
+  foldCount: number;
+  foldPoints: number;
+  scoreCount: number;
+  scorePoints: number;
+  ovenStartedAt: string | null;
+  dayNumber: number;
+}
+
+export interface BakeryRules {
+  rulesVersion: 'bake-v1';
+  foldsRequired: 6;
+  scoresRequired: 3;
+  idealSeconds: 30;
+  greenStartMs: number;
+  greenEndMs: number;
+  yellowStartMs: number;
+  yellowEndMs: number;
 }
 
 export interface GameSnapshot {
@@ -111,6 +147,7 @@ export interface GameSnapshot {
     revision: number;
     currentDay: number;
     dayMinigameCompleted: boolean;
+    dailyCraftKind: 'brew' | 'bake' | null;
   };
   cells: GardenCell[];
   ingredients: IngredientBatch[];
@@ -118,6 +155,12 @@ export interface GameSnapshot {
     activeSession: BrewSession | null;
     beverages: Beverage[];
     socialCards: SocialCard[];
+    intentCards: IntentCard[];
+  };
+  bakery: {
+    rules: BakeryRules;
+    activeSession: BakeSession | null;
+    foods: Food[];
     intentCards: IntentCard[];
   };
   foods: Food[];
@@ -185,6 +228,79 @@ export interface CompleteBrewReceipt {
   rulesVersion: string;
 }
 
+export interface StartBakeCommand {
+  saveId: string;
+  ingredientBatchId: string;
+  actionId: string;
+  expectedRevision: number;
+}
+
+export interface StartBakeReceipt {
+  actionId: string;
+  sessionId: string;
+  ingredientBatchId: string;
+  status: 'folding';
+  foldsRequired: number;
+  scoresRequired: number;
+  committedRevision: number;
+  dayNumber: number;
+  rulesVersion: 'bake-v1';
+}
+
+export interface BakeGestureCommand {
+  saveId: string;
+  sessionId: string;
+  actionId: string;
+  expectedRevision: number;
+  value: number;
+}
+
+export interface BakeGestureReceipt {
+  actionId: string;
+  sessionId: string;
+  status: BakeStatus;
+  foldCount?: number;
+  foldPoints?: number;
+  scoreCount?: number;
+  scorePoints?: number;
+  committedRevision: number;
+}
+
+export interface BeginBakeOvenCommand {
+  saveId: string;
+  sessionId: string;
+  actionId: string;
+  expectedRevision: number;
+}
+
+export interface BeginBakeOvenReceipt {
+  actionId: string;
+  sessionId: string;
+  status: 'baking';
+  ovenStartedAt: string;
+  idealSeconds: 30;
+  committedRevision: number;
+}
+
+export interface CompleteBakeCommand extends BeginBakeOvenCommand {}
+
+export interface CompleteBakeReceipt {
+  actionId: string;
+  sessionId: string;
+  foodId: string;
+  intentCardId: string | null;
+  intentCardKey: IntentCardKey | null;
+  intentCardTier: CardTier | null;
+  foodName: string;
+  qualityIndex: QualityIndex;
+  techniqueScore: number;
+  timingBand: 'red' | 'yellow' | 'green';
+  ovenElapsedMs: number;
+  committedRevision: number;
+  dayNumber: number;
+  rulesVersion: 'bake-v1';
+}
+
 export interface AdvanceDayCommand {
   saveId: string;
   actionId: string;
@@ -214,6 +330,10 @@ export function parseSnapshot(value: Json | undefined): GameSnapshot | null {
     !Array.isArray(candidate.brewery.beverages) ||
     !Array.isArray(candidate.brewery.socialCards) ||
     !Array.isArray(candidate.brewery.intentCards) ||
+    !candidate.bakery ||
+    !candidate.bakery.rules ||
+    !Array.isArray(candidate.bakery.foods) ||
+    !Array.isArray(candidate.bakery.intentCards) ||
     !Array.isArray(candidate.foods)
   ) {
     throw new Error('Invalid game snapshot');
@@ -259,6 +379,38 @@ export function parseCompleteBrewReceipt(value: Json): CompleteBrewReceipt {
   const receipt = parseCommandReceipt<CompleteBrewReceipt>(value);
   if (!receipt.sessionId || !receipt.beverageId || !receipt.beverageName) {
     throw new Error('Invalid complete brew receipt');
+  }
+  return receipt;
+}
+
+export function parseStartBakeReceipt(value: Json): StartBakeReceipt {
+  const receipt = parseCommandReceipt<StartBakeReceipt>(value);
+  if (!receipt.sessionId || !receipt.ingredientBatchId || receipt.rulesVersion !== 'bake-v1') {
+    throw new Error('Invalid start bake receipt');
+  }
+  return receipt;
+}
+
+export function parseBakeGestureReceipt(value: Json): BakeGestureReceipt {
+  const receipt = parseCommandReceipt<BakeGestureReceipt>(value);
+  if (!receipt.sessionId || !['folding', 'scoring', 'ready'].includes(receipt.status)) {
+    throw new Error('Invalid bake gesture receipt');
+  }
+  return receipt;
+}
+
+export function parseBeginBakeOvenReceipt(value: Json): BeginBakeOvenReceipt {
+  const receipt = parseCommandReceipt<BeginBakeOvenReceipt>(value);
+  if (!receipt.sessionId || receipt.status !== 'baking' || !receipt.ovenStartedAt) {
+    throw new Error('Invalid oven receipt');
+  }
+  return receipt;
+}
+
+export function parseCompleteBakeReceipt(value: Json): CompleteBakeReceipt {
+  const receipt = parseCommandReceipt<CompleteBakeReceipt>(value);
+  if (!receipt.sessionId || !receipt.foodId || !receipt.foodName || receipt.rulesVersion !== 'bake-v1') {
+    throw new Error('Invalid bake completion receipt');
   }
   return receipt;
 }

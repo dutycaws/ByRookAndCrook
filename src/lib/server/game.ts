@@ -2,17 +2,29 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
 import {
   parseAdvanceDayReceipt,
+  parseBakeGestureReceipt,
+  parseBeginBakeOvenReceipt,
+  parseCompleteBakeReceipt,
   parseCompleteBrewReceipt,
   parseReceipt,
   parseSnapshot,
+  parseStartBakeReceipt,
   parseStartBrewReceipt,
   type AdvanceDayCommand,
   type AdvanceDayReceipt,
+  type BakeGestureCommand,
+  type BakeGestureReceipt,
+  type BeginBakeOvenCommand,
+  type BeginBakeOvenReceipt,
+  type CompleteBakeCommand,
+  type CompleteBakeReceipt,
   type CompleteBrewCommand,
   type CompleteBrewReceipt,
   type GameSnapshot,
   type HarvestCommand,
   type HarvestReceipt,
+  type StartBakeCommand,
+  type StartBakeReceipt,
   type StartBrewCommand,
   type StartBrewReceipt
 } from '$lib/game/contracts';
@@ -126,6 +138,94 @@ export async function completeBrew(
 
   const receipt = parseCompleteBrewReceipt(data);
   console.info('complete_brew', {
+    actionId: receipt.actionId,
+    outcome: 'committed',
+    revision: receipt.committedRevision,
+    durationMs: Math.round(performance.now() - startedAt)
+  });
+  return receipt;
+}
+
+export async function startBake(
+  client: SupabaseClient<Database>,
+  command: StartBakeCommand
+): Promise<StartBakeReceipt> {
+  const { data, error } = await client.rpc('start_bake', {
+    p_save_id: command.saveId,
+    p_ingredient_batch_id: command.ingredientBatchId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseStartBakeReceipt(data);
+}
+
+export async function foldBake(
+  client: SupabaseClient<Database>,
+  command: BakeGestureCommand
+): Promise<BakeGestureReceipt> {
+  const { data, error } = await client.rpc('fold_bake', {
+    p_save_id: command.saveId,
+    p_session_id: command.sessionId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision,
+    p_distance: command.value
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseBakeGestureReceipt(data);
+}
+
+export async function scoreBake(
+  client: SupabaseClient<Database>,
+  command: BakeGestureCommand
+): Promise<BakeGestureReceipt> {
+  const { data, error } = await client.rpc('score_bake', {
+    p_save_id: command.saveId,
+    p_session_id: command.sessionId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision,
+    p_length: command.value
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseBakeGestureReceipt(data);
+}
+
+export async function beginBakeOven(
+  client: SupabaseClient<Database>,
+  command: BeginBakeOvenCommand
+): Promise<BeginBakeOvenReceipt> {
+  const { data, error } = await client.rpc('begin_bake_oven', {
+    p_save_id: command.saveId,
+    p_session_id: command.sessionId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseBeginBakeOvenReceipt(data);
+}
+
+export async function completeBake(
+  client: SupabaseClient<Database>,
+  command: CompleteBakeCommand
+): Promise<CompleteBakeReceipt> {
+  const startedAt = performance.now();
+  const { data, error } = await client.rpc('complete_bake', {
+    p_save_id: command.saveId,
+    p_session_id: command.sessionId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision
+  });
+  if (error) {
+    const mapped = mapDatabaseError(error);
+    console.info('complete_bake', {
+      actionId: command.actionId,
+      outcome: mapped.code,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    throw mapped;
+  }
+  const receipt = parseCompleteBakeReceipt(data);
+  console.info('complete_bake', {
     actionId: receipt.actionId,
     outcome: 'committed',
     revision: receipt.committedRevision,
