@@ -214,8 +214,14 @@ export type Database = {
           fence: string
           id: string
           input_sequence: number
+          intent_card_id: string | null
+          intent_snapshot: Json | null
+          interaction_version: string
           lease_until: string
           message: string
+          offering_beverage_id: string | null
+          offering_food_id: string | null
+          offering_kind: string | null
           patron_key: string
           result: Json | null
           rule_version: string
@@ -237,8 +243,14 @@ export type Database = {
           fence?: string
           id: string
           input_sequence: number
+          intent_card_id?: string | null
+          intent_snapshot?: Json | null
+          interaction_version?: string
           lease_until: string
           message: string
+          offering_beverage_id?: string | null
+          offering_food_id?: string | null
+          offering_kind?: string | null
           patron_key: string
           result?: Json | null
           rule_version?: string
@@ -260,8 +272,14 @@ export type Database = {
           fence?: string
           id?: string
           input_sequence?: number
+          intent_card_id?: string | null
+          intent_snapshot?: Json | null
+          interaction_version?: string
           lease_until?: string
           message?: string
+          offering_beverage_id?: string | null
+          offering_food_id?: string | null
+          offering_kind?: string | null
           patron_key?: string
           result?: Json | null
           rule_version?: string
@@ -279,6 +297,68 @@ export type Database = {
           },
           {
             foreignKeyName: "dialogue_turns_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dialogue_turns_save_id_intent_card_id_fkey"
+            columns: ["save_id", "intent_card_id"]
+            isOneToOne: false
+            referencedRelation: "intent_cards"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "dialogue_turns_save_id_offering_beverage_id_fkey"
+            columns: ["save_id", "offering_beverage_id"]
+            isOneToOne: false
+            referencedRelation: "beverages"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "dialogue_turns_save_id_offering_food_id_fkey"
+            columns: ["save_id", "offering_food_id"]
+            isOneToOne: false
+            referencedRelation: "foods"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
+      foods: {
+        Row: {
+          created_at: string
+          day_number: number
+          id: string
+          name: string
+          quality_index: number
+          recipe_key: string
+          save_id: string
+          source_action_id: string
+        }
+        Insert: {
+          created_at?: string
+          day_number: number
+          id?: string
+          name: string
+          quality_index: number
+          recipe_key: string
+          save_id: string
+          source_action_id: string
+        }
+        Update: {
+          created_at?: string
+          day_number?: number
+          id?: string
+          name?: string
+          quality_index?: number
+          recipe_key?: string
+          save_id?: string
+          source_action_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "foods_save_id_fkey"
             columns: ["save_id"]
             isOneToOne: false
             referencedRelation: "tavern_saves"
@@ -407,6 +487,122 @@ export type Database = {
           },
         ]
       }
+      hospitality_events: {
+        Row: {
+          action_id: string
+          actor_id: string
+          beverage_id: string | null
+          committed_revision: number
+          created_at: string
+          day_number: number
+          food_id: string | null
+          gold_earned: number
+          input_expected_revision: number
+          item_kind: string
+          item_name: string
+          legacy_card_id: string | null
+          patron_key: string
+          quality_index: number
+          relationship_change: number
+          result: Json
+          rules_version: string
+          save_id: string
+          turn_id: string | null
+        }
+        Insert: {
+          action_id: string
+          actor_id: string
+          beverage_id?: string | null
+          committed_revision: number
+          created_at?: string
+          day_number: number
+          food_id?: string | null
+          gold_earned: number
+          input_expected_revision: number
+          item_kind: string
+          item_name: string
+          legacy_card_id?: string | null
+          patron_key: string
+          quality_index: number
+          relationship_change: number
+          result: Json
+          rules_version: string
+          save_id: string
+          turn_id?: string | null
+        }
+        Update: {
+          action_id?: string
+          actor_id?: string
+          beverage_id?: string | null
+          committed_revision?: number
+          created_at?: string
+          day_number?: number
+          food_id?: string | null
+          gold_earned?: number
+          input_expected_revision?: number
+          item_kind?: string
+          item_name?: string
+          legacy_card_id?: string | null
+          patron_key?: string
+          quality_index?: number
+          relationship_change?: number
+          result?: Json
+          rules_version?: string
+          save_id?: string
+          turn_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hospitality_events_patron_key_fkey"
+            columns: ["patron_key"]
+            isOneToOne: false
+            referencedRelation: "patron_catalog"
+            referencedColumns: ["patron_key"]
+          },
+          {
+            foreignKeyName: "hospitality_events_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "hospitality_events_save_id_beverage_id_fkey"
+            columns: ["save_id", "beverage_id"]
+            isOneToOne: false
+            referencedRelation: "beverages"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "hospitality_events_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hospitality_events_save_id_food_id_fkey"
+            columns: ["save_id", "food_id"]
+            isOneToOne: false
+            referencedRelation: "foods"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "hospitality_events_save_id_legacy_card_id_fkey"
+            columns: ["save_id", "legacy_card_id"]
+            isOneToOne: false
+            referencedRelation: "social_cards"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "hospitality_events_turn_id_fkey"
+            columns: ["turn_id"]
+            isOneToOne: false
+            referencedRelation: "dialogue_turns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ingredient_batches: {
         Row: {
           bake_bonus: number
@@ -477,6 +673,173 @@ export type Database = {
             columns: ["save_id", "source_cell_id"]
             isOneToOne: false
             referencedRelation: "garden_cells"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
+      intent_card_catalog: {
+        Row: {
+          card_key: string
+          description: string
+          display_name: string
+          prompt_instruction: string
+          version: string
+        }
+        Insert: {
+          card_key: string
+          description: string
+          display_name: string
+          prompt_instruction: string
+          version: string
+        }
+        Update: {
+          card_key?: string
+          description?: string
+          display_name?: string
+          prompt_instruction?: string
+          version?: string
+        }
+        Relationships: []
+      }
+      intent_card_plays: {
+        Row: {
+          actor_id: string
+          card_id: string
+          card_key: string
+          catalog_version: string
+          created_at: string
+          day_number: number
+          intent_snapshot: Json
+          patron_key: string
+          save_id: string
+          tier: string
+          turn_id: string
+        }
+        Insert: {
+          actor_id: string
+          card_id: string
+          card_key: string
+          catalog_version: string
+          created_at?: string
+          day_number: number
+          intent_snapshot: Json
+          patron_key: string
+          save_id: string
+          tier: string
+          turn_id: string
+        }
+        Update: {
+          actor_id?: string
+          card_id?: string
+          card_key?: string
+          catalog_version?: string
+          created_at?: string
+          day_number?: number
+          intent_snapshot?: Json
+          patron_key?: string
+          save_id?: string
+          tier?: string
+          turn_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intent_card_plays_card_key_catalog_version_fkey"
+            columns: ["card_key", "catalog_version"]
+            isOneToOne: false
+            referencedRelation: "intent_card_catalog"
+            referencedColumns: ["card_key", "version"]
+          },
+          {
+            foreignKeyName: "intent_card_plays_patron_key_fkey"
+            columns: ["patron_key"]
+            isOneToOne: false
+            referencedRelation: "patron_catalog"
+            referencedColumns: ["patron_key"]
+          },
+          {
+            foreignKeyName: "intent_card_plays_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "intent_card_plays_save_id_card_id_fkey"
+            columns: ["save_id", "card_id"]
+            isOneToOne: true
+            referencedRelation: "intent_cards"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "intent_card_plays_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intent_card_plays_turn_id_fkey"
+            columns: ["turn_id"]
+            isOneToOne: false
+            referencedRelation: "dialogue_turns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      intent_cards: {
+        Row: {
+          card_key: string
+          catalog_version: string
+          created_at: string
+          id: string
+          save_id: string
+          source_beverage_id: string | null
+          source_key: string
+          source_kind: string
+          tier: string
+        }
+        Insert: {
+          card_key: string
+          catalog_version?: string
+          created_at?: string
+          id?: string
+          save_id: string
+          source_beverage_id?: string | null
+          source_key: string
+          source_kind: string
+          tier: string
+        }
+        Update: {
+          card_key?: string
+          catalog_version?: string
+          created_at?: string
+          id?: string
+          save_id?: string
+          source_beverage_id?: string | null
+          source_key?: string
+          source_kind?: string
+          tier?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intent_cards_card_key_catalog_version_fkey"
+            columns: ["card_key", "catalog_version"]
+            isOneToOne: false
+            referencedRelation: "intent_card_catalog"
+            referencedColumns: ["card_key", "version"]
+          },
+          {
+            foreignKeyName: "intent_cards_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intent_cards_save_id_source_beverage_id_fkey"
+            columns: ["save_id", "source_beverage_id"]
+            isOneToOne: false
+            referencedRelation: "beverages"
             referencedColumns: ["save_id", "id"]
           },
         ]
@@ -792,9 +1155,10 @@ export type Database = {
       dialogue_begin: {
         Args: {
           p_actor: string
-          p_beverage?: string
-          p_card?: string
+          p_intent_card?: string
           p_message: string
+          p_offering_item?: string
+          p_offering_kind?: string
           p_patron: string
           p_sequence: number
           p_turn: string
@@ -846,6 +1210,18 @@ export type Database = {
           p_beverage_id: string
           p_card_id?: string
           p_expected_revision?: number
+          p_patron_key: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      serve_hospitality: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_item_id: string
+          p_item_kind: string
+          p_legacy_card_id?: string
           p_patron_key: string
           p_save_id: string
         }

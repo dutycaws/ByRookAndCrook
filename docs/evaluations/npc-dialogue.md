@@ -14,6 +14,7 @@ Offline CI uses injected deterministic providers in test code. Production has no
 | Reply and journal agree | Validated decision is supplied to speech and committed with the journal; browser persists the agreed plan through reload and closure. |
 | Repeated praise and daily caps | Subject deduplication and positive/negative cap assertions; significant memory may still persist. |
 | Concurrent pours and retries | Actual parallel RPC tests and dropped-response browser tests verify a single receipt/payment/consumption. |
+| Intent and hospitality separation | Unit/RPC/browser cases cover text alone, intent alone, offering alone, and both; intent selection never requires a beverage. |
 | Expired leases and fencing | SQL/RPC tests preserve cumulative calls, invalidate old fences and let expired/failed turns stop blocking day-end. |
 | Autonomous/permanent outcomes | SQL tests store draws, replay day-end, run unattended NPCs, preserve terminal history and force authored worst-case outcomes. |
 | No unauthored character loss | Worst-case generated objective fails while the character remains present. |

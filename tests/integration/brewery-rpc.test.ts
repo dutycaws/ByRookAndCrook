@@ -18,6 +18,7 @@ interface BrewerySnapshot {
     activeSession: { id: string; ingredientBatchId: string } | null;
     beverages: Array<{ id: string; name: string; qualityIndex: number; dayNumber: number }>;
     socialCards: Array<{ tier: string; relationshipGain: number; goldMultiplier: number }>;
+    intentCards: Array<{ id: string; cardKey: string; tier: string; sourceBeverageId: string | null }>;
   };
 }
 
@@ -113,9 +114,10 @@ describe('brewery RPC', () => {
     expect(finished.brewery.beverages).toEqual([
       expect.objectContaining({ name: 'Ambrosial Draught', qualityIndex: 6, dayNumber: 1 })
     ]);
-    expect(finished.brewery.socialCards).toEqual([
-      expect.objectContaining({ tier: 'exceptional', relationshipGain: 10, goldMultiplier: 2 })
-    ]);
+    expect(finished.brewery.socialCards).toEqual([]);
+    expect(finished.brewery.intentCards).toContainEqual(
+      expect.objectContaining({ cardKey: 'resolve', tier: 'exceptional', sourceBeverageId: finished.brewery.beverages[0].id })
+    );
 
     const advanceInput = {
       p_save_id: finished.save.id,

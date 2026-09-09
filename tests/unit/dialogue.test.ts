@@ -8,9 +8,13 @@ describe('dialogue boundaries',()=>{
     const result=mergeEnvironment(original,{PUBLIC_SUPABASE_URL:'http://127.0.0.1:57321'});
     expect(result).toContain('OPENAI_API_KEY="test-only-placeholder"');expect(result).toContain('CUSTOM="first\nsecond"');expect(result).not.toContain('=old');
   });
-  it('requires a beverage with a card and validates message/sequence',()=>{
-    const input={turnId:crypto.randomUUID(),patronKey:'lira',message:'Hello',expectedConversationSequence:0};
-    expect(parseInput(input).cardId).toBeNull();expect(()=>parseInput({...input,cardId:crypto.randomUUID()})).toThrow();expect(()=>parseInput({...input,message:' '.repeat(2001)})).toThrow();
+  it('accepts intent and hospitality independently and validates message/sequence',()=>{
+    const input={turnId:crypto.randomUUID(),patronKey:'lira' as const,message:'Hello',expectedConversationSequence:0,interactionVersion:'dialogue-v2' as const};
+    expect(parseInput(input)).toMatchObject({intentCardId:null,offering:null});
+    expect(parseInput({...input,intentCardId:crypto.randomUUID()}).offering).toBeNull();
+    expect(parseInput({...input,offering:{kind:'beverage',itemId:crypto.randomUUID()}}).intentCardId).toBeNull();
+    expect(()=>parseInput({...input,offering:{kind:'invalid',itemId:crypto.randomUUID()}})).toThrow();
+    expect(()=>parseInput({...input,message:' '.repeat(2001)})).toThrow();
   });
   it('removes unsupported effects and requires quoted player evidence',()=>{
     const base={questStatus:'active',allowedTargets:['millhaven']};

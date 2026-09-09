@@ -11,8 +11,11 @@ export function parseInput(value:unknown): DialogueInput {
   const v=value as DialogueInput;
   if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !['lira','torvin'].includes(v.patronKey) || typeof v.message!=='string'
     || !v.message.trim() || v.message.length>2000 || !Number.isSafeInteger(v.expectedConversationSequence) || v.expectedConversationSequence<0
-    || v.beverageId!=null&&!uuid.test(v.beverageId) || v.cardId!=null&&(!uuid.test(v.cardId)||!v.beverageId)) throw new DialogueError('Enter a message. A social card requires a drink.',400,'INVALID_INPUT');
-  return {turnId:v.turnId,patronKey:v.patronKey,message:v.message,expectedConversationSequence:v.expectedConversationSequence,beverageId:v.beverageId??null,cardId:v.cardId??null};
+    || v.interactionVersion!=='dialogue-v2' || v.intentCardId!=null&&!uuid.test(v.intentCardId)
+    || v.offering!=null&&(!['food','beverage'].includes(v.offering.kind)||!uuid.test(v.offering.itemId)))
+    throw new DialogueError('Enter a message and choose an available intent card or offering.',400,'INVALID_INPUT');
+  return {turnId:v.turnId,patronKey:v.patronKey,message:v.message,expectedConversationSequence:v.expectedConversationSequence,
+    interactionVersion:'dialogue-v2',intentCardId:v.intentCardId??null,offering:v.offering??null};
 }
 export function databaseError(e:{message:string;code:string}): DialogueError {
   const status=Number(e.code.match(/^PT(\d{3})$/)?.[1]??500);
@@ -36,7 +39,8 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   const started=performance.now();
   const signal=AbortSignal.timeout(Math.min(90000,Math.max(1000,options.deadlineMs??90000)));
   const begun=await client.rpc('dialogue_begin',{p_actor:actor,p_turn:input.turnId,p_patron:input.patronKey,p_message:input.message,
-    p_sequence:input.expectedConversationSequence,p_beverage:input.beverageId??undefined,p_card:input.cardId??undefined}).abortSignal(signal);
+    p_sequence:input.expectedConversationSequence,p_intent_card:input.intentCardId??undefined,
+    p_offering_kind:input.offering?.kind,p_offering_item:input.offering?.itemId}).abortSignal(signal);
   if(begun.error) throw databaseError(begun.error);
   const turn=begun.data as any;
   if(turn.status==='completed') return {status:'completed',result:turn.result};
@@ -70,7 +74,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     const base=checkpoints.base?.value ?? await retrieve('base') as any;
     if(!checkpoints.base) await checkpoint('base',{value:base,contentVersion:turn.content_version});
     const context:any[]=[]; const fetched=new Set<string>();
-    let consequential=!!base.hospitality; let remember=false;
+    let consequential=!!base.hospitality||!!base.playerIntent; let remember=false;
     for(let i=0;i<Math.min(2,Math.max(1,options.rounds??2));i++) {
       const selected=await generate(`investigate${i}`,'investigate',stagePayload(prepareContext(base,context)));
       consequential ||= selected.kind!=='informational'; remember ||= selected.remember;

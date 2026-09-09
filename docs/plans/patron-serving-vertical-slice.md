@@ -2,6 +2,8 @@
 
 Implemented locally on 2026-09-07. This extends the working garden and brewery into **serve a beverage → apply an optional social card → receive gold → change relationship/story state → recover the same result after reload**.
 
+> Historical v1 record. `hospitality_events` is now the canonical food/drink ledger. Dialogue intent cards are independent from hospitality; only existing Pour Ale rows retain the legacy standalone-drink behavior described below. See the [current technical specification](../npc-dialogue.md).
+
 ## Source requirements and pilot decisions
 
 The [Product Design Document](</home/hosm/Projects/braindump/Specifications/Cozy Tavern/Product Design Document.md>) makes NPC interactions the primary loop: patrons pay different amounts for different beverage qualities, cards enhance interactions, and hospitality influences story arcs. The prototype's `BarView.tsx` and `game-context.tsx` supply Lira Nightwind, Torvin Ashbeard, their story premises, initial relationships, payment tables, and quality thresholds.

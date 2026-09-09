@@ -1,16 +1,15 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
-  import type { DialogueInput, Journal, PatronKey } from '$lib/game/dialogue';
+  import type { DialogueInput, Journal, Offering, PatronKey } from '$lib/game/dialogue';
   import type { BarSnapshot } from '$lib/game/serving';
   let { patronKey, name, journal, stock, unavailable }: {patronKey:PatronKey;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null}=$props();
-  let message=$state(''); let beverageId=$state(''); let cardId=$state(''); let busy=$state(false);
+  let message=$state(''); let intentCardId=$state(''); let offeringSelection=$state(''); let busy=$state(false);
   let frozen=$state<DialogueInput|null>(null); let notice=$state(''); let failure=$state(false);
   let hydrated=$state(false);
   let restoredTurn=$state<string|null>(null);
   $effect(()=>{hydrated=true; if(journal.pending && journal.pending.turnId!==restoredTurn && !frozen) {
     restoredTurn=journal.pending.turnId; void recover(journal.pending.turnId);
   }});
-  $effect(()=>{if(!beverageId)cardId='';});
   let cancelling=$state(false);
   let canRetry=$state(true);
   let operation=0;
@@ -19,13 +18,14 @@
   async function acceptStatus(body:any, completedNotice='Your last reply was saved.') {
     failure=false;
     if(body.status==='completed') {
-      frozen=null;message='';beverageId='';cardId='';notice=completedNotice;
+      frozen=null;message='';intentCardId='';offeringSelection='';notice=completedNotice;
       await invalidateAll();
     } else if(body.status==='cancelled'||body.status==='stale') {
       frozen=null;notice=body.status==='cancelled'?'Unfinished message cancelled.':'That message is closed. You can send a new message.';
       await invalidateAll();
     } else {
-      frozen=body.input;message=body.input.message;beverageId=body.input.beverageId??'';cardId=body.input.cardId??'';
+      frozen=body.input;message=body.input.message;intentCardId=body.input.intentCardId??'';
+      offeringSelection=body.input.offering ? `${body.input.offering.kind}:${body.input.offering.itemId}` : '';
       canRetry=body.canRetry??body.status!=='processing';
       notice=body.status==='processing'?'Your conversation is still being completed. Check again shortly.'
         :canRetry?'The last reply was not completed. Retry the same message or cancel it.'
@@ -46,8 +46,13 @@
   async function send(event:SubmitEvent) {
     event.preventDefault(); if(busy||frozen&&!canRetry)return;
     if(!frozen)canRetry=true;
-    frozen??={turnId:crypto.randomUUID(),patronKey,message,expectedConversationSequence:journal.sequence,beverageId:beverageId||null,cardId:cardId||null};
-    const command=frozen;const current=++operation;
+    const [offeringKind, offeringId] = offeringSelection.split(':', 2);
+    const offering: Offering | null = offeringId && (offeringKind === 'food' || offeringKind === 'beverage')
+      ? { kind: offeringKind, itemId: offeringId }
+      : null;
+    frozen??={turnId:crypto.randomUUID(),patronKey,message,expectedConversationSequence:journal.sequence,
+      interactionVersion:'dialogue-v2',intentCardId:intentCardId||null,offering};
+    const command=frozen as DialogueInput;const current=++operation;
     const controller=new AbortController();posting=controller;
     busy=true;notice='';failure=false;
     try {
@@ -123,10 +128,10 @@
         <label for="npc-message">Your message</label>
         <textarea id="npc-message" rows="3" maxlength="2000" required bind:value={message} placeholder="How is your quest going?"></textarea>
         <div class="dialogue-hospitality">
-          <label>Offer a drink<select bind:value={beverageId}><option value="">Conversation only</option>{#each stock.beverages as b}<option value={b.id}>{b.name}</option>{/each}</select></label>
-          <label>Enhance with a card<select bind:value={cardId} disabled={!beverageId}><option value="">No card</option>{#each stock.cards as c}<option value={c.id}>{c.displayName} · +{c.relationshipGain} trust · ×{c.goldMultiplier} gold</option>{/each}</select></label>
+          <label>Choose your intent<select bind:value={intentCardId}><option value="">No intent card</option>{#each stock.intentCards as card}<option value={card.id}>{card.displayName} · {card.description}</option>{/each}</select></label>
+          <label>Offer hospitality<select bind:value={offeringSelection}><option value="">No food or drink</option>{#each stock.beverages as beverage}<option value={`beverage:${beverage.id}`}>Drink · {beverage.name}</option>{/each}{#each stock.foods as food}<option value={`food:${food.id}`}>Food · {food.name}</option>{/each}</select></label>
         </div>
-        {#if beverageId}<p class="muted">The drink{cardId?' and card':''} will be used when the reply is saved. An unfinished reply spends nothing.</p>{/if}
+        {#if intentCardId || offeringSelection}<p class="muted">Your chosen intent guides how {name} reads the message. Hospitality is a separate offer. Selected inventory is used only when the reply is saved.</p>{/if}
       </fieldset>
       <button class="primary-button" disabled={!hydrated||busy||!!unavailable||!!frozen&&!canRetry||(!frozen&&!message.trim())}>{busy?'Considering your words…':frozen?'Retry the same message':'Speak'}</button>
       {#if frozen}<button type="button" class="text-button" disabled={busy} onclick={()=>recover(frozen!.turnId)}>Check reply</button><button type="button" class="text-button" disabled={cancelling} onclick={cancel}>{cancelling?'Cancelling…':'Cancel unfinished message'}</button>{/if}

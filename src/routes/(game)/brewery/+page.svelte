@@ -22,7 +22,7 @@
   let session = $derived(data.snapshot?.brewery.activeSession ?? null);
   let latestBeverage = $derived(data.snapshot?.brewery.beverages[0] ?? null);
   let latestCard = $derived(
-    data.snapshot?.brewery.socialCards.find((card) => card.sourceBeverageId === latestBeverage?.id) ?? null
+    data.snapshot?.brewery.intentCards.find((card) => card.sourceBeverageId === latestBeverage?.id) ?? null
   );
   let zone = $derived(classifySpeed(speed));
   let progress = $derived(
@@ -200,9 +200,9 @@
               <div class="card-reward">
                 <span aria-hidden="true">🃏</span>
                 <div>
-                  <p class="eyebrow">Social card earned · {latestCard.tier}</p>
+                  <p class="eyebrow">Intent card earned · {latestCard.tier}</p>
                   <strong>{latestCard.displayName}</strong>
-                  <small>Relationship +{latestCard.relationshipGain} · Gold ×{latestCard.goldMultiplier}</small>
+                  <small>{latestCard.description}</small>
                 </div>
               </div>
             {/if}

@@ -1,5 +1,5 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { getBarSnapshot, serveBeverage } from '$lib/server/serving';
+import { getBarSnapshot, serveHospitality } from '$lib/server/serving';
 import { GameServiceError } from '$lib/server/game';
 import { dialogueAvailability } from '$lib/server/dialogue/runtime';
 import { databaseError } from '$lib/server/dialogue/orchestrator';
@@ -42,17 +42,21 @@ export const actions: Actions = {
     const revision = String(data.get('expectedRevision') ?? '');
     const command = {
       saveId: String(data.get('saveId') ?? ''), patronKey: String(data.get('patronKey') ?? ''),
-      beverageId: String(data.get('beverageId') ?? ''), cardId: String(data.get('cardId') ?? '') || null,
+      itemKind: String(data.get('itemKind') ?? '') as 'food' | 'beverage',
+      itemId: String(data.get('itemId') ?? ''),
+      legacyCardId: String(data.get('legacyCardId') ?? '') || null,
       actionId: String(data.get('actionId') ?? ''), expectedRevision: revision === '' ? NaN : Number(revision)
     };
-    if (!uuid.test(command.saveId) || !uuid.test(command.beverageId) || !uuid.test(command.actionId) ||
-      (command.cardId !== null && !uuid.test(command.cardId)) || !/^[a-z0-9-]{1,40}$/.test(command.patronKey) ||
+    if (!uuid.test(command.saveId) || !uuid.test(command.itemId) || !uuid.test(command.actionId) ||
+      !['food', 'beverage'].includes(command.itemKind) ||
+      (command.legacyCardId !== null && (!uuid.test(command.legacyCardId) || command.itemKind !== 'beverage')) ||
+      !/^[a-z0-9-]{1,40}$/.test(command.patronKey) ||
       !Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 0) {
-      return fail(400, { message: 'Choose a patron and an available beverage.', retryable: false });
+      return fail(400, { message: 'Choose a patron and an available food or drink.', retryable: false });
     }
     try {
-      const receipt = await serveBeverage(locals.supabase, command);
-      return { success: true, receipt, message: `Served ${receipt.beverageName} to ${receipt.patronName}. Earned ${receipt.goldEarned} gold.` };
+      const receipt = await serveHospitality(locals.supabase, command);
+      return { success: true, receipt, message: `Served ${receipt.itemName} to ${receipt.patronName}. Earned ${receipt.goldEarned} gold.` };
     } catch (cause) {
       const status = cause instanceof GameServiceError ? cause.status : 500;
       return fail(status, {

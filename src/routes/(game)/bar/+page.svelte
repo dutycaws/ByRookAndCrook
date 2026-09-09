@@ -9,8 +9,8 @@
 
   let { data, form }: PageProps = $props();
   let patronKey = $state('lira');
-  let beverageId = $state('');
-  let cardId = $state('');
+  let itemSelection = $state('');
+  let legacyCardId = $state('');
   let pending = $state(false);
   let unresolved = $state<ServeCommand | null>(null);
   let localError = $state<string | null>(null);
@@ -31,22 +31,32 @@
   };
   $effect(() => { hydrated = true; });
   let patron = $derived(data.snapshot?.patrons.find((p) => p.key === patronKey));
-  let beverage = $derived(data.snapshot?.beverages.find((b) => b.id === beverageId));
-  let card = $derived(data.snapshot?.cards.find((c) => c.id === cardId));
+  let selectedKind = $derived(itemSelection.startsWith('food:') ? 'food' as const : 'beverage' as const);
+  let selectedId = $derived(itemSelection.split(':', 2)[1] ?? '');
+  let item = $derived(selectedKind === 'food'
+    ? data.snapshot?.foods.find((food) => food.id === selectedId)
+    : data.snapshot?.beverages.find((drink) => drink.id === selectedId));
+  let legacyCard = $derived(data.snapshot?.legacyCards.find((card) => card.id === legacyCardId));
 
   $effect(() => {
     if (unresolved) return;
-    if (!data.snapshot?.beverages.some((b) => b.id === beverageId)) beverageId = data.snapshot?.beverages[0]?.id ?? '';
-    if (!data.snapshot?.cards.some((c) => c.id === cardId)) cardId = '';
+    const choices = [
+      ...(data.snapshot?.beverages.map((drink) => `beverage:${drink.id}`) ?? []),
+      ...(data.snapshot?.foods.map((food) => `food:${food.id}`) ?? [])
+    ];
+    if (!choices.includes(itemSelection)) itemSelection = choices[0] ?? '';
+    if (selectedKind !== 'beverage' || !data.snapshot?.legacyCards.some((card) => card.id === legacyCardId)) legacyCardId = '';
   });
 
   const enhanceServe: SubmitFunction = ({ formData, cancel }) => {
-    if (!data.snapshot || pending || (!unresolved && !beverage)) { cancel(); return; }
+    if (!data.snapshot || pending || (!unresolved && !item)) { cancel(); return; }
     unresolved ??= {
-      saveId: data.snapshot.save.id, patronKey, beverageId, cardId: cardId || null,
+      saveId: data.snapshot.save.id, patronKey, itemKind: selectedKind, itemId: selectedId,
+      legacyCardId: legacyCardId || null,
       actionId: crypto.randomUUID(), expectedRevision: data.snapshot.save.revision
     };
-    for (const [key, value] of Object.entries(unresolved)) formData.set(key, String(value ?? ''));
+    const command = unresolved;
+    for (const [key, value] of Object.entries(command)) formData.set(key, String(value ?? ''));
     pending = true;
     localError = null;
     return async ({ result, update }) => {
@@ -130,40 +140,48 @@
 
       <section class="panel serving-panel" aria-labelledby="pour-title">
         <p class="eyebrow">From your cellar</p><h2 id="pour-title">Make a little hospitality</h2>
-        {#if data.snapshot.beverages.length === 0 && !unresolved}
-          <div class="empty-state"><span aria-hidden="true">🍺</span><h3>No drinks ready to serve</h3>
-            <p>Your served bottles remain in the brewery's history. Brew another batch to stock the bar.</p>
+        {#if data.snapshot.beverages.length === 0 && data.snapshot.foods.length === 0 && !unresolved}
+          <div class="empty-state"><span aria-hidden="true">🍽️</span><h3>No hospitality ready to serve</h3>
+            <p>Brew a drink or bake some food before offering it at the bar.</p>
             <a class="primary-button inline-button" href="/brewery">Visit the brewery</a>
           </div>
         {:else}
           <form method="POST" action="?/serve" use:enhance={enhanceServe}>
             <fieldset disabled={!hydrated || pending || !!unresolved}>
-              <legend>Choose a beverage</legend>
+              <legend>Choose food or drink</legend>
               <div class="pour-options">
                 {#each data.snapshot.beverages as drink (drink.id)}
-                  <label class:selected={beverageId === drink.id}>
-                    <input type="radio" name="beverageId" value={drink.id} bind:group={beverageId} />
+                  <label class:selected={itemSelection === `beverage:${drink.id}`}>
+                    <input type="radio" value={`beverage:${drink.id}`} bind:group={itemSelection} />
                     <span><strong>{drink.name}</strong><small>{qualityLabel(drink.qualityIndex)}</small></span>
                   </label>
                 {/each}
+                {#each data.snapshot.foods as food (food.id)}
+                  <label class:selected={itemSelection === `food:${food.id}`}>
+                    <input type="radio" value={`food:${food.id}`} bind:group={itemSelection} />
+                    <span><strong>{food.name}</strong><small>{qualityLabel(food.qualityIndex)}</small></span>
+                  </label>
+                {/each}
               </div>
-              <label class="card-choice">Social card <span class="muted">Optional · played once</span>
-                <select bind:value={cardId} name="cardId">
-                  <option value="">Save my cards</option>
-                  {#each data.snapshot.cards as reward (reward.id)}
+              {#if selectedKind === 'beverage' && data.snapshot.legacyCards.length}
+                <label class="card-choice">Legacy Pour Ale entitlement <span class="muted">Optional · usable once with a drink</span>
+                  <select bind:value={legacyCardId}>
+                    <option value="">Save legacy entitlement</option>
+                    {#each data.snapshot.legacyCards as reward (reward.id)}
                     <option value={reward.id}>{reward.displayName} · {reward.tier} · +{reward.relationshipGain} relationship · ×{reward.goldMultiplier} gold</option>
-                  {/each}
-                </select>
-              </label>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
             </fieldset>
-            {#if beverage && patron}
+            {#if item && patron}
               <div class="pour-summary">
-                <p>{patron.name} pays <strong>{patron.prices[beverage.qualityIndex]} gold</strong> for this quality.</p>
-                {#if card}<p>{card.displayName}: payment ×{card.goldMultiplier}, relationship +{card.relationshipGain}. The card is used with this pour.</p>{/if}
+                <p>{patron.name} pays <strong>{patron.prices[item.qualityIndex]} gold</strong> for this quality.</p>
+                {#if legacyCard}<p>{legacyCard.displayName}: payment ×{legacyCard.goldMultiplier}, relationship +{legacyCard.relationshipGain}. This legacy entitlement is used with the drink.</p>{/if}
               </div>
             {/if}
-            <button class="primary-button full-button" disabled={!hydrated || pending || (!beverage && !unresolved) || data.journals[patronKey]?.availability!=='present'}>
-              {pending ? 'Pouring…' : unresolved ? 'Retry the same pour' : `Serve to ${patron?.name ?? 'patron'}`}
+            <button class="primary-button full-button" disabled={!hydrated || pending || (!item && !unresolved) || data.journals[patronKey]?.availability!=='present'}>
+              {pending ? 'Serving…' : unresolved ? 'Retry the same serving' : `Serve to ${patron?.name ?? 'patron'}`}
             </button>
           </form>
         {/if}
@@ -192,7 +210,7 @@
       {:else}<ol>
         {#each data.snapshot.history as event (event.actionId)}
           <li>
-            <div><strong>{event.beverageName} → {event.patronName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}{event.cardId ? ' · Social card played' : ''}</small></div>
+            <div><strong>{event.itemName ?? event.beverageName} → {event.patronName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}{event.cardId ? ' · Legacy entitlement used' : ''}</small></div>
             <p class="serve-effects">+{event.goldEarned} gold · Relationship {signed(event.relationshipChange)} · Story {signed(event.arcChange)}</p>
             <p>{event.storyEvent}</p>
           </li>

@@ -2,6 +2,8 @@
 
 Status: implemented and verified locally on 2026-09-07. Hosted deployment remains a later step.
 
+> Historical v1 record. New brew completions now issue a versioned intent card instead of Pour Ale. Existing Pour Ale rows remain labeled legacy entitlements for standalone drink service. See the [current dialogue and hospitality specification](../npc-dialogue.md).
+
 This slice extends the garden plan with one connected path:
 
 > harvest an ingredient → select it in the brewery → stir for 30 seconds → bottle a quality-scored beverage → earn a social card → start the next tavern day

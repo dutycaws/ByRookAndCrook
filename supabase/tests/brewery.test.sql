@@ -112,10 +112,10 @@ select is((select name from public.beverages), 'Ambrosial Draught', 'Resplendent
 select is((select quality_index from public.beverages), 6::smallint, 'the beverage persists its quality');
 select is((select consumed_quantity from public.ingredient_batches), 1, 'completion consumes exactly one unit');
 select is((public.get_tavern_snapshot() #>> '{ingredients,0,quantity}')::integer, 1, 'snapshot reports the remaining ingredient unit');
-select is((select count(*) from public.social_cards), 1::bigint, 'a qualifying brew creates one social card');
-select is((select tier from public.social_cards), 'exceptional', 'Resplendent brew earns an Exceptional card');
-select is((select relationship_gain from public.social_cards), 10::smallint, 'Exceptional Pour Ale stores its relationship effect');
-select is((select gold_multiplier from public.social_cards), 2.00::numeric, 'Exceptional Pour Ale stores its gold multiplier');
+select is((select count(*) from public.social_cards), 0::bigint, 'a new brew creates no legacy Pour Ale entitlement');
+select is((select count(*) from public.intent_cards where source_kind='brew'), 1::bigint, 'a qualifying brew creates one intent card');
+select is((select tier from public.intent_cards where source_kind='brew'), 'exceptional', 'Resplendent brew earns an exceptional intent card');
+select is((select card_key from public.intent_cards where source_kind='brew'), 'resolve', 'a Resplendent brew rewards Resolve');
 select is((select revision from public.tavern_saves), 3::bigint, 'completion advances revision once');
 select is((select day_minigame_completed from public.tavern_saves), true, 'completion closes the daily minigame');
 select ok((public.get_tavern_snapshot() #>> '{brewery,activeSession}') is null, 'completed brew is no longer active');

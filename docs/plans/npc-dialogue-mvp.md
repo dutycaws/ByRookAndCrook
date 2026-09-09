@@ -2,7 +2,9 @@
 
 Implementation record for the user-approved plan (2026-09-07). Status: implemented and verified locally.
 
-The keeper talks to Lira Nightwind and Torvin Ashbeard through adaptive investigation, optional deliberation, rule validation, speech, consistency review, and attributed memory extraction. OpenAI is primary; local generation is an explicit stub. Conversations may include an actual drink and optional card. Private conversations stay private; public quest outcomes become next-day news. NPC intentions act overnight without mandatory crafting. Failures persist; character loss must be authored and warned.
+> Historical v1 record. Dialogue v2 supersedes the coupled drink/card contract: the player now chooses an optional intent card independently from optional food or drink. Published intent definitions and plays retain their exact versioned instruction. See the [current technical specification](../npc-dialogue.md).
+
+The keeper talks to Lira Nightwind and Torvin Ashbeard through adaptive investigation, optional deliberation, rule validation, speech, consistency review, and attributed memory extraction. OpenAI is primary; local generation is an explicit stub. Private conversations stay private; public quest outcomes become next-day news. NPC intentions act overnight without mandatory crafting. Failures persist; character loss must be authored and warned.
 
 ## Execution ledger
 

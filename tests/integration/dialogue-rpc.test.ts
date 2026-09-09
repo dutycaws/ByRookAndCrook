@@ -7,7 +7,7 @@ import type { DialogueInput } from '../../src/lib/game/dialogue';
 const players:Array<Awaited<ReturnType<typeof createTestPlayer>>>=[];
 afterEach(async()=>{for(const p of players.splice(0))expect((await p.admin.auth.admin.deleteUser(p.userId)).error).toBeNull();});
 async function player(prefix:string){const p=await createTestPlayer(prefix);players.push(p);expect((await p.client.rpc('create_tavern')).error).toBeNull();return p;}
-const input=(message='How is the quest going?'):DialogueInput=>({turnId:crypto.randomUUID(),patronKey:'lira',message,expectedConversationSequence:0});
+const input=(message='How is the quest going?'):DialogueInput=>({turnId:crypto.randomUUID(),patronKey:'lira',message,expectedConversationSequence:0,interactionVersion:'dialogue-v2'});
 describe('adaptive dialogue',()=>{
   it('investigates adaptively, reviews a rewrite, remembers attribution, and replays once',async()=>{
     const p=await player('dialogue'); const f=fixtureProvider({secondInvestigation:true,rewrite:true});const command=input('I thank you and advise you to scout, then negotiate.');
@@ -28,13 +28,70 @@ describe('adaptive dialogue',()=>{
   it('commits hospitality with a turn once and supports failed-stage resume',async()=>{
     const p=await createBrewedTavern('dialogue-drink');players.push(p);
     const stock=(await p.client.rpc('get_bar_snapshot')).data as any;
-    const command={...input(),beverageId:stock.beverages[0].id,cardId:stock.cards[0].id};
+    const startingIntents=stock.intentCards.length;
+    const command={...input(),intentCardId:stock.intentCards[0].id,offering:{kind:'beverage' as const,itemId:stock.beverages[0].id}};
     await expect(runDialogue(p.admin,p.userId,command,fixtureProvider({failStage:'speak'}))).rejects.toThrow();
     expect(((await p.client.rpc('get_bar_snapshot')).data as any).beverages).toHaveLength(1);
     const f=fixtureProvider();const r=await runDialogue(p.admin,p.userId,command,f);expect(f.stages).not.toContain('investigate');
-    expect((r.result as any).serving.goldEarned).toBe(90);
+    expect((r.result as any).serving.goldEarned).toBe(45);
+    expect((r.result as any).intentCard.id).toBe(command.intentCardId);
     const stockAfter=(await p.client.rpc('get_bar_snapshot')).data as any;
-    expect(stockAfter.beverages).toHaveLength(0);expect(stockAfter.cards).toHaveLength(0);expect(stockAfter.history).toHaveLength(1);
+    expect(stockAfter.beverages).toHaveLength(0);expect(stockAfter.intentCards).toHaveLength(startingIntents-1);expect(stockAfter.history).toHaveLength(1);
+  });
+  it('commits intent-only and offering-only turns as independent choices',async()=>{
+    const p=await createBrewedTavern('dialogue-independent');players.push(p);
+    const before=(await p.client.rpc('get_bar_snapshot')).data as any;
+    const intent={...input('I want to ask with charm.'),intentCardId:before.intentCards[0].id};
+    const intentResult=await runDialogue(p.admin,p.userId,intent,fixtureProvider());
+    expect((intentResult.result as any).intentCard.id).toBe(intent.intentCardId);
+    expect((intentResult.result as any).serving).toBeNull();
+    const afterIntent=(await p.client.rpc('get_bar_snapshot')).data as any;
+    expect(afterIntent.intentCards).toHaveLength(before.intentCards.length-1);
+    expect(afterIntent.beverages).toHaveLength(1);
+    expect(afterIntent.save.revision).toBe(4);
+
+    const offering={...input('Please accept this drink.'),expectedConversationSequence:1,
+      offering:{kind:'beverage' as const,itemId:afterIntent.beverages[0].id}};
+    const offeringResult=await runDialogue(p.admin,p.userId,offering,fixtureProvider());
+    expect((offeringResult.result as any).intentCard).toBeNull();
+    expect((offeringResult.result as any).serving).toMatchObject({itemKind:'beverage',itemId:offering.offering.itemId});
+    const afterOffering=(await p.client.rpc('get_bar_snapshot')).data as any;
+    expect(afterOffering.intentCards).toHaveLength(before.intentCards.length-1);
+    expect(afterOffering.beverages).toHaveLength(0);
+    expect(afterOffering.history).toHaveLength(1);
+    expect(afterOffering.save.revision).toBe(5);
+  });
+  it('keeps a food-and-intent selection atomic across provider failure and retry',async()=>{
+    const p=await createBrewedTavern('dialogue-food');players.push(p);
+    const inserted=await p.admin.from('foods').insert({
+      save_id:p.saveId,name:'Test berry tart',recipe_key:'berry-tart',quality_index:5,
+      day_number:1,source_action_id:crypto.randomUUID()
+    }).select('id').single();
+    if(inserted.error)throw inserted.error;
+    const stock=(await p.client.rpc('get_bar_snapshot')).data as any;
+    const selectedIntent=stock.intentCards[0];
+    const command={...input('I offer this tart with honest resolve.'),intentCardId:selectedIntent.id,
+      offering:{kind:'food' as const,itemId:inserted.data.id}};
+    await expect(runDialogue(p.admin,p.userId,command,fixtureProvider({failStage:'speak'}))).rejects.toThrow();
+    const failed=(await p.client.rpc('get_bar_snapshot')).data as any;
+    expect(failed.foods.some((food:any)=>food.id===inserted.data.id)).toBe(true);
+    expect(failed.intentCards.some((card:any)=>card.id===command.intentCardId)).toBe(true);
+    expect(failed.history).toHaveLength(0);
+    const frozen=(await p.admin.from('dialogue_turns').select('intent_snapshot').eq('id',command.turnId).single()).data?.intent_snapshot as any;
+    expect(frozen).toMatchObject({id:command.intentCardId,cardKey:selectedIntent.cardKey,catalogVersion:'intent-v1'});
+    expect((await p.admin.from('intent_card_catalog').update({prompt_instruction:'Changed after selection'}).eq('card_key',selectedIntent.cardKey)).error).not.toBeNull();
+    expect((await p.admin.from('intent_cards').update({catalog_version:'intent-v2'}).eq('id',command.intentCardId)).error).not.toBeNull();
+    expect((await p.admin.from('intent_cards').delete().eq('id',command.intentCardId)).error).not.toBeNull();
+    const completed=await runDialogue(p.admin,p.userId,command,fixtureProvider());
+    expect((completed.result as any).serving).toMatchObject({itemKind:'food',itemId:inserted.data.id});
+    expect((completed.result as any).intentCard.id).toBe(command.intentCardId);
+    const after=(await p.client.rpc('get_bar_snapshot')).data as any;
+    expect(after.foods.some((food:any)=>food.id===inserted.data.id)).toBe(false);
+    expect(after.intentCards.some((card:any)=>card.id===command.intentCardId)).toBe(false);
+    expect(after.history).toHaveLength(1);
+    const play=(await p.admin.from('intent_card_plays').select('catalog_version,intent_snapshot').eq('turn_id',command.turnId).single()).data as any;
+    expect(play.catalog_version).toBe('intent-v1');
+    expect(play.intent_snapshot).toEqual(frozen);
   });
   it('isolates private sheets, claims, turns and completion from other players',async()=>{
     const a=await player('dialogue-owner'),b=await player('dialogue-foreign');const command=input('I thank you for your courage.');
@@ -89,18 +146,19 @@ describe('adaptive dialogue',()=>{
   it('rejects a generation made stale by a competing pour without duplicating payment',async()=>{
     const p=await createBrewedTavern('dialogue-competing');players.push(p);
     const stock=(await p.client.rpc('get_bar_snapshot')).data as any;
-    const command={...input(),beverageId:stock.beverages[0].id,cardId:stock.cards[0].id};
+    const command={...input(),intentCardId:stock.intentCards[0].id,offering:{kind:'beverage' as const,itemId:stock.beverages[0].id}};
     const f=fixtureProvider();
     await expect(runDialogue(p.admin,p.userId,command,{async generate(stage,payload,signal){
       const output=await f.generate(stage,payload,signal);
-      if(stage==='review')expect((await p.client.rpc('serve_beverage',{
-        p_save_id:p.saveId,p_patron_key:'torvin',p_beverage_id:command.beverageId,p_card_id:command.cardId,
+      if(stage==='review')expect((await p.client.rpc('serve_hospitality',{
+        p_save_id:p.saveId,p_patron_key:'torvin',p_item_kind:'beverage',p_item_id:command.offering.itemId,
         p_action_id:crypto.randomUUID(),p_expected_revision:3
       })).error).toBeNull();
       return output;
     }})).rejects.toMatchObject({code:'STATE_CHANGED'});
     const after=(await p.client.rpc('get_bar_snapshot')).data as any;
-    expect(after.history).toHaveLength(1);expect(after.save.gold).toBe(80);
+    expect(after.history).toHaveLength(1);expect(after.save.gold).toBe(40);
+    expect(after.intentCards.some((card:any)=>card.id===command.intentCardId)).toBe(true);
     expect(((await p.client.rpc('get_npc_journal',{p_patron:'lira'})).data as any).sequence).toBe(0);
   });
   it('aborts on deadline and resumes safely from recorded stages',async()=>{
@@ -206,7 +264,7 @@ describe('adaptive dialogue',()=>{
   it('fails oversized mandatory context before a provider charge and keeps day advancement available',async()=>{
     const p=await createBrewedTavern('dialogue-oversized');players.push(p);
     const stock=(await p.client.rpc('get_bar_snapshot')).data as any;
-    const command={...input(),beverageId:stock.beverages[0].id,cardId:stock.cards[0].id};
+    const command={...input(),intentCardId:stock.intentCards[0].id,offering:{kind:'beverage' as const,itemId:stock.beverages[0].id}};
     const client={rpc(name:string,args:any){return {async abortSignal(){
       const response=await p.admin.rpc(name as any,args);
       if(name==='dialogue_context'&&args.p_category==='base'&&!response.error)
@@ -219,7 +277,7 @@ describe('adaptive dialogue',()=>{
     expect((await p.client.rpc('dialogue_status',{p_turn:command.turnId})).data).toMatchObject({status:'failed',error:'CONTEXT_BUDGET',canRetry:false});
     expect((await p.admin.from('dialogue_turns').select('calls').eq('id',command.turnId).single()).data?.calls).toBe(0);
     const after=(await p.client.rpc('get_bar_snapshot')).data as any;
-    expect(after.beverages).toHaveLength(1);expect(after.cards).toHaveLength(1);expect(after.history).toHaveLength(0);
+    expect(after.beverages).toHaveLength(1);expect(after.intentCards.some((card:any)=>card.id===command.intentCardId)).toBe(true);expect(after.history).toHaveLength(0);
     const snapshot=(await p.client.rpc('get_tavern_snapshot')).data as any;
     expect((await p.client.rpc('advance_tavern_day',{p_save_id:snapshot.save.id,p_action_id:crypto.randomUUID(),p_expected_revision:snapshot.save.revision})).error).toBeNull();
   });

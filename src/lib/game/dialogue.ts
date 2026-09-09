@@ -10,8 +10,27 @@ export interface Decision {
   intention: Intention | null;
 }
 export interface Memory { kind: 'keeper_claim' | 'npc_statement' | 'promise' | 'interaction'; text: string; quote: string; speaker: 'keeper' | 'npc' }
-export interface DialogueInput { turnId: string; patronKey: PatronKey; message: string; expectedConversationSequence: number; beverageId?: string | null; cardId?: string | null }
-export interface DialogueReply { turnId: string; reply: string; sequence: number; relationship: number; relationshipChange: number; serving: { goldEarned: number; beverageName: string } | null; intention: Intention | null; committedRevision: number }
+export type Offering = { kind: 'food' | 'beverage'; itemId: string };
+export interface DialogueInput {
+  turnId: string;
+  patronKey: PatronKey;
+  message: string;
+  expectedConversationSequence: number;
+  interactionVersion: 'dialogue-v2';
+  intentCardId?: string | null;
+  offering?: Offering | null;
+}
+export interface DialogueReply {
+  turnId: string;
+  reply: string;
+  sequence: number;
+  relationship: number;
+  relationshipChange: number;
+  serving: { goldEarned: number; itemKind: Offering['kind']; itemName: string } | null;
+  intentCard: { id: string; cardKey: string; displayName: string; tier: string } | null;
+  intention: Intention | null;
+  committedRevision: number;
+}
 export interface Journal {
   sequence: number;
   availability: 'present' | 'dead' | 'departed';

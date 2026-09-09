@@ -83,6 +83,27 @@ export interface SocialCard {
   createdAt: string;
 }
 
+export type IntentCardKey = 'charm' | 'insight' | 'resolve' | 'rumor';
+
+export interface IntentCard {
+  id: string;
+  cardKey: IntentCardKey;
+  displayName: string;
+  description: string;
+  tier: CardTier;
+  sourceBeverageId?: string | null;
+  createdAt?: string;
+}
+
+export interface Food {
+  id: string;
+  name: string;
+  recipeKey: string;
+  qualityIndex: QualityIndex;
+  dayNumber: number;
+  createdAt: string;
+}
+
 export interface GameSnapshot {
   save: {
     id: string;
@@ -97,7 +118,9 @@ export interface GameSnapshot {
     activeSession: BrewSession | null;
     beverages: Beverage[];
     socialCards: SocialCard[];
+    intentCards: IntentCard[];
   };
+  foods: Food[];
 }
 
 export interface HarvestCommand {
@@ -150,7 +173,10 @@ export interface CompleteBrewReceipt {
   actionId: string;
   sessionId: string;
   beverageId: string;
-  socialCardId: string | null;
+  socialCardId?: string | null;
+  intentCardId?: string | null;
+  intentCardKey?: IntentCardKey | null;
+  intentCardTier?: CardTier | null;
   beverageName: string;
   qualityIndex: QualityIndex;
   stirScore: number;
@@ -186,7 +212,9 @@ export function parseSnapshot(value: Json | undefined): GameSnapshot | null {
     !Array.isArray(candidate.ingredients) ||
     !candidate.brewery ||
     !Array.isArray(candidate.brewery.beverages) ||
-    !Array.isArray(candidate.brewery.socialCards)
+    !Array.isArray(candidate.brewery.socialCards) ||
+    !Array.isArray(candidate.brewery.intentCards) ||
+    !Array.isArray(candidate.foods)
   ) {
     throw new Error('Invalid game snapshot');
   }

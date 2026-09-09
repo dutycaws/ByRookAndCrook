@@ -113,7 +113,7 @@ test('a dropped harvest response retries the same action exactly once', async ({
   }
 });
 
-test('a harvested ingredient becomes a persistent brew, social card, and completed tavern day', async ({ page }) => {
+test('a harvested ingredient becomes a persistent brew, intent card, and completed tavern day', async ({ page }) => {
   test.setTimeout(45_000);
   const player = await createTestPlayer('brew-journey');
   const pageErrors: string[] = [];
@@ -165,8 +165,9 @@ test('a harvested ingredient becomes a persistent brew, social card, and complet
 
     await expect(page.getByRole('heading', { name: 'Honest Mead' })).toBeVisible();
     await expect(page.getByText('Decent', { exact: true })).toBeVisible();
-    await expect(page.getByText('Social card earned · fine')).toBeVisible();
-    await expect(page.getByText('Relationship +5 · Gold ×1.2')).toBeVisible();
+    await expect(page.getByText('Intent card earned · fine')).toBeVisible();
+    await expect(page.getByText('Charm', { exact: true })).toBeVisible();
+    await expect(page.getByText('Frame the keeper’s words with warmth and personal appeal.')).toBeVisible();
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Honest Mead' })).toBeVisible();
@@ -176,14 +177,13 @@ test('a harvested ingredient becomes a persistent brew, social card, and complet
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('link', { name: 'Serve a drink at the bar' }).click();
     await expect(page.getByRole('heading', { name: 'The bar', exact: true })).toBeVisible();
-    await page.getByLabel('Social card').selectOption({ index: 1 });
     await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
-    await expect(page.getByRole('status')).toContainText('Earned 14 gold');
-    await expect(page.getByLabel('Tavern gold')).toContainText('14 gold');
-    await expect(page.getByRole('heading', { name: 'No drinks ready to serve' })).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Earned 12 gold');
+    await expect(page.getByLabel('Tavern gold')).toContainText('12 gold');
+    await expect(page.getByRole('heading', { name: 'No hospitality ready to serve' })).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel('Tavern gold')).toContainText('14 gold');
-    await expect(page.getByText('Relationship +8 · Story 0', { exact: false })).toBeVisible();
+    await expect(page.getByLabel('Tavern gold')).toContainText('12 gold');
+    await expect(page.getByText('Relationship +3 · Story 0', { exact: false })).toBeVisible();
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('button', { name: 'Rest and begin next day' }).click();
     await expect(page.getByText('Tavern day 2 · Daily craft')).toBeVisible();

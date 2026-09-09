@@ -28,17 +28,18 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
       else await route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(result)});
     });
     await page.getByLabel('Your message').fill('I thank you and advise you to scout, then negotiate.');
-    await page.getByLabel('Offer a drink').selectOption({index:1});
-    await page.getByLabel('Enhance with a card').selectOption({index:1});
+    await page.getByLabel('Choose your intent').selectOption({index:1});
+    await page.getByLabel('Offer hospitality').selectOption({index:1});
     await page.getByRole('button', {name:'Speak',exact:true}).click();
     await expect(page.getByRole('button',{name:'Check reply'})).toBeEnabled();
     await page.getByRole('button',{name:'Check reply'}).click();
     await expect(page.getByText('Your last reply was saved.')).toBeVisible();
     await expect(page.locator('.npc-exchange')).toHaveCount(1);
-    await expect(page.getByLabel('Tavern gold')).toContainText('90 gold');
+    await expect(page.getByLabel('Tavern gold')).toContainText('45 gold');
     await expect(page.locator('.serving-history li')).toHaveCount(1);
     await expect(page.getByLabel('Your message')).toHaveValue('');
-    await expect(page.getByLabel('Enhance with a card')).toBeDisabled();
+    await expect(page.getByLabel('Choose your intent')).toHaveValue('');
+    await expect(page.getByLabel('Offer hospitality')).toHaveValue('');
     await page.reload();
     await expect(page.locator('.npc-exchange')).toHaveCount(1);
     await expect(page.locator('.npc-exchange')).toContainText('I agree. I will scout on my next outing, then try diplomacy on the following one.');
@@ -95,8 +96,8 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
         ?route.fulfill({status:503,contentType:'application/json',body:'{"message":"Injected cancellation outage"}'})
         :route.continue());
       await page.getByLabel('Your message').fill('How is the quest going?');
-      await page.getByLabel('Offer a drink').selectOption({index:1});
-      await page.getByLabel('Enhance with a card').selectOption({index:1});
+      await page.getByLabel('Choose your intent').selectOption({index:1});
+      await page.getByLabel('Offer hospitality').selectOption({index:1});
       await page.getByRole('button',{name:'Speak',exact:true}).click();
       await reached;
       await expect(page.getByRole('button',{name:'Cancel unfinished message'})).toBeEnabled();
@@ -118,7 +119,7 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
       const stock=(await player.client.rpc('get_bar_snapshot')).data as any;
       expect(stock.history).toHaveLength(phase==='generating'?0:1);
       expect(stock.beverages).toHaveLength(phase==='generating'?1:0);
-      expect(stock.cards).toHaveLength(phase==='generating'?1:0);
+      expect(stock.intentCards).toHaveLength(phase==='generating'?5:4);
       await page.reload();
       await expect(page.locator('.npc-exchange')).toHaveCount(phase==='generating'?0:1);
       await expect(page.getByRole('button',{name:'Speak',exact:true})).toBeVisible();

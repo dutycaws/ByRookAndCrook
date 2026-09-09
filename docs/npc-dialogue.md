@@ -1,12 +1,12 @@
 # NPC dialogue MVP: technical specification
 
-Implemented for Lira Nightwind and Torvin Ashbeard in SvelteKit + Supabase. This document consolidates the approved dialogue plan and the delivered contracts. The bar supports conversation alone, conversation with a real beverage, and conversation with a beverage plus a card. Each NPC keeps their own transcript, intentions, attributed memories and permanent history.
+Implemented for Lira Nightwind and Torvin Ashbeard in SvelteKit + Supabase. This document consolidates the approved dialogue plan and the delivered contracts. Every turn has text plus two independent optional choices: a player-selected intent card and a food or drink offering. Each NPC keeps their own transcript, intentions, attributed memories and permanent history.
 
 ## Runtime boundaries
 
 ```mermaid
 flowchart TD
-  UI[Bar: message, optional drink and card] --> API[Authenticated SvelteKit endpoint]
+  UI[Bar: message, optional intent, optional hospitality] --> API[Authenticated SvelteKit endpoint]
   API --> Begin[Reserve turn and fenced lease]
   Begin --> Investigate[Investigate scoped knowledge: 1–2 rounds]
   Investigate --> Decide[Optional deliberation]
@@ -35,12 +35,13 @@ The legacy patron catalog retains historical prices and receipts but has no dire
   "patronKey": "lira",
   "message": "How is the quest going?",
   "expectedConversationSequence": 0,
-  "beverageId": null,
-  "cardId": null
+  "interactionVersion": "dialogue-v2",
+  "intentCardId": null,
+  "offering": { "kind": "beverage", "itemId": "owned-item UUID" }
 }
 ```
 
-Messages contain 1–2,000 characters. A card requires a beverage. The complete input is frozen under the turn ID; changing any field on retry is a conflict. Responses are either `{status:"processing",turnId}` or `{status:"completed",result}`. The completed result includes reply, sequence, relationship, total relationship change, optional serving receipt, optional accepted intention and committed save revision.
+Messages contain 1–2,000 characters. `intentCardId` and `offering` may each be null; neither requires the other. The complete input is frozen under the turn ID; changing any field on retry is a conflict. Responses are either `{status:"processing",turnId}` or `{status:"completed",result}`. The completed result includes reply, sequence, relationship, total relationship change, the played intent card, optional hospitality receipt, optional accepted intention and committed save revision.
 
 `GET /api/dialogue/:turnId` returns owned status, frozen input, any saved result, a sanitized error code and `canRetry`. `DELETE` cancels unfinished work and replaces its fence. Mutation endpoints require the same origin. Responses with game data use `private, no-store` caching.
 
@@ -61,12 +62,14 @@ The application service alone calls `dialogue_begin`, `dialogue_context`, `dialo
 | `private.npc_memories` | Attributed statements/claims/promises/interactions with exact source quote and turn FK. |
 | `private.npc_reactions` | Daily subject deduplication and relationship-change accounting. |
 | `private.npc_usage` | Per-player UTC-day attempt and call counters. |
+| `public.intent_cards` / `public.intent_card_plays` | Versioned player-selected dialogue framing and its one-use ledger. |
+| `public.hospitality_events` | Canonical food/drink receipt and consumption ledger shared by dialogue and standalone serving. |
 
 Content-version foreign keys make historical sheets resolvable. Existing characters stay pinned when new content is published. A memory never updates a quest, content sheet, event or character availability. The keeper's claim remains a claim even if it asserts success. Memory summaries with invalid source quotes or system-style person references are discarded.
 
 ## Investigation and decisions
 
-Baseline context includes compact identity/voice/personality, current relationship and intention, allowed entity targets, original message, proposed hospitality and up to six completed exchanges. It is checkpointed so a retry uses the same evidence.
+Baseline context includes compact identity/voice/personality, current relationship and intention, allowed entity targets, original message, the player-selected intent, proposed hospitality and up to six completed exchanges. It is checkpointed so a retry uses the same evidence. Intent tells the model how the keeper means to frame the words; it cannot compel agreement or create a game effect by itself.
 
 The investigation function schema permits only `quests`, `history`, `relationships`, `memories` and `news`, with at most three requests per round and 200-character queries. The second round can follow a reference discovered in the first. SQL scopes every result to the actor's save and character, applies authored trust disclosure thresholds, and shares another character's events only when designated public and already in a prior tavern day.
 
@@ -82,9 +85,9 @@ The writer receives the validated decision and `effectiveIntention`, which resol
 
 A meaningful positive or negative reaction applies +2 or −2. The same subject (`quest`, `personal`, `hospitality`) cannot score repeatedly for the same NPC/day. Positive and negative totals are separately capped at four per day. Routine praise earns no effect. Memories can persist after a scoring cap is reached. There is no model action that verifies fulfillment/betrayal or converts a claimed outcome into canon.
 
-Server context previews the beverage name/quality, payment, card and relationship effect. Completion calls the same private serving helper used by standalone pours. Bottle/card uniqueness comes from the existing serving ledger. The reply, serving receipt, payment, bottle/card consumption, relationship, accepted intention, sequence and memories commit together. A failed, cancelled or stale turn consumes nothing.
+Server context supplies the selected intent separately from a food/drink preview. The preview contains item type, name, quality, payment and relationship effect. Completion calls the same private hospitality helper used by standalone service. Item uniqueness comes from `hospitality_events`; intent uniqueness comes from `intent_card_plays`. The reply, intent play, hospitality receipt, payment, item consumption, relationship, accepted intention, sequence and memories commit together. A failed, cancelled or stale turn consumes nothing.
 
-Quality-specific prices and card multipliers/bonuses are preserved. Subsequent serves change trust and overnight hospitality, while legacy chapter progress remains historical. The result's `relationshipChange` already includes hospitality and dialogue effects; consumers must not add the serving delta again.
+Quality-specific prices are preserved. Historical Pour Ale rewards remain labeled legacy entitlements, can be used only with standalone drink service, and retain their stored multipliers/bonuses. New crafts issue intent cards instead. Subsequent hospitality changes trust and overnight readiness, while legacy chapter progress remains historical. The result's `relationshipChange` already includes hospitality and dialogue effects; consumers must not add the hospitality delta again.
 
 ## Overnight rules and permanent consequences
 
@@ -92,7 +95,7 @@ Closing is allowed without crafting. An active brew or unexpired processing conv
 
 - Preparation adds one, capped at two. Wait moves to the next step.
 - Attempt chance is `clamp(10,90,50 + 10*(skill-difficulty) + 10*preparation + 5*hospitality)`.
-- Authored skills/difficulty are 0–4. Hospitality is the day's summed `(qualityIndex-3)` from served drinks, clamped −3..3. Cards affect gold/trust, not this modifier.
+- Authored skills/difficulty are 0–4. Hospitality is the day's summed `(qualityIndex-3)` from served food and drinks, clamped −3..3. Intent cards do not alter this modifier.
 - The draw is an integer 0–99; success means draw < chance. The draw, probability and outcome are saved once and replayed exactly.
 - Attempts finish the objective, whether successful or failed. There is no automatic retry of a terminal quest.
 - A failed authored combat attempt with zero preparation and draw >=95 may kill Lira or permanently remove Torvin, according to that version's warning/loss definition. The journal warns before the step. New generated goals have no character-loss authority.
@@ -116,7 +119,7 @@ References: [function calling](https://developers.openai.com/api/docs/guides/fun
 
 - Content: `supabase/content/npcs.json`, `scripts/npc-content.ts`.
 - Contracts/orchestration: `src/lib/game/dialogue.ts`, `src/lib/server/dialogue/`.
-- Persistence/rules: additive migration `202609070010_npc_dialogue.sql` after serving migration 003.
+- Persistence/rules: the base dialogue migrations plus additive `202609080013_intent_hospitality_v2.sql`, `202609080014_dialogue_interaction_v2.sql` and the idempotency correction in `202609080015_intent_hospitality_corrections.sql`.
 - Interface: `/bar`, `/api/dialogue`, `/api/dialogue/[turnId]`.
 - Deterministic verification: `supabase/tests/npc_dialogue.test.sql`, `tests/integration/dialogue-rpc.test.ts`, `tests/unit/dialogue.test.ts`, `tests/e2e/dialogue-journey.test.ts`.
 - Live evaluation and review rubric: [evaluation cases](evaluations/npc-dialogue.md).

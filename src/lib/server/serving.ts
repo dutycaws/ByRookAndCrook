@@ -14,14 +14,17 @@ export async function getBarSnapshot(client: SupabaseClient<Database>) {
   return parseBarSnapshot(data);
 }
 
-export async function serveBeverage(client: SupabaseClient<Database>, command: ServeCommand) {
+export async function serveHospitality(client: SupabaseClient<Database>, command: ServeCommand) {
   const start = performance.now();
-  const { data, error } = await client.rpc('serve_beverage', {
-    p_save_id: command.saveId, p_patron_key: command.patronKey, p_beverage_id: command.beverageId,
-    p_card_id: command.cardId ?? undefined, p_action_id: command.actionId, p_expected_revision: command.expectedRevision
+  const { data, error } = await client.rpc('serve_hospitality', {
+    p_save_id: command.saveId, p_patron_key: command.patronKey,
+    p_item_kind: command.itemKind, p_item_id: command.itemId,
+    p_legacy_card_id: command.legacyCardId ?? undefined,
+    p_action_id: command.actionId, p_expected_revision: command.expectedRevision
   });
-  console.info('serve_beverage', {
-    actionId: command.actionId, outcome: error?.code ?? 'committed', durationMs: Math.round(performance.now() - start)
+  console.info('serve_hospitality', {
+    actionId: command.actionId, itemKind: command.itemKind,
+    outcome: error?.code ?? 'committed', durationMs: Math.round(performance.now() - start)
   });
   if (error) throw failure(error);
   return parseServeReceipt(data);
