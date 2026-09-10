@@ -76,18 +76,18 @@ The versioned machine-readable form of this contract is [`static/assets/scenes/m
 
 ### Garden direction
 
-The Garden keeps the established pointy-top odd-row grid and saved coordinates. Its future illustrated scene uses a high three-quarter fixed camera over an enclosed kitchen garden. Stone-edged beds converge around the lower-middle selection area; hives, trellises, damp soil, labels, and dense planting provide depth without changing the playable plot geometry.
+The Garden keeps the established pointy-top odd-row grid and saved coordinates. Its illustrated scene uses a high three-quarter fixed camera over an enclosed kitchen garden. One reusable stone-edged soil bed, seven crop families at three growth stages, the apiary, and the semantic hit area all project from the same odd-row coordinates. Trellises, the well, paths, and dense edge planting provide depth without changing playable geometry.
 
 | Property | Direction |
 | --- | --- |
-| Primary focus | Selected plot near reference `(640, 470)`; neighboring bonus relationship remains visually readable |
-| Scene coordinates | Environment `0, 0, 1672, 941`; interactive board `315, 76, 1005, 679`; selection-safe region `430, 250, 760, 450`; apiary anchor `(1105, 235)` |
+| Primary focus | Selected plot within the centered tessellated board; neighboring bonus relationship remains readable through the live inspector |
+| Scene coordinates | Environment `0, 0, 1672, 941`; interactive and selection-safe board `538, 138, 596, 639`; default selected-plot anchor `(793, 236)`; apiary anchor `(963, 236)` |
 | Palette | Moss `#344224`, leaf `#718843`, damp earth `#2a1b0f`, stone `#5e5842`, brass `#aa7830` |
 | Lighting | Late-afternoon gold from upper left with a deep edge vignette |
 | Mobile framing | Preserve the selected plot and its actual adjacent plots; move details below rather than shrinking touch targets |
 | Excluded mechanics | Water, fertilizer, soil nutrients, tasks, helper chat, and card costs shown by the reference |
 
-Issue #7 supplies the camera and art direction only. Complete Garden environment and plot-state artwork belongs to issue #12.
+The selection ring, hover target, keyboard focus, bed art, crop art, and harvest effect share one plot origin. Crop removal starts only after the harvest form receives a confirmed success; unresolved requests leave the crop visible and retain the frozen action identifier for retry. Decorative bees and foliage have no game authority, stop with reduced motion, and suspend while the document is hidden.
 
 ### Brewery layer and motion contract
 

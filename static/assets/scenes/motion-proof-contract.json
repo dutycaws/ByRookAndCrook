@@ -5,17 +5,165 @@
     "height": 941
   },
   "responsiveCrops": {
-    "desktop": { "x": 220, "y": 0, "width": 1232, "height": 941 },
-    "tablet": { "x": 83, "y": 0, "width": 1506, "height": 941 },
-    "phone": { "x": 208, "y": 0, "width": 1256, "height": 941 }
+    "desktop": {
+      "x": 220,
+      "y": 0,
+      "width": 1232,
+      "height": 941
+    },
+    "tablet": {
+      "x": 83,
+      "y": 0,
+      "width": 1506,
+      "height": 941
+    },
+    "phone": {
+      "x": 208,
+      "y": 0,
+      "width": 1256,
+      "height": 941
+    }
   },
   "garden": {
-    "referenceOnly": true,
-    "environmentBounds": { "x": 0, "y": 0, "width": 1672, "height": 941 },
-    "interactiveBoardBounds": { "x": 315, "y": 76, "width": 1005, "height": 679 },
-    "selectionSafeBounds": { "x": 430, "y": 250, "width": 760, "height": 450 },
-    "selectedPlotAnchor": { "x": 640, "y": 470 },
-    "apiaryAnchor": { "x": 1105, "y": 235 }
+    "referenceOnly": false,
+    "environmentBounds": {
+      "x": 0,
+      "y": 0,
+      "width": 1672,
+      "height": 941
+    },
+    "interactiveBoardBounds": {
+      "x": 538,
+      "y": 138,
+      "width": 596,
+      "height": 639
+    },
+    "selectionSafeBounds": {
+      "x": 538,
+      "y": 138,
+      "width": 596,
+      "height": 639
+    },
+    "selectedPlotAnchor": {
+      "x": 793,
+      "y": 236
+    },
+    "apiaryAnchor": {
+      "x": 963,
+      "y": 236
+    },
+    "layers": [
+      {
+        "id": "environment",
+        "path": "/assets/scenes/garden-environment.webp",
+        "z": 0,
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1672,
+          "height": 941
+        }
+      },
+      {
+        "id": "atmosphere",
+        "path": "/assets/scenes/garden/garden-atmosphere.webp",
+        "z": 4,
+        "bounds": {
+          "x": 922,
+          "y": 180,
+          "width": 620,
+          "height": 330
+        },
+        "anchor": {
+          "x": 0,
+          "y": 0
+        },
+        "worldAnchor": {
+          "x": 922,
+          "y": 180
+        }
+      },
+      {
+        "id": "foreground",
+        "path": "/assets/scenes/garden/garden-foreground.webp",
+        "z": 5,
+        "bounds": {
+          "x": 0,
+          "y": 611,
+          "width": 960,
+          "height": 330
+        },
+        "anchor": {
+          "x": 0,
+          "y": 0
+        },
+        "worldAnchor": {
+          "x": 0,
+          "y": 611
+        }
+      }
+    ],
+    "plotAsset": {
+      "path": "/assets/scenes/garden/garden-plot-base.webp",
+      "width": 230,
+      "height": 260,
+      "anchor": {
+        "x": 115,
+        "y": 130
+      }
+    },
+    "beehiveAsset": {
+      "path": "/assets/scenes/garden/garden-beehive.webp",
+      "width": 360,
+      "height": 300,
+      "anchor": {
+        "x": 180,
+        "y": 260
+      }
+    },
+    "cropStages": {
+      "hops": [
+        "/assets/scenes/garden/garden-crop-hops-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-hops-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-hops-stage-3.webp"
+      ],
+      "fennel": [
+        "/assets/scenes/garden/garden-crop-fennel-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-fennel-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-fennel-stage-3.webp"
+      ],
+      "pepper": [
+        "/assets/scenes/garden/garden-crop-pepper-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-pepper-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-pepper-stage-3.webp"
+      ],
+      "chamomile": [
+        "/assets/scenes/garden/garden-crop-chamomile-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-chamomile-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-chamomile-stage-3.webp"
+      ],
+      "tomatoes": [
+        "/assets/scenes/garden/garden-crop-tomatoes-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-tomatoes-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-tomatoes-stage-3.webp"
+      ],
+      "lavender": [
+        "/assets/scenes/garden/garden-crop-lavender-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-lavender-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-lavender-stage-3.webp"
+      ],
+      "sage": [
+        "/assets/scenes/garden/garden-crop-sage-stage-1.webp",
+        "/assets/scenes/garden/garden-crop-sage-stage-2.webp",
+        "/assets/scenes/garden/garden-crop-sage-stage-3.webp"
+      ]
+    },
+    "motion": {
+      "harvestDurationMs": 620,
+      "decorativeSpriteCount": 12,
+      "hiddenTab": "suspend",
+      "reducedMotion": "static"
+    }
   },
   "brewery": {
     "layers": [
@@ -23,72 +171,167 @@
         "id": "environment",
         "path": "/assets/scenes/brewery-environment.webp",
         "z": 0,
-        "bounds": { "x": 0, "y": 0, "width": 1672, "height": 941 }
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1672,
+          "height": 941
+        }
       },
       {
         "id": "fire",
         "path": "/assets/scenes/brewery/brewery-fire.webp",
         "z": 1,
-        "bounds": { "x": 450, "y": 560, "width": 780, "height": 325 },
-        "anchor": { "x": 390, "y": 325 },
-        "worldAnchor": { "x": 840, "y": 885 }
+        "bounds": {
+          "x": 450,
+          "y": 560,
+          "width": 780,
+          "height": 325
+        },
+        "anchor": {
+          "x": 390,
+          "y": 325
+        },
+        "worldAnchor": {
+          "x": 840,
+          "y": 885
+        }
       },
       {
         "id": "wort",
         "path": "/assets/scenes/brewery/brewery-wort-surface.webp",
         "maskPath": "/assets/scenes/brewery/brewery-wort-mask.webp",
         "z": 2,
-        "bounds": { "x": 445, "y": 345, "width": 782, "height": 235 },
-        "anchor": { "x": 391, "y": 118 },
-        "worldAnchor": { "x": 836, "y": 463 }
+        "bounds": {
+          "x": 445,
+          "y": 345,
+          "width": 782,
+          "height": 235
+        },
+        "anchor": {
+          "x": 391,
+          "y": 118
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 463
+        }
       },
       {
         "id": "paddle-immersion-shadow",
         "path": "/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp",
         "z": 2,
-        "bounds": { "x": 706, "y": 437, "width": 260, "height": 100 },
-        "anchor": { "x": 130, "y": 50 },
-        "worldAnchor": { "x": 836, "y": 487 }
+        "bounds": {
+          "x": 706,
+          "y": 437,
+          "width": 260,
+          "height": 100
+        },
+        "anchor": {
+          "x": 130,
+          "y": 50
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 487
+        }
       },
       {
         "id": "paddle",
         "path": "/assets/scenes/brewery/brewery-paddle.webp",
         "z": 3,
-        "bounds": { "x": 744, "y": -20, "width": 184, "height": 570 },
-        "anchor": { "x": 92, "y": 520 },
-        "worldAnchor": { "x": 836, "y": 500 }
+        "bounds": {
+          "x": 744,
+          "y": -20,
+          "width": 184,
+          "height": 570
+        },
+        "anchor": {
+          "x": 92,
+          "y": 520
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 500
+        }
       },
       {
         "id": "foreground-rim",
         "path": "/assets/scenes/brewery/brewery-cauldron-foreground-rim.webp",
         "z": 4,
-        "bounds": { "x": 400, "y": 450, "width": 875, "height": 355 },
-        "anchor": { "x": 0, "y": 0 },
-        "worldAnchor": { "x": 400, "y": 450 }
+        "bounds": {
+          "x": 400,
+          "y": 450,
+          "width": 875,
+          "height": 355
+        },
+        "anchor": {
+          "x": 0,
+          "y": 0
+        },
+        "worldAnchor": {
+          "x": 400,
+          "y": 450
+        }
       },
       {
         "id": "steam",
         "path": "/assets/scenes/brewery/brewery-steam.webp",
         "z": 5,
-        "bounds": { "x": 496, "y": 40, "width": 680, "height": 453 },
-        "anchor": { "x": 340, "y": 423 },
-        "worldAnchor": { "x": 836, "y": 463 }
+        "bounds": {
+          "x": 496,
+          "y": 40,
+          "width": 680,
+          "height": 453
+        },
+        "anchor": {
+          "x": 340,
+          "y": 423
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 463
+        }
       }
     ],
     "motion": {
-      "pathCenter": { "x": 836, "y": 500 },
-      "pathRadius": { "x": 205, "y": 45 },
-      "paddleRotationDegrees": { "min": -12, "max": 12 },
+      "pathCenter": {
+        "x": 836,
+        "y": 500
+      },
+      "pathRadius": {
+        "x": 205,
+        "y": 45
+      },
+      "paddleRotationDegrees": {
+        "min": -12,
+        "max": 12
+      },
       "releaseDecayMs": 400,
       "liquidTranslationPx": 3,
       "liquidHighlightOpacityDelta": 0.08
     },
     "fallbacks": {
-      "idle": { "paddle": "rest", "wort": "still" },
-      "active": { "paddle": "input-position", "wort": "masked-swirl" },
-      "released": { "paddle": "decay-to-rest", "wort": "decay-to-still" },
-      "complete": { "paddle": "rest", "wort": "still" },
-      "reducedMotion": { "paddle": "current-static-pose", "wort": "still" }
+      "idle": {
+        "paddle": "rest",
+        "wort": "still"
+      },
+      "active": {
+        "paddle": "input-position",
+        "wort": "masked-swirl"
+      },
+      "released": {
+        "paddle": "decay-to-rest",
+        "wort": "decay-to-still"
+      },
+      "complete": {
+        "paddle": "rest",
+        "wort": "still"
+      },
+      "reducedMotion": {
+        "paddle": "current-static-pose",
+        "wort": "still"
+      }
     }
   },
   "bakery": {
@@ -97,128 +340,300 @@
         "id": "environment",
         "path": "/assets/scenes/bakery-environment.webp",
         "z": 0,
-        "bounds": { "x": 0, "y": 0, "width": 1672, "height": 941 }
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1672,
+          "height": 941
+        }
       },
       {
         "id": "preparation-surface",
         "path": "/assets/scenes/bakery/bakery-preparation-surface.webp",
         "z": 1,
-        "bounds": { "x": 0, "y": 550, "width": 1672, "height": 391 },
-        "anchor": { "x": 836, "y": 180 },
-        "worldAnchor": { "x": 836, "y": 730 }
+        "bounds": {
+          "x": 0,
+          "y": 550,
+          "width": 1672,
+          "height": 391
+        },
+        "anchor": {
+          "x": 836,
+          "y": 180
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 730
+        }
       },
       {
         "id": "dough-shadow",
         "path": "/assets/scenes/bakery/bakery-dough-shadow.webp",
         "z": 2,
-        "bounds": { "x": 596, "y": 605, "width": 480, "height": 250 },
-        "anchor": { "x": 240, "y": 125 },
-        "worldAnchor": { "x": 836, "y": 730 }
+        "bounds": {
+          "x": 596,
+          "y": 605,
+          "width": 480,
+          "height": 250
+        },
+        "anchor": {
+          "x": 240,
+          "y": 125
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 730
+        }
       },
       {
         "id": "dough-rest",
         "path": "/assets/scenes/bakery/bakery-dough-rest.webp",
         "z": 3,
-        "bounds": { "x": 596, "y": 535, "width": 480, "height": 250 },
-        "anchor": { "x": 240, "y": 205 },
-        "worldAnchor": { "x": 836, "y": 740 }
+        "bounds": {
+          "x": 596,
+          "y": 535,
+          "width": 480,
+          "height": 250
+        },
+        "anchor": {
+          "x": 240,
+          "y": 205
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 740
+        }
       },
       {
         "id": "dough-fold-active",
         "path": "/assets/scenes/bakery/bakery-dough-fold-active.webp",
         "z": 3,
-        "bounds": { "x": 596, "y": 535, "width": 480, "height": 250 },
-        "anchor": { "x": 240, "y": 205 },
-        "worldAnchor": { "x": 836, "y": 740 }
+        "bounds": {
+          "x": 596,
+          "y": 535,
+          "width": 480,
+          "height": 250
+        },
+        "anchor": {
+          "x": 240,
+          "y": 205
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 740
+        }
       },
       {
         "id": "dough-fold-confirmed",
         "path": "/assets/scenes/bakery/bakery-dough-fold-confirmed.webp",
         "z": 3,
-        "bounds": { "x": 596, "y": 535, "width": 480, "height": 250 },
-        "anchor": { "x": 240, "y": 205 },
-        "worldAnchor": { "x": 836, "y": 740 }
+        "bounds": {
+          "x": 596,
+          "y": 535,
+          "width": 480,
+          "height": 250
+        },
+        "anchor": {
+          "x": 240,
+          "y": 205
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 740
+        }
       },
       {
         "id": "score-groove-01",
         "path": "/assets/scenes/bakery/bakery-score-groove-01.webp",
         "z": 4,
-        "bounds": { "x": 596, "y": 535, "width": 480, "height": 250 },
-        "anchor": { "x": 240, "y": 205 },
-        "worldAnchor": { "x": 836, "y": 740 }
+        "bounds": {
+          "x": 596,
+          "y": 535,
+          "width": 480,
+          "height": 250
+        },
+        "anchor": {
+          "x": 240,
+          "y": 205
+        },
+        "worldAnchor": {
+          "x": 836,
+          "y": 740
+        }
       },
       {
         "id": "scoring-tool",
         "path": "/assets/scenes/bakery/bakery-scoring-tool.webp",
         "z": 5,
-        "bounds": { "x": 930, "y": 530, "width": 310, "height": 70 },
-        "anchor": { "x": 8, "y": 35 },
-        "worldAnchor": { "x": 938, "y": 565 }
+        "bounds": {
+          "x": 930,
+          "y": 530,
+          "width": 310,
+          "height": 70
+        },
+        "anchor": {
+          "x": 8,
+          "y": 35
+        },
+        "worldAnchor": {
+          "x": 938,
+          "y": 565
+        }
       },
       {
         "id": "oven-embers",
         "path": "/assets/scenes/bakery/bakery-oven-embers.webp",
         "z": 6,
-        "bounds": { "x": 520, "y": 290, "width": 660, "height": 275 },
-        "anchor": { "x": 330, "y": 275 },
-        "worldAnchor": { "x": 850, "y": 565 }
+        "bounds": {
+          "x": 520,
+          "y": 290,
+          "width": 660,
+          "height": 275
+        },
+        "anchor": {
+          "x": 330,
+          "y": 275
+        },
+        "worldAnchor": {
+          "x": 850,
+          "y": 565
+        }
       },
       {
         "id": "oven-steam",
         "path": "/assets/scenes/bakery/bakery-oven-steam.webp",
         "z": 7,
-        "bounds": { "x": 638, "y": 113, "width": 485, "height": 323 },
-        "anchor": { "x": 242, "y": 323 },
-        "worldAnchor": { "x": 880, "y": 436 }
+        "bounds": {
+          "x": 638,
+          "y": 113,
+          "width": 485,
+          "height": 323
+        },
+        "anchor": {
+          "x": 242,
+          "y": 323
+        },
+        "worldAnchor": {
+          "x": 880,
+          "y": 436
+        }
       },
       {
         "id": "oven-peel",
         "path": "/assets/scenes/bakery/bakery-oven-peel.webp",
         "z": 8,
-        "bounds": { "x": 502, "y": 300, "width": 920, "height": 600 },
-        "anchor": { "x": 310, "y": 260 },
-        "worldAnchor": { "x": 812, "y": 560 }
+        "bounds": {
+          "x": 502,
+          "y": 300,
+          "width": 920,
+          "height": 600
+        },
+        "anchor": {
+          "x": 310,
+          "y": 260
+        },
+        "worldAnchor": {
+          "x": 812,
+          "y": 560
+        }
       },
       {
         "id": "loaf-pale",
         "path": "/assets/scenes/bakery/bakery-loaf-pale.webp",
         "z": 8,
-        "bounds": { "x": 577, "y": 263, "width": 520, "height": 415 },
-        "anchor": { "x": 260, "y": 390 },
-        "worldAnchor": { "x": 837, "y": 653 }
+        "bounds": {
+          "x": 577,
+          "y": 263,
+          "width": 520,
+          "height": 415
+        },
+        "anchor": {
+          "x": 260,
+          "y": 390
+        },
+        "worldAnchor": {
+          "x": 837,
+          "y": 653
+        }
       },
       {
         "id": "loaf-ideal",
         "path": "/assets/scenes/bakery/bakery-loaf-ideal.webp",
         "z": 8,
-        "bounds": { "x": 577, "y": 263, "width": 520, "height": 415 },
-        "anchor": { "x": 260, "y": 390 },
-        "worldAnchor": { "x": 837, "y": 653 }
+        "bounds": {
+          "x": 577,
+          "y": 263,
+          "width": 520,
+          "height": 415
+        },
+        "anchor": {
+          "x": 260,
+          "y": 390
+        },
+        "worldAnchor": {
+          "x": 837,
+          "y": 653
+        }
       },
       {
         "id": "loaf-overbaked",
         "path": "/assets/scenes/bakery/bakery-loaf-overbaked.webp",
         "z": 8,
-        "bounds": { "x": 577, "y": 263, "width": 520, "height": 415 },
-        "anchor": { "x": 260, "y": 390 },
-        "worldAnchor": { "x": 837, "y": 653 }
+        "bounds": {
+          "x": 577,
+          "y": 263,
+          "width": 520,
+          "height": 415
+        },
+        "anchor": {
+          "x": 260,
+          "y": 390
+        },
+        "worldAnchor": {
+          "x": 837,
+          "y": 653
+        }
       },
       {
         "id": "oven-foreground",
         "path": "/assets/scenes/bakery/bakery-oven-foreground.webp",
         "z": 9,
-        "bounds": { "x": 386, "y": 430, "width": 900, "height": 300 },
-        "anchor": { "x": 0, "y": 0 },
-        "worldAnchor": { "x": 386, "y": 430 }
+        "bounds": {
+          "x": 386,
+          "y": 430,
+          "width": 900,
+          "height": 300
+        },
+        "anchor": {
+          "x": 0,
+          "y": 0
+        },
+        "worldAnchor": {
+          "x": 386,
+          "y": 430
+        }
       }
     ],
     "motion": {
-      "foldTarget": { "x": 606, "y": 535, "width": 460, "height": 225 },
+      "foldTarget": {
+        "x": 606,
+        "y": 535,
+        "width": 460,
+        "height": 225
+      },
       "foldSettleMs": 260,
       "scoreStrokeMs": 260,
-      "scoreToolTipBounds": { "x": 606, "y": 535, "width": 460, "height": 225 },
+      "scoreToolTipBounds": {
+        "x": 606,
+        "y": 535,
+        "width": 460,
+        "height": 225
+      },
       "doughScaleDelta": 0.08,
-      "doughRotationDegrees": { "min": -3, "max": 3 },
+      "doughRotationDegrees": {
+        "min": -3,
+        "max": 3
+      },
       "ovenInsertionMs": 1150,
       "ovenExtractionMs": 720,
       "loafCrossfadeMs": 1100

@@ -53,12 +53,41 @@ test('the shared crafting layout preserves scene-first semantics at every target
         } else {
           await expect(layout.locator('.desktop-status')).toBeVisible();
         }
+
+        if (route === 'garden') {
+          const geometry = await layout.locator('.plot-node').evaluateAll((nodes) => nodes.map((node) => {
+            const plot = node.getBoundingClientRect();
+            const hit = node.querySelector('.hex-cell')!.getBoundingClientRect();
+            const art = node.querySelector('.plot-base')!.getBoundingClientRect();
+            const scene = node.closest('[data-area-scene]')!.getBoundingClientRect();
+            return {
+              hitWidth: hit.width,
+              hitHeight: hit.height,
+              centerDelta: Math.hypot((hit.left + hit.width / 2) - (art.left + art.width / 2), (hit.top + hit.height / 2) - (art.top + art.height / 2)),
+              withinScene: hit.left >= scene.left - 1 && hit.right <= scene.right + 1 && hit.top >= scene.top - 1 && hit.bottom <= scene.bottom + 1,
+              sameOrigin: Math.abs(plot.left - hit.left) <= 1 && Math.abs(plot.top - hit.top) <= 1
+            };
+          }));
+          expect(geometry).toHaveLength(12);
+          for (const plot of geometry) {
+            expect(plot.hitWidth).toBeGreaterThanOrEqual(44);
+            expect(plot.hitHeight).toBeGreaterThanOrEqual(44);
+            expect(plot.centerDelta).toBeLessThanOrEqual(1);
+            expect(plot.withinScene).toBe(true);
+            expect(plot.sameOrigin).toBe(true);
+          }
+        }
       }
     }
 
     await page.goto('/garden');
     await page.setViewportSize({ width: 390, height: 844 });
     const selectedPlot = page.getByRole('button', { name: /^c1,/i });
+    const anotherPlot = page.getByRole('button', { name: /^c4,/i });
+    const beforeSelection = await anotherPlot.boundingBox();
+    await anotherPlot.click();
+    await expect(anotherPlot).toHaveAttribute('aria-pressed', 'true');
+    expect(await anotherPlot.boundingBox()).toEqual(beforeSelection);
     await selectedPlot.focus();
     await expect(selectedPlot).toBeFocused();
     await page.keyboard.press('Enter');
@@ -68,6 +97,7 @@ test('the shared crafting layout preserves scene-first semantics at every target
     expect(target!.height).toBeGreaterThanOrEqual(44);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(page.locator('[data-area-scene="garden"]')).toHaveAttribute('data-reduced-motion', 'true');
+    await expect(page.locator('[data-scene-layer="garden bees and leaves"]')).toHaveCSS('animation-name', 'none');
     expect(errors).toEqual([]);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

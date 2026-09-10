@@ -6,7 +6,7 @@ Issue [#9](https://github.com/dutycaws/ByRookAndCrook/issues/9) extends the Bar�
 
 The route controller continues to own its `GameSnapshot`, named form actions, save revision, action IDs, retry state, clocks, and outcomes. Each route derives a small render-only projection:
 
-- `GardenVisualState` exposes plot identity, odd-r coordinates, crop kind and stage, selection, readiness, and presentation status.
+- `GardenVisualState` exposes plot identity, odd-r coordinates, crop kind, supported plant key/name and stage, selection, readiness, and presentation status.
 - `BrewVisualState` exposes phase, the minimum session identity needed for display, bounded agitation, pending state, and an error message.
 - `BakeVisualState` exposes phase, fold/score counts, and the projection of the authoritative oven start time into an elapsed display.
 
@@ -46,4 +46,4 @@ An essential `SceneLayer` that fails to load is replaced by a labeled, actionabl
 
 `tests/unit/scene-presentation.test.ts` verifies phase derivation, geometry preservation, bounds, and omission of authoritative state. `tests/e2e/crafting-layout.test.ts` checks all three routes at the four target viewports, semantic rails and actions, layout order, overflow, keyboard selection, touch-target size, and reduced motion. `tests/e2e/motion-proof.test.ts` checks the shared scene plane under active Brewery and Bakery motion and deliberately aborts an essential scene image to verify the fallback.
 
-The complete Garden, Brewery, and Bakery production illustrations remain owned by issues #10–#12. Those tickets should compose `SceneLayer` and `SceneActionSurface` within this framework and continue passing state through the narrow view contracts.
+Issues #10–#12 promote all three production illustrations through this boundary. The routes continue to pass narrow view contracts and callbacks while their existing controllers retain command and result authority.

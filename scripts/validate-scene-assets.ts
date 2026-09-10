@@ -32,6 +32,11 @@ type SceneContract = {
     selectionSafeBounds: { x: number; y: number; width: number; height: number };
     selectedPlotAnchor: { x: number; y: number };
     apiaryAnchor: { x: number; y: number };
+    layers: SceneLayer[];
+    plotAsset: { path: string; width: number; height: number; anchor: { x: number; y: number } };
+    beehiveAsset: { path: string; width: number; height: number; anchor: { x: number; y: number } };
+    cropStages: Record<string, string[]>;
+    motion: { harvestDurationMs: number; decorativeSpriteCount: number; hiddenTab: string; reducedMotion: string };
   };
   brewery: { layers: SceneLayer[] };
   bakery: { layers: SceneLayer[] };
@@ -65,6 +70,32 @@ const references: ExpectedAsset[] = [
 ];
 
 const runtimeAssets: ExpectedAsset[] = [
+  { path: 'static/assets/scenes/garden-environment.webp', width: 1672, height: 941, alpha: false, sha256: '17444dbbcde2554e94d1ecea75551c783eabd5eeac6c2b07fd4156a7ba513e2d', maxBytes: 500_000 },
+  { path: 'static/assets/scenes/garden/garden-atmosphere.webp', width: 620, height: 330, alpha: true, sha256: '2a1c9d88886ae253a2321a49adcdb3148ec3b4609305f8035b0860f8c8d25a0f', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-beehive.webp', width: 360, height: 300, alpha: true, sha256: '11b5fd9011d5ea874ae2d1dea21fa47c6286478af0f910b8e98d380dc6e8c83e', maxBytes: 90_000 },
+  { path: 'static/assets/scenes/garden/garden-foreground.webp', width: 960, height: 330, alpha: true, sha256: 'fe590cf6e63f965b54345502f4e48aa914916b8e38c234886d030cf453dc1a73', maxBytes: 170_000 },
+  { path: 'static/assets/scenes/garden/garden-plot-base.webp', width: 230, height: 260, alpha: true, sha256: 'b76d3d0226e9fbabe6a534aac9443044c1331629fbed5ca1babf7fe89fb868b3', maxBytes: 60_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-chamomile-stage-1.webp', width: 240, height: 320, alpha: true, sha256: 'db57c904a15a423641078739dd72a1d6ee26398bbf5aa54e3fcbb21db6542f76', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-chamomile-stage-2.webp', width: 240, height: 320, alpha: true, sha256: '034c22c0fd19cbb2459e634a6f3fe96937a9c06d25b22a5650bfb102b00ed891', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-chamomile-stage-3.webp', width: 240, height: 320, alpha: true, sha256: '944aa8f600cfd612674dc6bc1c3c74bb920f24a52514a339c7beb023667f4e04', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-fennel-stage-1.webp', width: 240, height: 320, alpha: true, sha256: '74bed97125e2c99efff968e647ed2ce0480fee1fd399ec66bf84a9545e1f8c70', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-fennel-stage-2.webp', width: 240, height: 320, alpha: true, sha256: 'ed636c34fc388105c97da3c2f3f7a9cd8b7f32a30e57ac263d8ac06ef28891ff', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-fennel-stage-3.webp', width: 240, height: 320, alpha: true, sha256: 'ccfc18a95fedab4c59b028b2a2e631a85a80edf8d37e39fb95d40dad3997bd33', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-hops-stage-1.webp', width: 240, height: 320, alpha: true, sha256: 'b0efbbe5a0a45b46c54614d60f166381fd831be870cbee52c20dcaebf18b4ac1', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-hops-stage-2.webp', width: 240, height: 320, alpha: true, sha256: 'd9c60b462674169168be01f522a80aee143ddb95857259b115ddc18cea30a205', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-hops-stage-3.webp', width: 240, height: 320, alpha: true, sha256: 'd20308fe62e42e1e09c9ed172e6290748655c8fed8bcbac8171ee2ae95d901ed', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-lavender-stage-1.webp', width: 240, height: 320, alpha: true, sha256: '6d0a937377ea814895782196b630db47842d4cf8b8f43563357cfc68d094fe57', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-lavender-stage-2.webp', width: 240, height: 320, alpha: true, sha256: '343b75232ab7d3cc610be896dd167d29d6d271879c7a639dbbd768a1a850b332', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-lavender-stage-3.webp', width: 240, height: 320, alpha: true, sha256: '88a07810143218d17de962f16fc96d7fdbd4afd9c918cb3fa8242218c4e07207', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-pepper-stage-1.webp', width: 240, height: 320, alpha: true, sha256: '0985d4b3ede89cd57bcae1038c488a89ded7841b0bc0d94eef7574091a00c47e', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-pepper-stage-2.webp', width: 240, height: 320, alpha: true, sha256: 'de0ba90ba41d53738972c53155779c8a26664b18f551c4070f43330b5607441c', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-pepper-stage-3.webp', width: 240, height: 320, alpha: true, sha256: '0533aaa937274dbeceaf1a23b801a6207a9ed1836258ea666e834a9ac52e1a0c', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-sage-stage-1.webp', width: 240, height: 320, alpha: true, sha256: '529cb8f37dc82d592c3de78b5e0faf9bb45ef62d3d992b7f557c15a9c8521adc', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-sage-stage-2.webp', width: 240, height: 320, alpha: true, sha256: '4a18f77a2800b952589290d456ab82d26bcb73a45779294a3dda547c21b0107e', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-sage-stage-3.webp', width: 240, height: 320, alpha: true, sha256: '4d2e8c1b465b1e25b1edcdf5c2e06ae77bffd59920037ca91263f905ada27b80', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-tomatoes-stage-1.webp', width: 240, height: 320, alpha: true, sha256: '74f1ef8f821f482359b1808f435a62dc7d190bf7356a77bfc9c1b742e5d29922', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-tomatoes-stage-2.webp', width: 240, height: 320, alpha: true, sha256: '9c9479f13d8f244ddfc403e38bfc09ee649af12838583eed3a4d705b93b3cbbe', maxBytes: 80_000 },
+  { path: 'static/assets/scenes/garden/garden-crop-tomatoes-stage-3.webp', width: 240, height: 320, alpha: true, sha256: 'e131f744dd4186e2e801cb172c6cb345e7c6a6010305386531184c2aa93470c3', maxBytes: 80_000 },
   { path: 'static/assets/scenes/brewery-environment.webp', width: 1672, height: 941, alpha: false, sha256: '206e9ccab60d0c774b8cf940aaa464da9d62ab2e5fd05f520b69c69bf325c504', maxBytes: 350_000 },
   { path: 'static/assets/scenes/brewery/brewery-cauldron-foreground-rim.webp', width: 875, height: 355, alpha: true, sha256: '9bf51e4caa5a4f899f00835c97b8c2b8fd6e163431d79776f88f58d0ad7a5e07', maxBytes: 150_000 },
   { path: 'static/assets/scenes/brewery/brewery-fire.webp', width: 780, height: 325, alpha: true, sha256: 'ab163702a2b29deadd255e4dc8bc6d2c2d8a6a6d7adfc3055641a3221e29c6f1', maxBytes: 100_000 },
@@ -173,7 +204,7 @@ async function assertContract() {
       throw new Error(`${path}: ${name} crop leaves the design canvas`);
     }
   }
-  if (!contract.garden.referenceOnly) throw new Error(`${path}: issue #7 must not claim production Garden art`);
+  if (contract.garden.referenceOnly) throw new Error(`${path}: production Garden art must not be reference-only`);
   for (const [name, bounds] of Object.entries({
     environment: contract.garden.environmentBounds,
     interactiveBoard: contract.garden.interactiveBoardBounds,
@@ -190,7 +221,7 @@ async function assertContract() {
     asset
   ]));
   const referenced = new Set<string>();
-  for (const [area, layers] of [['brewery', contract.brewery.layers], ['bakery', contract.bakery.layers]] as const) {
+  for (const [area, layers] of [['garden', contract.garden.layers], ['brewery', contract.brewery.layers], ['bakery', contract.bakery.layers]] as const) {
     let previousZ = -Infinity;
     for (const layer of layers) {
       if (layer.z < previousZ) throw new Error(`${path}: ${area} layers are not in z-order at ${layer.id}`);
@@ -220,6 +251,33 @@ async function assertContract() {
         referenced.add(layer.maskPath);
       }
     }
+  }
+
+  for (const [name, asset] of Object.entries({ plot: contract.garden.plotAsset, beehive: contract.garden.beehiveAsset })) {
+    const expected = expectedByRuntimePath.get(asset.path);
+    if (!expected) throw new Error(`${path}: Garden ${name} references an unreviewed asset ${asset.path}`);
+    if (expected.width !== asset.width || expected.height !== asset.height) {
+      throw new Error(`${path}: Garden ${name} dimensions differ from the reviewed asset`);
+    }
+    if (asset.anchor.x < 0 || asset.anchor.y < 0 || asset.anchor.x > asset.width || asset.anchor.y > asset.height) {
+      throw new Error(`${path}: Garden ${name} anchor leaves its asset bounds`);
+    }
+    referenced.add(asset.path);
+  }
+  const cropKeys = ['hops', 'fennel', 'pepper', 'chamomile', 'tomatoes', 'lavender', 'sage'];
+  for (const cropKey of cropKeys) {
+    const stages = contract.garden.cropStages[cropKey];
+    if (!stages || stages.length !== 3) throw new Error(`${path}: Garden ${cropKey} must define three stages`);
+    for (const stagePath of stages) {
+      const expected = expectedByRuntimePath.get(stagePath);
+      if (!expected || expected.width !== 240 || expected.height !== 320 || !expected.alpha) {
+        throw new Error(`${path}: Garden ${cropKey} stage references an invalid asset ${stagePath}`);
+      }
+      referenced.add(stagePath);
+    }
+  }
+  if (contract.garden.motion.decorativeSpriteCount > 40 || contract.garden.motion.harvestDurationMs > 1_000) {
+    throw new Error(`${path}: Garden motion exceeds its bounded presentation budget`);
   }
 
   const omitted = [...expectedByRuntimePath.keys()].filter((assetPath) => !referenced.has(assetPath));

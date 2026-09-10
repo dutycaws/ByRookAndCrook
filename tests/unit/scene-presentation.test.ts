@@ -42,7 +42,10 @@ describe('scene presentation contracts', () => {
   it('projects garden geometry and selection without save or reward state', () => {
     const visual = deriveGardenVisualState(snapshot(), 'cell-1', false, null);
     expect(visual.plots).toEqual([
-      { id: 'cell-1', layoutKey: 'c1', col: 2, row: 3, kind: 'plant', stage: 3, selected: true, harvestable: true }
+      {
+        id: 'cell-1', layoutKey: 'c1', col: 2, row: 3, kind: 'plant',
+        plantKey: 'fennel', plantName: 'Fennel', stage: 3, selected: true, harvestable: true
+      }
     ]);
     expect(visual.status).toBe('ready');
     expect(JSON.stringify(visual)).not.toContain('revision');

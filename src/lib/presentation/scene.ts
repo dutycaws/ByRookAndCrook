@@ -19,6 +19,8 @@ export interface GardenVisualPlot {
   col: number;
   row: number;
   kind: GardenCell['kind'];
+  plantKey: string | null;
+  plantName: string | null;
   stage: number | null;
   selected: boolean;
   harvestable: boolean;
@@ -94,6 +96,8 @@ export function deriveGardenVisualState(
       col: cell.col,
       row: cell.row,
       kind: cell.kind,
+      plantKey: cell.plantKey,
+      plantName: cell.plantName,
       stage: cell.growthStage,
       selected: cell.id === selectedCellId,
       harvestable: cell.harvestable

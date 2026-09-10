@@ -1,11 +1,11 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
-  import GardenGrid from '$lib/components/garden/GardenGrid.svelte';
+  import { onDestroy } from 'svelte';
   import CropDetails from '$lib/components/garden/CropDetails.svelte';
-  import AreaScene from '$lib/components/scene/AreaScene.svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import IllustratedActionButton from '$lib/components/scene/IllustratedActionButton.svelte';
+  import GardenScene from '$lib/components/scenes/GardenScene.svelte';
   import type { HarvestCommand } from '$lib/game/contracts';
   import { deriveGardenVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
@@ -14,6 +14,9 @@
   let selectedId = $state<string | null>(null);
   let pending = $state(false);
   let pendingCommand = $state<HarvestCommand | null>(null);
+  let pendingHarvestVisual = $state<{ cellId: string; plantKey: string; stage: number } | null>(null);
+  let harvestEffect = $state<{ token: number; cellId: string; plantKey: string; stage: number } | null>(null);
+  let harvestEffectTimer: ReturnType<typeof setTimeout> | null = null;
   let transportError = $state<string | null>(null);
 
   let selected = $derived(
@@ -41,6 +44,9 @@
         actionId: crypto.randomUUID(),
         expectedRevision: data.snapshot.save.revision
       };
+      pendingHarvestVisual = selected.kind === 'plant' && selected.plantKey && selected.growthStage
+        ? { cellId: selected.id, plantKey: selected.plantKey, stage: selected.growthStage }
+        : null;
     }
 
     formData.set('saveId', pendingCommand.saveId);
@@ -57,10 +63,22 @@
         return;
       }
 
-      if (result.type === 'success') pendingCommand = null;
+      if (result.type === 'success') {
+        if (pendingHarvestVisual) {
+          harvestEffect = { ...pendingHarvestVisual, token: Date.now() };
+          if (harvestEffectTimer) clearTimeout(harvestEffectTimer);
+          harvestEffectTimer = setTimeout(() => (harvestEffect = null), 1_000);
+        }
+        pendingCommand = null;
+        pendingHarvestVisual = null;
+      }
       await update({ reset: false, invalidateAll: true });
     };
   };
+
+  onDestroy(() => {
+    if (harvestEffectTimer) clearTimeout(harvestEffectTimer);
+  });
 </script>
 
 <svelte:head>
@@ -110,12 +128,7 @@
             </div>
             <span class="legend"><i></i> Ready</span>
           </div>
-          <AreaScene area="garden" label="Illustrated tavern garden with twelve selectable hex plots" class="garden-scene-frame">
-            <div class="garden-scene-backdrop" aria-hidden="true"></div>
-            <div class="garden-plane-grid">
-              <GardenGrid cells={data.snapshot!.cells} {selectedId} scale={1.85} onselect={(id) => (selectedId = id)} />
-            </div>
-          </AreaScene>
+          <GardenScene {visual} {harvestEffect} onselect={(id) => (selectedId = id)} />
         </section>
       {/snippet}
       {#snippet inspector()}
@@ -175,9 +188,5 @@
 </main>
 
 <style>
-  :global(.garden-scene-frame) { margin-top: 1rem; border: 1px solid #725426; box-shadow: inset 0 0 0 1px #120b04; }
-  .garden-scene-backdrop { position: absolute; inset: 0; background: radial-gradient(circle at 55% 45%, #71833c 0 16%, transparent 48%), linear-gradient(#8a7040 0 18%, #3d542a 44%, #182817); }
-  .garden-scene-backdrop::after { position: absolute; inset: 0; background: linear-gradient(115deg, #fff4b41a, transparent 38%), radial-gradient(ellipse at 50% 86%, #0a1609b8, transparent 72%); content: ''; }
-  .garden-plane-grid { position: absolute; inset: 130px 250px 80px; display: grid; place-items: center; border: 2px solid #8f6b2d80; background: radial-gradient(ellipse, #2d321bdf, #11170ad9 72%); box-shadow: inset 0 0 100px #0a0704, 0 24px 50px #0008; }
   @media (max-width: 620px) { .garden-panel { min-height: 0; padding: .85rem; } .panel-heading { padding-bottom: .75rem; } }
 </style>
