@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   STIR_DECAY_MS,
+  STIR_IDLE_MS,
   STIR_MAX_RPM,
+  STIR_REANCHOR_GAP_MS,
   advanceStirPhase,
   angularSpeedRpm,
   beginCircularStir,
@@ -56,7 +58,7 @@ describe('layered scene motion', () => {
     let update = sampleCircularStir(state, point(200, 0, 20), ellipse);
     expect(update.reanchored).toBe(true);
     state = update.state;
-    update = sampleCircularStir(state, point(0, 50, 250), ellipse);
+    update = sampleCircularStir(state, point(0, 50, 20 + STIR_REANCHOR_GAP_MS + 1), ellipse);
     expect(update.reanchored).toBe(true);
     expect(update.state.speed).toBe(0);
   });
@@ -93,8 +95,9 @@ describe('layered scene motion', () => {
     expect(tickCircularStir(released, 60 + STIR_DECAY_MS).speed).toBe(0);
 
     state = { ...state, lastMovementAt: 50 };
-    expect(tickCircularStir(state, 170).decayStartedAt).toBe(170);
-    expect(tickCircularStir(tickCircularStir(state, 170), 570).speed).toBe(0);
+    const idleStartedAt = 50 + STIR_IDLE_MS;
+    expect(tickCircularStir(state, idleStartedAt).decayStartedAt).toBe(idleStartedAt);
+    expect(tickCircularStir(tickCircularStir(state, idleStartedAt), idleStartedAt + STIR_DECAY_MS).speed).toBe(0);
   });
 
   it('advances visual phase from the same speed while bounding fold previews', () => {

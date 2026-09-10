@@ -2,9 +2,9 @@ export const SCENE_WIDTH = 1672;
 export const SCENE_HEIGHT = 941;
 
 export const STIR_DEAD_ZONE = 0.25;
-export const STIR_REANCHOR_GAP_MS = 200;
+export const STIR_REANCHOR_GAP_MS = 750;
 export const STIR_SMOOTHING_WINDOW_MS = 500;
-export const STIR_IDLE_MS = 120;
+export const STIR_IDLE_MS = 500;
 export const STIR_DECAY_MS = 400;
 export const STIR_MAX_RPM = 40;
 
