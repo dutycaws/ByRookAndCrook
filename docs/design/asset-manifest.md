@@ -115,6 +115,8 @@ The 21 crop assets are 240 × 320 alpha WebPs cut from the generated three-stage
 
 Run `npm run art:assets:check` to verify the three reference checksums, runtime dimensions, alpha requirements, derivative checksums, file-size ceilings, and absence of PNG source masters under `static/assets`.
 
+The issue-#13 [assembled-scene acceptance record](../quality/scene-acceptance.md) uses these exact reference files and runtime derivatives. Its twelve annotated viewport screenshots, three WebM interaction clips, and structured benchmark result live under `docs/screenshots/final-review/`. They are review evidence only and never ship from `static/assets` or participate in game state.
+
 ## Export conventions
 
 - Use the common `1672 × 941` design space and preserve the exact layer bounds in the JSON contract.

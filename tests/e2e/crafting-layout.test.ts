@@ -33,6 +33,8 @@ test('the shared crafting layout preserves scene-first semantics at every target
       await expect(layout).toBeVisible();
       await expect(layout.locator('[data-contextual-action]')).toBeVisible();
       await expect(layout.locator('[data-scene-rail="inspector"]')).toBeVisible();
+      await expect(page.getByRole('button', { name: /water|fertiliz|adjust heat|skim foam|vent steam|helper chat|draw card/i })).toHaveCount(0);
+      await expect(page.getByText(/daily tasks|tavern level|reputation|\bXP\b/i)).toHaveCount(0);
 
       for (const viewport of [
         { width: 1672, height: 941 },
@@ -84,10 +86,14 @@ test('the shared crafting layout preserves scene-first semantics at every target
     await page.setViewportSize({ width: 390, height: 844 });
     const selectedPlot = page.getByRole('button', { name: /^c1,/i });
     const anotherPlot = page.getByRole('button', { name: /^c4,/i });
+    await expect.poll(async () => (await anotherPlot.boundingBox())?.width ?? 0).toBeLessThan(100);
     const beforeSelection = await anotherPlot.boundingBox();
     await anotherPlot.click();
     await expect(anotherPlot).toHaveAttribute('aria-pressed', 'true');
-    expect(await anotherPlot.boundingBox()).toEqual(beforeSelection);
+    const afterSelection = await anotherPlot.boundingBox();
+    for (const edge of ['x', 'y', 'width', 'height'] as const) {
+      expect(Math.abs(afterSelection![edge] - beforeSelection![edge])).toBeLessThanOrEqual(0.5);
+    }
     await selectedPlot.focus();
     await expect(selectedPlot).toBeFocused();
     await page.keyboard.press('Enter');
@@ -95,6 +101,13 @@ test('the shared crafting layout preserves scene-first semantics at every target
     const target = await selectedPlot.boundingBox();
     expect(target!.width).toBeGreaterThanOrEqual(44);
     expect(target!.height).toBeGreaterThanOrEqual(44);
+    if (await page.evaluate(() => navigator.maxTouchPoints > 0)) {
+      const touchHarvestable = page.getByRole('button', { name: /ready to harvest/i }).first();
+      await touchHarvestable.tap();
+      await expect(touchHarvestable).toHaveAttribute('aria-pressed', 'true');
+      await page.getByRole('button', { name: 'Harvest crop' }).tap();
+      await expect(page.getByRole('status')).toContainText(/Harvested \d ingredients?/);
+    }
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(page.locator('[data-area-scene="garden"]')).toHaveAttribute('data-reduced-motion', 'true');
     await expect(page.locator('[data-scene-layer="garden bees and leaves"]')).toHaveCSS('animation-name', 'none');

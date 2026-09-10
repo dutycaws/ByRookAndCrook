@@ -46,7 +46,9 @@ test('harvested ingredients become persistent food through the reload-safe baker
     await page.reload();
     await expect(page.locator('[data-motion-proof="bakery"]')).toHaveAttribute('data-bakery-phase', 'ready');
     await expect(page.locator('.oven-peel')).toBeVisible();
-    await page.getByRole('button', { name: 'Put loaf in oven' }).click();
+    const ovenButton = page.getByRole('button', { name: 'Put loaf in oven' });
+    await expect(ovenButton).toBeEnabled();
+    await ovenButton.click();
     await expect(page.getByRole('heading', { name: 'Watch the crust' })).toBeVisible();
     await expect(page.locator('[data-motion-proof="bakery"]')).toHaveAttribute('data-bakery-phase', 'baking');
 

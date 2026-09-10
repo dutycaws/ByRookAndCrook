@@ -116,7 +116,7 @@ try {
       await bakeryPage.locator('.stage-heading > strong').filter({ hasText: `${count}/6` }).waitFor();
     }
   }
-  bakeryScene = bakeryPage.locator('[data-motion-proof="bakery"][data-phase="scoring"]');
+  bakeryScene = bakeryPage.locator('[data-motion-proof="bakery"][data-bakery-phase="scoring"]');
   await bakeryScene.waitFor();
   await dragBakery(bakeryPage);
   await bakeryPage.locator('.stage-heading > strong').filter({ hasText: '1/3' }).waitFor();

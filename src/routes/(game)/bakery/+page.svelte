@@ -1,6 +1,6 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import BakeryScene from '$lib/components/scenes/BakeryScene.svelte';
@@ -29,6 +29,11 @@
   let foldForm = $state<HTMLFormElement>();
   let scoreForm = $state<HTMLFormElement>();
   let elapsedMs = $state(0);
+  let hydrated = $state(false);
+
+  onMount(() => {
+    hydrated = true;
+  });
 
   let session = $derived(data.snapshot?.bakery.activeSession ?? null);
   let rules = $derived(data.snapshot?.bakery.rules);
@@ -190,7 +195,7 @@
             <div class="result-actions">
               <a class="primary-button inline-button" href="/bar">Offer food at the bar</a>
               <form method="POST" action="?/advance" use:enhance={enhanceAdvance}>
-                <button class="text-button" type="submit" disabled={pending}>
+                <button class="text-button" type="submit" disabled={!hydrated || pending}>
                   {retrying('advance') ? 'Retry resting' : 'Rest and begin next day'}
                 </button>
               </form>
@@ -208,7 +213,7 @@
           <p>Drag across the dough for each fold. Longer, deliberate folds earn a steadier crumb.</p>
           <form bind:this={foldForm} method="POST" action="?/fold" use:enhance={enhanceFold}>
             <input type="hidden" name="distance" value={gestureValue} />
-            <button class="secondary-button full-button" type="submit" disabled={pending}
+            <button class="secondary-button full-button" type="submit" disabled={!hydrated || pending}
               onclick={() => { if (!unresolved) gestureValue = 70; }}>
               {retrying('fold') ? 'Retry fold' : 'Fold dough with keyboard'}
             </button>
@@ -220,7 +225,7 @@
           <p>Swipe across the loaf exactly three times so steam can escape in the oven.</p>
           <form bind:this={scoreForm} method="POST" action="?/score" use:enhance={enhanceScore}>
             <input type="hidden" name="length" value={gestureValue} />
-            <button class="secondary-button full-button" type="submit" disabled={pending}
+            <button class="secondary-button full-button" type="submit" disabled={!hydrated || pending}
               onclick={() => { if (!unresolved) gestureValue = 70; }}>
               {retrying('score') ? 'Retry score' : 'Score loaf with keyboard'}
             </button>
@@ -231,7 +236,7 @@
             <h2 id="bakery-stage">The loaf is ready to bake</h2>
             <p>The oven uses its own clock. Reloading cannot pause or restart the thirty-second bake.</p>
             <form method="POST" action="?/oven" use:enhance={enhanceOven}>
-              <button class="primary-button full-button" type="submit" disabled={pending}>
+              <button class="primary-button full-button" type="submit" disabled={!hydrated || pending}>
                 {retrying('oven') ? 'Retry putting loaf in oven' : 'Put loaf in oven'}
               </button>
             </form>
@@ -250,7 +255,7 @@
             <span>The loaf can always be removed.</span>
           </div>
           <form method="POST" action="?/complete" use:enhance={enhanceComplete}>
-            <button class="primary-button full-button" type="submit" disabled={pending}>
+            <button class="primary-button full-button" type="submit" disabled={!hydrated || pending}>
               {retrying('complete') ? 'Retry taking out bread' : 'Take out bread'}
             </button>
           </form>
@@ -274,7 +279,7 @@
                   </label>
                 {/each}
               </fieldset>
-              <button class="primary-button full-button" type="submit" disabled={!selectedIngredientId || pending}>
+              <button class="primary-button full-button" type="submit" disabled={!hydrated || !selectedIngredientId || pending}>
                 {retrying('start') ? 'Retry starting loaf' : 'Begin today’s loaf'}
               </button>
             </form>
@@ -297,7 +302,7 @@
         {#if !session && snapshot.save.dailyCraftKind === null}
           <form method="POST" action="?/advance" use:enhance={enhanceAdvance} class="rest-without-craft">
             <p>Crafting is optional. The tavern may close without brewing or baking.</p>
-            <button class="text-button full-button" type="submit" disabled={pending}>
+            <button class="text-button full-button" type="submit" disabled={!hydrated || pending}>
               {retrying('advance') ? 'Retry resting' : 'Rest without crafting'}
             </button>
           </form>

@@ -140,3 +140,9 @@ The artwork is presentational. Existing server actions, immutable command IDs, r
 - [`motion-asset-contact-sheet.png`](../screenshots/motion-asset-contact-sheet.png) shows the two assembled scenes and each alpha cutout against a checker field.
 
 These images prove layer compatibility and art direction. Interactive motion, rapid reversal, display-density checks, and demonstration clips remain the acceptance work of issue #8.
+
+### Final assembled-scene review
+
+Issue [#13](https://github.com/dutycaws/ByRookAndCrook/issues/13) reviews the production Garden, Brewery, and Bakery together. The [final acceptance record](../quality/scene-acceptance.md) links twelve annotated screenshots at the exact 1,672 × 941, 1,440 × 900, 768 × 1,024, and 390 × 844 targets, one direct-interaction clip per area, measured frame timings, and the state/recovery tests behind each visual claim.
+
+The assembled review confirms that the three fixed cameras share the shell's ebony, brass, and parchment hierarchy while retaining distinct natural, copper-cellar, and stone-oven material palettes. Narrow layouts preserve the live scene and immediate action before secondary rails. The review does not promote any reference-only display or control into a game mechanic.
