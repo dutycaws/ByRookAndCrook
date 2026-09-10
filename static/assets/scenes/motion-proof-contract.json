@@ -55,7 +55,7 @@
       "pathCenter": { "x": 836, "y": 500 },
       "pathRadius": { "x": 205, "y": 45 },
       "paddleRotationDegrees": { "min": -12, "max": 12 },
-      "releaseDecayMs": 300,
+      "releaseDecayMs": 400,
       "liquidTranslationPx": 3,
       "liquidHighlightOpacityDelta": 0.08
     },

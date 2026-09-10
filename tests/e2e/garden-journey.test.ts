@@ -144,6 +144,7 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await expect(page.getByRole('heading', { name: 'Stir the wort' })).toBeVisible();
     await expect(page.locator('.brew-progress-heading strong')).not.toHaveText('30s');
 
+    await page.getByRole('radio', { name: /Assisted control/ }).check();
     const slider = page.getByLabel('Stirring speed');
     await slider.press('End');
     await expect(page.locator('.zone-readout strong')).toHaveText('Too fast');

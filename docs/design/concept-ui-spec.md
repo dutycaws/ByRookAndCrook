@@ -101,7 +101,7 @@ The Brewery uses a large copper vat centered in a dark timber cellar. Copper hig
 | 4 | `brewery-cauldron-foreground-rim.webp` | `400, 450, 875, 355` | Restores front-rim and vat-body occlusion over the paddle and wort |
 | 5 | Live UI | Scene overlay | Existing progress, state, input, retry, and accessible controls |
 
-The paddle immersion anchor travels an ellipse centered at `(836, 500)` with radii `(205, 45)`. Rotation is limited to `−12°…12°`. Pointer or keyboard motion drives the same normalized input; after movement ends, speed and visual response decay to rest over 300 milliseconds. The wort may translate internally by at most three pixels and vary highlight opacity by at most eight percent. It cannot escape its alpha mask.
+The paddle immersion anchor travels an ellipse centered at `(836, 500)` with radii `(205, 45)`. Rotation is limited to `−12°…12°`. Pointer or keyboard motion drives the same normalized input; after movement ends, speed and visual response decay to rest over 400 milliseconds. The wort may translate internally by at most three pixels and vary highlight opacity by at most eight percent. It cannot escape its alpha mask.
 
 Normal idle, completion, and reduced-motion views use the same paddle at its static rest pose and a still wort surface. Active motion repositions the cutout and applies a bounded masked swirl. No gameplay state is encoded in a newly generated frame.
 

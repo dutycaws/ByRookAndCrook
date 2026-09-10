@@ -958,6 +958,51 @@ input:focus-visible {
   accent-color: #69a64f;
 }
 
+.stir-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 15px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.stir-mode legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--gold);
+  font-family: 'Cinzel', serif;
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.stir-mode label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #4b371b;
+  background: #0d0905;
+  cursor: pointer;
+}
+
+.stir-mode label.active {
+  border-color: #b38737;
+  background: #261b0c;
+  box-shadow: inset 3px 0 #c89435;
+}
+
+.stir-mode input { accent-color: var(--gold); }
+.stir-mode strong,
+.stir-mode small,
+.speed-control small { display: block; }
+.stir-mode strong { color: var(--ink); font-family: 'Cinzel', serif; font-size: 11px; }
+.stir-mode small,
+.speed-control small { margin-top: 2px; color: var(--muted); font-family: 'EB Garamond', serif; font-size: 11px; letter-spacing: 0; text-transform: none; }
+
 .zone-readout {
   display: flex;
   align-items: baseline;

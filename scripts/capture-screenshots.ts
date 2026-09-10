@@ -46,6 +46,7 @@ try {
     const timer = document.querySelector('.brew-progress-heading strong');
     return timer !== null && timer.textContent !== '30s';
   });
+  await page.getByRole('radio', { name: /Assisted control/ }).check();
   await page.getByLabel('Stirring speed').evaluate((control) => {
     const slider = control as HTMLInputElement;
     slider.value = '50';

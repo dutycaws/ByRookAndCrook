@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { untrack } from 'svelte';
+  import BakeryMotionProof from '$lib/components/scenes/BakeryMotionProof.svelte';
   import { qualityLabel } from '$lib/game/contracts';
   import type { PageProps, SubmitFunction } from './$types';
 
@@ -20,7 +21,6 @@
   let pending = $state(false);
   let transportError = $state<string | null>(null);
   let unresolved = $state<FrozenBakeryCommand | null>(null);
-  let gestureStartX = $state<number | null>(null);
   let gestureValue = $state(70);
   let foldForm = $state<HTMLFormElement>();
   let scoreForm = $state<HTMLFormElement>();
@@ -69,24 +69,11 @@
     return crypto.randomUUID();
   }
 
-  function beginGesture(event: PointerEvent) {
+  function commitSceneGesture(kind: 'fold' | 'score', value: number) {
     if (pending || unresolved) return;
-    gestureStartX = event.clientX;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  }
-
-  function finishGesture(event: PointerEvent, kind: 'fold' | 'score') {
-    if (pending || unresolved || gestureStartX === null) return;
-    const target = event.currentTarget as HTMLElement;
-    const width = Math.max(1, target.getBoundingClientRect().width);
-    gestureValue = Math.min(100, Math.round(Math.abs(event.clientX - gestureStartX) / width * 100));
-    gestureStartX = null;
+    gestureValue = value;
     if (kind === 'fold') foldForm?.requestSubmit();
     else scoreForm?.requestSubmit();
-  }
-
-  function cancelGesture() {
-    gestureStartX = null;
   }
 
   function submitKeyboardGesture(kind: 'fold' | 'score') {
@@ -205,13 +192,8 @@
           <p>Drag across the dough for each fold. Longer, deliberate folds earn a steadier crumb.</p>
           <form bind:this={foldForm} method="POST" action="?/fold" use:enhance={enhanceFold}>
             <input type="hidden" name="distance" value={gestureValue} />
-            <button type="button" class="dough-board" aria-label={`Fold dough, ${session.foldCount} of 6 complete`}
-              onpointerdown={beginGesture} onpointerup={(event) => finishGesture(event, 'fold')}
-              onpointercancel={cancelGesture}
-              onclick={(event) => { if (event.detail === 0) submitKeyboardGesture('fold'); }}>
-              <div class="dough"><span>Drag to fold</span></div>
-              <i class:active={gestureStartX !== null}></i>
-            </button>
+            <BakeryMotionProof phase="folding" foldCount={session.foldCount} scoreCount={session.scoreCount}
+              disabled={pending || !!unresolved} oncommit={commitSceneGesture} />
             <button class="secondary-button full-button" type="submit" disabled={pending}
               onclick={() => { if (!unresolved) gestureValue = 70; }}>
               {retrying('fold') ? 'Retry fold' : 'Fold dough with keyboard'}
@@ -224,15 +206,8 @@
           <p>Swipe across the loaf exactly three times so steam can escape in the oven.</p>
           <form bind:this={scoreForm} method="POST" action="?/score" use:enhance={enhanceScore}>
             <input type="hidden" name="length" value={gestureValue} />
-            <button type="button" class="score-board" aria-label={`Score loaf, ${session.scoreCount} of 3 complete`}
-              onpointerdown={beginGesture} onpointerup={(event) => finishGesture(event, 'score')}
-              onpointercancel={cancelGesture}
-              onclick={(event) => { if (event.detail === 0) submitKeyboardGesture('score'); }}>
-              <div class="loaf">
-                {#each Array(session.scoreCount) as _}<i></i>{/each}
-                <span>Swipe to score</span>
-              </div>
-            </button>
+            <BakeryMotionProof phase="scoring" foldCount={session.foldCount} scoreCount={session.scoreCount}
+              disabled={pending || !!unresolved} oncommit={commitSceneGesture} />
             <button class="secondary-button full-button" type="submit" disabled={pending}
               onclick={() => { if (!unresolved) gestureValue = 70; }}>
               {retrying('score') ? 'Retry score' : 'Score loaf with keyboard'}
@@ -329,14 +304,6 @@
   .stage-heading h2,.bake-result h2,.oven-ready h2,.bake-setup h2 { margin:5px 0 8px; color:var(--gold-bright); font-family:'Cinzel',serif; }
   .stage-heading>strong { color:var(--gold-bright); font-family:'Cinzel',serif; font-size:24px; }
   .bakery-workbench p { color:var(--muted); }
-  .dough-board,.score-board { position:relative; display:grid; width:100%; min-height:290px; margin:24px 0 14px; padding:0; place-items:center; overflow:hidden; border:1px solid #614823; color:inherit; background:radial-gradient(circle,#49311c 0,#21150b 65%,#120d07 100%); cursor:grab; touch-action:none; user-select:none; }
-  .dough-board:active,.score-board:active { cursor:grabbing; }
-  .dough { display:grid; width:min(68%,390px); aspect-ratio:1.9; place-items:center; border-radius:50%; color:#5f4328; background:radial-gradient(circle at 40% 30%,#d7b476,#a6763f 75%); box-shadow:0 18px 30px #0008,inset 0 0 25px #f4d69a66; }
-  .dough-board>i { position:absolute; width:3px; height:72%; background:#efd895; opacity:0; transform:rotate(20deg); }
-  .dough-board>i.active { opacity:.7; }
-  .loaf { position:relative; display:flex; align-items:center; justify-content:center; gap:26px; width:min(72%,410px); aspect-ratio:2.1; border-radius:52% 48% 45% 55%; color:#5f4328; background:linear-gradient(145deg,#cda25f,#8b5b2f); box-shadow:0 18px 30px #0008,inset 0 0 30px #f7d99f55; }
-  .loaf i { width:5px; height:58%; border-radius:50%; background:#6f4526; transform:rotate(24deg); box-shadow:2px 0 #edcf8e66; }
-  .loaf span { position:absolute; bottom:12px; }
   .step-pips { display:flex; justify-content:center; gap:9px; margin-top:18px; }
   .step-pips i { width:38px; height:5px; background:#3e2d17; }
   .step-pips i.done { background:var(--gold); }
@@ -363,5 +330,5 @@
   .rest-without-craft { padding:16px; border:1px solid var(--border); background:#151008; }
   .rest-without-craft p { margin-top:0; color:var(--muted); }
   .bake-message { margin-top:18px; }
-  @media (max-width:800px) { .bakery-layout { grid-template-columns:1fr; }.bakery-workbench { min-height:520px; padding:20px; }.dough-board,.score-board { min-height:230px; }.oven { height:220px; } }
+  @media (max-width:800px) { .bakery-layout { grid-template-columns:1fr; }.bakery-workbench { min-height:520px; padding:20px; }.oven { height:220px; } }
 </style>

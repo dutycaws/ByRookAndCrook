@@ -33,6 +33,7 @@
     "npc:content:migration": "tsx scripts/npc-content.ts",
     "npc:eval:live": "tsx scripts/evaluate-npc-dialogue.ts --live",
     "screenshots": "tsx scripts/capture-screenshots.ts",
+    "motion:proof:capture": "tsx scripts/capture-motion-proofs.ts",
     "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live",
     "art:assets:check": "tsx scripts/validate-scene-assets.ts"
   },

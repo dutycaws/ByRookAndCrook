@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { untrack } from 'svelte';
+  import BreweryMotionProof from '$lib/components/scenes/BreweryMotionProof.svelte';
   import { qualityLabel } from '$lib/game/contracts';
   import type { PageProps, SubmitFunction } from './$types';
 
@@ -17,7 +18,7 @@
   let advanceActionId = $state<string | null>(null);
   let pending = $state(false);
   let transportError = $state<string | null>(null);
-  let stirring = $state(false);
+  let inputMode = $state<'physical' | 'assisted'>('physical');
 
   let session = $derived(data.snapshot?.brewery.activeSession ?? null);
   let latestBeverage = $derived(data.snapshot?.brewery.beverages[0] ?? null);
@@ -78,21 +79,9 @@
     });
   });
 
-  function setSpeedFromPointer(event: PointerEvent) {
-    if (!stirring) return;
-    const target = event.currentTarget as HTMLElement;
-    const bounds = target.getBoundingClientRect();
-    speed = Math.round(Math.min(100, Math.max(0, ((event.clientX - bounds.left) / bounds.width) * 100)));
-  }
-
-  function beginStirring(event: PointerEvent) {
-    stirring = true;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    setSpeedFromPointer(event);
-  }
-
-  function stopStirring() {
-    stirring = false;
+  function selectInputMode(mode: 'physical' | 'assisted') {
+    inputMode = mode;
+    speed = 0;
   }
 
   const enhanceStart: SubmitFunction = ({ formData }) => {
@@ -242,23 +231,23 @@
             </div>
           </div>
 
-          <div
-            class="cauldron-control"
-            role="presentation"
-            onpointerdown={beginStirring}
-            onpointermove={setSpeedFromPointer}
-            onpointerup={stopStirring}
-            onpointercancel={stopStirring}
-          >
-            <div class="cauldron">
-              <span class:stirring={speed > 0} style={`transform: rotate(${speed * 2}deg)`}>🥄</span>
-            </div>
-            <div class="fire" aria-hidden="true">🔥 🔥 🔥</div>
-          </div>
+          <BreweryMotionProof {speed} mode={inputMode} disabled={pending} onspeed={(value) => (speed = value)} />
+
+          <fieldset class="stir-mode">
+            <legend>Stirring input</legend>
+            <label class:active={inputMode === 'physical'}>
+              <input type="radio" name="stir-mode" checked={inputMode === 'physical'} onchange={() => selectInputMode('physical')} />
+              <span><strong>Physical stirring</strong><small>Circle the paddle through the wort</small></span>
+            </label>
+            <label class:active={inputMode === 'assisted'}>
+              <input type="radio" name="stir-mode" checked={inputMode === 'assisted'} onchange={() => selectInputMode('assisted')} />
+              <span><strong>Assisted control</strong><small>Hold a selected pace with the slider</small></span>
+            </label>
+          </fieldset>
 
           <label class="speed-control">
-            <span>Stirring speed</span>
-            <input type="range" min="0" max="100" step="1" bind:value={speed} />
+            <span>Stirring speed <small>Assisted control holds this pace</small></span>
+            <input aria-label="Stirring speed" type="range" min="0" max="100" step="1" bind:value={speed} disabled={inputMode !== 'assisted'} />
           </label>
 
           <div class="zone-readout {zone}" role="status" aria-live="polite">
