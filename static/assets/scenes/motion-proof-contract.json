@@ -26,6 +26,14 @@
         "bounds": { "x": 0, "y": 0, "width": 1672, "height": 941 }
       },
       {
+        "id": "fire",
+        "path": "/assets/scenes/brewery/brewery-fire.webp",
+        "z": 1,
+        "bounds": { "x": 450, "y": 560, "width": 780, "height": 325 },
+        "anchor": { "x": 390, "y": 325 },
+        "worldAnchor": { "x": 840, "y": 885 }
+      },
+      {
         "id": "wort",
         "path": "/assets/scenes/brewery/brewery-wort-surface.webp",
         "maskPath": "/assets/scenes/brewery/brewery-wort-mask.webp",
@@ -33,6 +41,14 @@
         "bounds": { "x": 445, "y": 345, "width": 782, "height": 235 },
         "anchor": { "x": 391, "y": 118 },
         "worldAnchor": { "x": 836, "y": 463 }
+      },
+      {
+        "id": "paddle-immersion-shadow",
+        "path": "/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp",
+        "z": 2,
+        "bounds": { "x": 706, "y": 437, "width": 260, "height": 100 },
+        "anchor": { "x": 130, "y": 50 },
+        "worldAnchor": { "x": 836, "y": 487 }
       },
       {
         "id": "paddle",
@@ -49,6 +65,14 @@
         "bounds": { "x": 400, "y": 450, "width": 875, "height": 355 },
         "anchor": { "x": 0, "y": 0 },
         "worldAnchor": { "x": 400, "y": 450 }
+      },
+      {
+        "id": "steam",
+        "path": "/assets/scenes/brewery/brewery-steam.webp",
+        "z": 5,
+        "bounds": { "x": 496, "y": 40, "width": 680, "height": 453 },
+        "anchor": { "x": 340, "y": 423 },
+        "worldAnchor": { "x": 836, "y": 463 }
       }
     ],
     "motion": {

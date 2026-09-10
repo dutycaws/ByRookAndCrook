@@ -29,16 +29,21 @@ Issue [#7](https://github.com/dutycaws/ByRookAndCrook/issues/7) establishes the 
 | Runtime asset | Dimensions | Alpha | SHA-256 | Source and use |
 | --- | ---: | :---: | --- | --- |
 | `static/assets/scenes/brewery-environment.webp` | 1,672 × 941 | No | `206e9ccab60d0c774b8cf940aaa464da9d62ab2e5fd05f520b69c69bf325c504` | Generated master `exec-92c010de-aa17-4151-a8cb-a871e1bebce6.png`; fixed room, plain banner, unbranded copper vat, wort, and hearth. |
+| `static/assets/scenes/brewery/brewery-fire.webp` | 780 × 325 | Yes | `ab163702a2b29deadd255e4dc8bc6d2c2d8a6a6d7adfc3055641a3221e29c6f1` | Generated master `exec-9594178f-2f07-44b9-9a1e-1ddb0c069ee4.png`; isolated flame and ember overlay for the cauldron brazier. |
 | `static/assets/scenes/brewery/brewery-wort-surface.webp` | 782 × 235 | Yes | `9d9c35c65eadfe109269c0f441e1a6e289e854b5e7d0e78091c9774b2e9c9e88` | Elliptical surface derived from the canonical environment, preserving exact liquid texture and light. |
 | `static/assets/scenes/brewery/brewery-wort-mask.webp` | 782 × 235 | Yes | `5a1b69fa4636cb6300c3b8e484ff43e7c2cc6118355c83b29395c2a2ccc39859` | Feathered white alpha mask matching the surface bounds. |
+| `static/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp` | 260 × 100 | Yes | `7ba33644cf767c6ad83790aa6546e7aecf1ec885dfee9e88e814afd6b9e2d190` | Procedural soft immersion/contact shadow, positioned independently beneath the paddle blade. |
 | `static/assets/scenes/brewery/brewery-paddle.webp` | 184 × 570 | Yes | `2b8f64b9a10a46d8f55a41a782eec830e1c8b9cb493a60fd3a76eced1350d3e9` | Generated master `exec-24b3729f-d1d0-4c7b-8072-b6df0c87cca6.png`; isolated wet oak paddle with no hand or baked shadow. |
 | `static/assets/scenes/brewery/brewery-cauldron-foreground-rim.webp` | 875 × 355 | Yes | `9bf51e4caa5a4f899f00835c97b8c2b8fd6e163431d79776f88f58d0ad7a5e07` | Foreground crop and curved alpha matte derived from the same environment; restores exact rim/body occlusion. |
+| `static/assets/scenes/brewery/brewery-steam.webp` | 680 × 453 | Yes | `e1790cb06a023076c0eda879f5f79e6b6414206e06206aea4142cb955de8dce5` | Generated master `exec-9a8a8477-f1c5-4fc5-af61-875717347cf2.png`; isolated warm steam and condensation overlay. |
 
 **Brewery environment brief:** Create a wide fixed-camera fantasy brewery in grounded painterly realism. Center a large hammered copper vat with an unobstructed amber wort ellipse. Use aged timber, barrels, copper stills, worn brass, hearth light, and deep brown shadows. Include no people, hands, paddles, interface, words, logos, meters, cards, or gameplay information. A second edit removed generated tankard emblems from the banner and vat without changing the camera or cauldron.
 
 **Paddle brief:** Create one complete long dark-oak brewing paddle with a broad flat blade, warm upper-right light, and a restrained wet amber sheen on the lower blade. Isolate it on real transparency with no hand, person, cauldron, background, external shadow, text, or interface.
 
-The wort surface and foreground rim are extracted from the same reviewed environment plate. They are not separately generated animation frames.
+**Fire and steam briefs:** Create separate real-alpha overlays for the fixed Brewery camera. The fire is a compact strip of orange-gold flames and restrained embers for the circular brazier, with no container or room. The steam is three soft pale-cream wisps with faint amber candlelight and a few condensation motes, with no vat, paddle, room, text, or interface. Both were generated with the built-in OpenAI image tool on 2026-09-10, then resized and exported as quality-90 exact-alpha WebP. The soft paddle immersion shadow is procedural so its contact edge remains stable while the illustrated paddle moves.
+
+The wort surface and foreground rim are extracted from the same reviewed environment plate. They are not separately generated animation frames. Fire, steam, and immersion shadow remain separate so the runtime can suspend, reduce, or move each effect without changing game state.
 
 ### Bakery
 
@@ -63,7 +68,7 @@ The generated pose sheet and scoring tool initially contained a rendered checker
 
 ### Contract and review evidence
 
-[`static/assets/scenes/motion-proof-contract.json`](../../static/assets/scenes/motion-proof-contract.json) records the design canvas, responsive crops, bounds, anchors, z-order, allowed motion, and static fallbacks. It is the shared asset/occlusion input for issues #8 and #9.
+[`static/assets/scenes/motion-proof-contract.json`](../../static/assets/scenes/motion-proof-contract.json) records the design canvas, responsive crops, bounds, anchors, z-order, allowed motion, and static fallbacks. It began as the issues #8 and #9 proof contract and now includes the production Brewery layers delivered by issue #10.
 
 | Evidence | Purpose |
 | --- | --- |

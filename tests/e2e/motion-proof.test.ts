@@ -50,6 +50,24 @@ async function dragCircle(page: Page, clockwise: boolean) {
   return scene;
 }
 
+async function dragPointerCircle(page: Page, pointerType: 'touch' | 'pen') {
+  const scene = page.locator('[data-motion-proof="brewery"]');
+  const projection = await sceneProjection(scene);
+  const center = projection.point(836, 463);
+  const radius = { x: 330 * projection.scale, y: 96 * projection.scale };
+  const points = Array.from({ length: 25 }, (_, index) => {
+    const angle = Math.PI * 2 * index / 24;
+    return { clientX: center.x + Math.cos(angle) * radius.x, clientY: center.y + Math.sin(angle) * radius.y };
+  });
+  const pointerId = pointerType === 'touch' ? 41 : 42;
+  await scene.dispatchEvent('pointerdown', { ...points[0], pointerId, pointerType, isPrimary: true, buttons: 1 });
+  for (const point of points.slice(1)) {
+    await page.waitForTimeout(14);
+    await scene.dispatchEvent('pointermove', { ...point, pointerId, pointerType, isPrimary: true, buttons: 1 });
+  }
+  return { scene, pointerId, point: points.at(-1)! };
+}
+
 async function expectNoHorizontalOverflow(page: Page) {
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -74,11 +92,23 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
   try {
     await loginAndHarvest(page, player.email, player.password);
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
+    let scene = page.locator('[data-motion-proof="brewery"]');
+    await expect(scene).toHaveAttribute('data-brew-phase', 'setup');
     await page.getByRole('button', { name: 'Begin 30-second brew' }).click();
 
-    let scene = page.locator('[data-motion-proof="brewery"]');
     await expect(scene).toBeVisible();
-    await expect(scene.locator('img')).toHaveCount(4);
+    await expect(scene).toHaveAttribute('data-brew-phase', 'active');
+    await expect(scene.locator('img')).toHaveCount(7);
+    await expect(scene.locator('.brazier-fire')).toHaveClass(/heated/);
+    await expect(scene.locator('.steam')).toHaveClass(/heated/);
+    await dragCircle(page, true);
+    await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThan(10);
+    await expect(scene).toHaveAttribute('data-pointer-type', 'mouse');
+    await page.getByRole('radio', { name: /Assisted control/ }).evaluate((control: HTMLInputElement) => control.click());
+    await expect(scene).toHaveAttribute('data-input-mode', 'assisted');
+    await expect(scene).toHaveAttribute('data-pointer-type', 'none');
+    await page.mouse.up();
+    await page.getByRole('radio', { name: /Physical stirring/ }).check();
     await dragCircle(page, true);
     await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThan(10);
     await page.evaluate(() => {
@@ -86,6 +116,9 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
       document.dispatchEvent(new Event('visibilitychange'));
     });
     await expect(scene).toHaveAttribute('data-speed', '0');
+    const hiddenTicks = Number(await page.locator('.brew-panel').getAttribute('data-brew-sample-ticks'));
+    await page.waitForTimeout(350);
+    await expect(page.locator('.brew-panel')).toHaveAttribute('data-brew-sample-ticks', String(hiddenTicks));
     await page.mouse.up();
     await page.reload();
     scene = page.locator('[data-motion-proof="brewery"]');
@@ -112,13 +145,68 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
     await expect(scene).toHaveAttribute('data-speed', '0');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(scene).toHaveAttribute('data-reduced-motion', 'true');
+    const staticFireStyle = await scene.locator('.brazier-fire').getAttribute('style');
+    const staticWortStyle = await scene.locator('.wort').getAttribute('style');
+    const staticImmersionStyle = await scene.locator('.immersion-shadow').getAttribute('style');
+    const staticPaddleStyle = await scene.locator('.paddle').getAttribute('style');
+    const staticSteamStyle = await scene.locator('.steam').getAttribute('style');
+    await expect(scene.locator('.brazier-fire')).toHaveCSS('animation-name', 'none');
+    await expect(scene.locator('.steam')).toHaveCSS('animation-name', 'none');
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(scene).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    await dragCircle(page, true);
+    const touch = await dragPointerCircle(page, 'touch');
     await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThan(10);
-    await page.mouse.up();
+    await expect(scene).toHaveAttribute('data-pointer-type', 'touch');
+    await expect(scene.locator('.brazier-fire')).toHaveAttribute('style', staticFireStyle!);
+    await expect(scene.locator('.wort')).toHaveAttribute('style', staticWortStyle!);
+    await expect(scene.locator('.immersion-shadow')).toHaveAttribute('style', staticImmersionStyle!);
+    await expect(scene.locator('.paddle')).toHaveAttribute('style', staticPaddleStyle!);
+    await expect(scene.locator('.steam')).toHaveAttribute('style', staticSteamStyle!);
+    await touch.scene.dispatchEvent('pointerup', { ...touch.point, pointerId: touch.pointerId, pointerType: 'touch', isPrimary: true });
+
+    const snapshotResult = await player.client.rpc('get_tavern_snapshot');
+    const activeSession = (snapshotResult.data as unknown as { brewery: { activeSession: { id: string } | null } }).brewery.activeSession;
+    expect(activeSession).not.toBeNull();
+    const backdated = await player.admin
+      .from('brew_sessions')
+      .update({ started_at: new Date(Date.now() - 31_000).toISOString() })
+      .eq('id', activeSession!.id);
+    expect(backdated.error).toBeNull();
+    await page.evaluate(() => {
+      const currentTime = Date.now.bind(Date);
+      Date.now = () => currentTime() + 31_000;
+    });
+    await expect(page.getByRole('button', { name: 'Bottle this brew' })).toBeEnabled();
+    await expect(scene).toHaveAttribute('data-brew-phase', 'ready');
+
+    const completionPayloads: URLSearchParams[] = [];
+    let dropCompletion = true;
+    await page.route(
+      (url) => url.pathname === '/brewery' && url.search === '?/complete',
+      async (route) => {
+        completionPayloads.push(new URLSearchParams(route.request().postData() ?? ''));
+        if (dropCompletion) {
+          dropCompletion = false;
+          await route.fetch();
+          await route.abort('failed');
+          return;
+        }
+        await route.continue();
+      }
+    );
+    await page.getByRole('button', { name: 'Bottle this brew' }).click();
+    await expect(page.getByRole('alert')).toContainText('response was lost');
+    await expect(scene.locator('.phase-banner')).toContainText('Ledger interrupted');
+    await page.getByRole('button', { name: 'Bottle this brew' }).click();
+    await expect(scene).toHaveAttribute('data-brew-phase', 'result');
+    await expect(scene.locator('.brazier-fire')).not.toHaveClass(/heated/);
+    expect(completionPayloads).toHaveLength(2);
+    expect(completionPayloads[0].get('actionId')).toBe(completionPayloads[1].get('actionId'));
+    expect(completionPayloads[0].get('totalTicks')).toBe(completionPayloads[1].get('totalTicks'));
+    expect(Number(completionPayloads[0].get('totalTicks'))).toBeGreaterThan(0);
+
     await page.route('**/assets/scenes/brewery-environment.webp', (route) => route.abort());
     await page.reload();
     await expect(page.getByRole('img', { name: 'Brewery environment artwork could not be loaded' })).toBeVisible();

@@ -3,7 +3,7 @@
   import { untrack } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
-  import BreweryMotionProof from '$lib/components/scenes/BreweryMotionProof.svelte';
+  import BreweryScene from '$lib/components/scenes/BreweryScene.svelte';
   import { qualityLabel } from '$lib/game/contracts';
   import { deriveBrewVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
@@ -30,11 +30,12 @@
     data.snapshot?.brewery.intentCards.find((card) => card.sourceBeverageId === latestBeverage?.id) ?? null
   );
   let zone = $derived(classifySpeed(speed));
+  let visualError = $derived(transportError ?? (form?.message && !form?.success ? form.message : null));
   let progress = $derived(
     session ? Math.min(100, Math.max(0, 100 - (remainingMs / (session.durationSeconds * 1000)) * 100)) : 0
   );
   let canBottle = $derived(Boolean(session && remainingMs <= 0 && !pending));
-  let visual = $derived(deriveBrewVisualState(data.snapshot ?? null, { speed, zone, remainingMs, pending, error: transportError }));
+  let visual = $derived(deriveBrewVisualState(data.snapshot ?? null, { speed, zone, remainingMs, pending, error: visualError }));
 
   $effect(() => {
     const ingredients = data.snapshot?.ingredients ?? [];
@@ -70,7 +71,7 @@
       const sample = () => {
         const finishAt = Date.parse(active.startedAt) + active.durationSeconds * 1000;
         remainingMs = Math.max(0, finishAt - Date.now());
-        if (remainingMs <= 0 || totalTicks >= 160) return;
+        if (remainingMs <= 0 || totalTicks >= 160 || document.visibilityState !== 'visible') return;
 
         totalTicks += 1;
         const currentZone = classifySpeed(speed);
@@ -190,7 +191,8 @@
         </dl>
       {/snippet}
       {#snippet scene()}
-      <section class="brew-panel panel" aria-labelledby="brew-title">
+      <section class="brew-panel panel" aria-labelledby="brew-title" data-brew-sample-ticks={totalTicks}>
+        <BreweryScene {visual} mode={inputMode} disabled={pending} onspeed={(value) => (speed = value)} />
         {#if snapshot.save.dailyCraftKind === 'bake'}
           <div class="empty-state">
             <span aria-hidden="true">🥖</span>
@@ -244,8 +246,6 @@
               <i style={`left: calc(${speed}% - 2px)`}></i>
             </div>
           </div>
-
-          <BreweryMotionProof {speed} mode={inputMode} disabled={pending} onspeed={(value) => (speed = value)} />
 
           <fieldset class="stir-mode">
             <legend>Stirring input</legend>

@@ -53,6 +53,8 @@ describe('scene presentation contracts', () => {
     const game = snapshot();
     const input = { speed: 125, zone: 'fast' as const, remainingMs: 12_000, pending: false, error: null };
     expect(deriveBrewVisualState(game, input).phase).toBe('setup');
+    expect(deriveBrewVisualState(game, { ...input, pending: true })).toMatchObject({ phase: 'setup', pending: true });
+    expect(deriveBrewVisualState(game, { ...input, error: 'ledger offline' })).toMatchObject({ phase: 'setup', error: 'ledger offline' });
     game.brewery.activeSession = {
       id: 'brew-1', ingredientBatchId: 'ingredient-1', plantKey: 'fennel', plantName: 'Fennel', icon: '🌿',
       ingredientQualityIndex: 3, ingredientBrewBonus: 1, startedAt: '2026-09-10T00:00:00Z', durationSeconds: 30

@@ -67,7 +67,10 @@ const references: ExpectedAsset[] = [
 const runtimeAssets: ExpectedAsset[] = [
   { path: 'static/assets/scenes/brewery-environment.webp', width: 1672, height: 941, alpha: false, sha256: '206e9ccab60d0c774b8cf940aaa464da9d62ab2e5fd05f520b69c69bf325c504', maxBytes: 350_000 },
   { path: 'static/assets/scenes/brewery/brewery-cauldron-foreground-rim.webp', width: 875, height: 355, alpha: true, sha256: '9bf51e4caa5a4f899f00835c97b8c2b8fd6e163431d79776f88f58d0ad7a5e07', maxBytes: 150_000 },
+  { path: 'static/assets/scenes/brewery/brewery-fire.webp', width: 780, height: 325, alpha: true, sha256: 'ab163702a2b29deadd255e4dc8bc6d2c2d8a6a6d7adfc3055641a3221e29c6f1', maxBytes: 100_000 },
   { path: 'static/assets/scenes/brewery/brewery-paddle.webp', width: 184, height: 570, alpha: true, sha256: '2b8f64b9a10a46d8f55a41a782eec830e1c8b9cb493a60fd3a76eced1350d3e9', maxBytes: 40_000 },
+  { path: 'static/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp', width: 260, height: 100, alpha: true, sha256: '7ba33644cf767c6ad83790aa6546e7aecf1ec885dfee9e88e814afd6b9e2d190', maxBytes: 10_000 },
+  { path: 'static/assets/scenes/brewery/brewery-steam.webp', width: 680, height: 453, alpha: true, sha256: 'e1790cb06a023076c0eda879f5f79e6b6414206e06206aea4142cb955de8dce5', maxBytes: 120_000 },
   { path: 'static/assets/scenes/brewery/brewery-wort-mask.webp', width: 782, height: 235, alpha: true, sha256: '5a1b69fa4636cb6300c3b8e484ff43e7c2cc6118355c83b29395c2a2ccc39859', maxBytes: 20_000 },
   { path: 'static/assets/scenes/brewery/brewery-wort-surface.webp', width: 782, height: 235, alpha: true, sha256: '9d9c35c65eadfe109269c0f441e1a6e289e854b5e7d0e78091c9774b2e9c9e88', maxBytes: 100_000 },
   { path: 'static/assets/scenes/bakery-environment.webp', width: 1672, height: 941, alpha: false, sha256: '8669352fbb4edb26a4e5ca92248ea17ddbc00d467ae65239ff64165aae36e5eb', maxBytes: 350_000 },
