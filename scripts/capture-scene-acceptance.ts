@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { cpus, freemem, platform, release, totalmem } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cpus, freemem, platform, release, tmpdir, totalmem } from 'node:os';
+import { join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { createTestPlayer } from '../tests/helpers/local-supabase';
+import { createCaptureDirectory, finalizeCapture } from './media/capture-artifacts';
 
 type Area = 'garden' | 'brewery' | 'bakery';
 type Viewport = { label: string; width: number; height: number };
@@ -11,8 +12,8 @@ type TestPlayer = Awaited<ReturnType<typeof createTestPlayer>>;
 
 const appUrl = process.env.APP_URL ?? 'http://127.0.0.1:3000';
 const serverMode = process.env.ACCEPTANCE_SERVER_MODE ?? 'development server';
-const outputDirectory = fileURLToPath(new URL('../docs/screenshots/final-review', import.meta.url));
-const temporaryVideoDirectory = '/tmp/by-rook-and-crook-final-review-videos';
+const outputDirectory = createCaptureDirectory('scene-acceptance');
+const temporaryVideoDirectory = await mkdtemp(join(tmpdir(), 'brac-scene-acceptance-video-'));
 const benchmarkDurationMs = 2_000;
 const benchmarkTrials = 3;
 
@@ -400,7 +401,7 @@ try {
   const report = {
     schemaVersion: 1,
     capturedAt: new Date().toISOString(),
-    gitCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    gitCommit: process.env.CAPTURE_COMMIT ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     appUrl,
     conditions: {
       serverMode,
@@ -424,6 +425,11 @@ try {
   };
   await writeFile(`${outputDirectory}/acceptance-results.json`, `${JSON.stringify(report, null, 2)}\n`);
 
+  await finalizeCapture(outputDirectory, 'scene-acceptance', await browser.version(), { width: 1672, height: 941, deviceScaleFactor: 1 }, 'npm run scene:acceptance:capture', serverMode, {
+    references,
+    benchmarks
+  });
+
   const failed = benchmarks.filter((entry) => !entry.meetsTarget);
   if (failed.length > 0) {
     throw new Error(`Performance targets were missed: ${failed.map((entry) => `${entry.area} ${entry.viewport} ${entry.meanFps}fps/${entry.worstFrameMs}ms`).join(', ')}`);
@@ -433,4 +439,5 @@ try {
   await Promise.allSettled(contexts.map((context) => context.close()));
   await browser.close();
   await Promise.allSettled(players.map((player) => player.admin.auth.admin.deleteUser(player.userId)));
+  await rm(temporaryVideoDirectory, { recursive: true, force: true });
 }

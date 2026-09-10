@@ -1,10 +1,10 @@
 import { mkdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { createTestPlayer } from '../tests/helpers/local-supabase';
+import { createCaptureDirectory, finalizeCapture } from './media/capture-artifacts';
 
 const appUrl = process.env.APP_URL ?? 'http://127.0.0.1:3000';
-const outputDirectory = fileURLToPath(new URL('../docs/screenshots', import.meta.url));
+const outputDirectory = createCaptureDirectory('screenshots');
 
 const player = await createTestPlayer('screenshots');
 const browser = await chromium.launch();
@@ -93,7 +93,10 @@ try {
 
   if (pageErrors.length > 0) throw new Error(`Browser errors while capturing screenshots: ${pageErrors.join('; ')}`);
 
-  console.info(`Wrote garden, ingredient, brewery, and responsive bar screenshots to ${outputDirectory}.`);
+  await finalizeCapture(outputDirectory, 'screenshots', await browser.version(), { width: 1440, height: 1000, deviceScaleFactor: 1 }, 'npm run screenshots', process.env.ACCEPTANCE_SERVER_MODE ?? 'development server', {
+    viewports: ['1440x1000', '1440x900', '1672x941', '768x1024', '390x844']
+  });
+  console.info(`Wrote candidate screenshots and capture manifest to ${outputDirectory}.`);
 } finally {
   await browser.close();
   await player.admin.auth.admin.deleteUser(player.userId);

@@ -36,7 +36,18 @@
     "motion:proof:capture": "tsx scripts/capture-motion-proofs.ts",
     "scene:acceptance:capture": "tsx scripts/capture-scene-acceptance.ts",
     "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live",
-    "art:assets:check": "tsx scripts/validate-scene-assets.ts"
+    "art:assets:check": "tsx scripts/validate-scene-assets.ts",
+    "media:git:check": "tsx scripts/media/git-policy.ts",
+    "media:git:check:staged": "tsx scripts/media/git-policy.ts --staged",
+    "media:master:ingest": "tsx scripts/media/master-ingest.ts",
+    "media:masters:archive": "tsx scripts/media/master-archive.ts",
+    "media:masters:verify": "tsx scripts/media/archive-verify.ts",
+    "media:masters:confirm-drive": "tsx scripts/media/master-confirm-drive.ts",
+    "media:masters:status": "tsx scripts/media/master-release-status.ts",
+    "media:evidence:validate": "tsx scripts/media/evidence-validate.ts",
+    "media:evidence:promote": "tsx scripts/media/evidence-promote.ts",
+    "media:perf": "tsx scripts/media/performance.ts",
+    "media:perf:calibration": "tsx scripts/media/performance-calibration.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.6",

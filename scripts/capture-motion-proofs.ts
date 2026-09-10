@@ -1,11 +1,13 @@
-import { mkdir } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { createTestPlayer } from '../tests/helpers/local-supabase';
+import { createCaptureDirectory, finalizeCapture } from './media/capture-artifacts';
 
 const appUrl = process.env.APP_URL ?? 'http://127.0.0.1:3000';
-const outputDirectory = fileURLToPath(new URL('../docs/screenshots/motion-proofs', import.meta.url));
-const temporaryVideoDirectory = '/tmp/by-rook-and-crook-motion-videos';
+const outputDirectory = createCaptureDirectory('motion-proofs');
+const temporaryVideoDirectory = await mkdtemp(join(tmpdir(), 'brac-motion-proof-video-'));
 
 async function loginAndHarvest(page: Page, email: string, password: string) {
   await page.goto(`${appUrl}/login`);
@@ -138,11 +140,15 @@ try {
   await screenshotScene(bakery2xPhone, `${outputDirectory}/bakery-score-phone-2x.png`, '/bakery');
   await bakery2xPhone.close();
 
-  console.info(`Wrote Brewery and Bakery proof screenshots and WebM clips to ${outputDirectory}.`);
+  await finalizeCapture(outputDirectory, 'motion-proofs', await browser.version(), { width: 1440, height: 1000, deviceScaleFactor: 1 }, 'npm run motion:proof:capture', process.env.ACCEPTANCE_SERVER_MODE ?? 'development server', {
+    viewports: ['1440x1000@1x', '1440x1000@2x', '390x844@1x', '390x844@2x']
+  });
+  console.info(`Wrote candidate motion evidence and capture manifest to ${outputDirectory}.`);
 } finally {
   await browser.close();
   await Promise.all([
     breweryPlayer.admin.auth.admin.deleteUser(breweryPlayer.userId),
     bakeryPlayer.admin.auth.admin.deleteUser(bakeryPlayer.userId)
   ]);
+  await rm(temporaryVideoDirectory, { recursive: true, force: true });
 }

@@ -9,7 +9,65 @@ permissions:
   contents: read
 
 jobs:
+  media-policy:
+    # This job deliberately needs neither Docker nor Supabase: run it before the
+    # expensive verification path and make policy violations immediately visible.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The range scanner must see blobs that were added and then deleted in
+          # the same PR, as well as the actual PR base commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Select npm version
+        run: |
+          npm install --global npm@11.18.0
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve policy range
+        id: range
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          else
+            base="$PUSH_BASE_SHA"
+            head="$PUSH_HEAD_SHA"
+          fi
+          # GitHub uses an all-zero `before` SHA when a branch is created. Use
+          # the empty tree as the range base in that case so the root commit's
+          # blobs are checked rather than making the policy job inapplicable.
+          if printf '%s' "$base" | grep --extended-regexp --quiet '^0+$'; then
+            base="$(git hash-object -t tree /dev/null)"
+            git cat-file -e "${base}^{tree}"
+          else
+            git rev-parse --verify "${base}^{commit}" >/dev/null
+          fi
+          git rev-parse --verify "${head}^{commit}" >/dev/null
+          printf 'base=%s\nhead=%s\n' "$base" "$head" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce media policy
+        run: npm run media:git:check -- --base "${{ steps.range.outputs.base }}" --head "${{ steps.range.outputs.head }}"
+
   verify:
+    needs: media-policy
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -98,4 +156,135 @@ jobs:
 
       - name: Stop local Supabase
         if: always()
+        run: npm run db:stop
+
+  media-performance:
+    # Main builds collect the baseline. After ten valid reports pass calibration,
+    # set MEDIA_PERF_ENFORCE=true as a repository variable and require this job in
+    # branch protection; performance-sensitive PRs then use enforce mode.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' && vars.MEDIA_PERF_ENFORCE == 'true')
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+      DO_NOT_TRACK: '1'
+      MEDIA_PERF_MODE: ${{ github.event_name == 'pull_request' && 'enforce' || 'report' }}
+      APP_URL: http://127.0.0.1:3000
+      ORIGIN: http://127.0.0.1:3000
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select performance scope
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            printf 'run=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git rev-parse --verify "${PR_BASE_SHA}^{commit}" >/dev/null
+          git rev-parse --verify "${PR_HEAD_SHA}^{commit}" >/dev/null
+          run=false
+          while IFS= read -r path; do
+            case "$path" in
+              src/*|static/*|package.json|package-lock.json|tsconfig.json|.npmrc|svelte.config.*|vite.config.*|playwright.config.*|config/media-policy.json|scripts/media/performance*.ts|.github/workflows/ci.yml)
+                run=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA")
+          printf 'run=%s\n' "$run" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unaffected pull request
+        if: steps.scope.outputs.run != 'true'
+        run: echo 'No performance-sensitive application, asset, dependency-lock, or build files changed.'
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: 22.20.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Select npm version
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          npm install --global npm@11.18.0
+          node --version
+          npm --version
+
+      - uses: supabase/setup-cli@v1
+        if: steps.scope.outputs.run == 'true'
+        with:
+          version: 2.114.0
+
+      - name: Install dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: npm ci
+
+      - name: Start and rebuild local Supabase
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          npm run db:start
+          npm run env:local
+          npm run db:reset:local
+          npm run fixtures:users:local
+
+      - name: Install Chromium
+        if: steps.scope.outputs.run == 'true'
+        run: npm exec -- playwright install --with-deps chromium
+
+      - name: Build production application
+        if: steps.scope.outputs.run == 'true'
+        run: npm run build
+
+      - name: Start production preview
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          # env:local creates this controlled local-only file. Adapter-node reads
+          # these values at process start, not from the Vite build environment.
+          set -a
+          . ./.env
+          set +a
+          npm run preview > "$RUNNER_TEMP/brac-preview.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/brac-preview.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error "http://127.0.0.1:3000/login" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/brac-preview.log" >&2
+          exit 1
+
+      - name: Collect mobile media performance
+        if: steps.scope.outputs.run == 'true'
+        run: npm run media:perf
+
+      - name: Upload media performance report
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-performance-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: artifacts/media-performance/
+
+      - name: Stop production preview
+        if: always() && steps.scope.outputs.run == 'true'
+        run: |
+          if [ -f "$RUNNER_TEMP/brac-preview.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/brac-preview.pid")" || true
+          fi
+
+      - name: Stop local Supabase
+        if: always() && steps.scope.outputs.run == 'true'
         run: npm run db:stop

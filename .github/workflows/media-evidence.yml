@@ -1,0 +1,146 @@
+name: Capture media evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact 40-character commit SHA to capture and attach evidence to
+        required: true
+        type: string
+      capture_kind:
+        description: Evidence capture to run
+        required: true
+        default: scene-acceptance
+        type: choice
+        options:
+          - screenshots
+          - motion-proof
+          - scene-acceptance
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      DO_NOT_TRACK: '1'
+      CAPTURE_COMMIT: ${{ inputs.commit }}
+      CAPTURE_KIND: ${{ inputs.capture_kind }}
+      # Capture scripts own the layout beneath this directory; keeping it outside
+      # docs ensures a normal evidence capture never dirties the repository.
+      MEDIA_CAPTURE_OUTPUT_DIR: artifacts/media-captures/pending
+      APP_URL: http://127.0.0.1:3000
+      ORIGIN: http://127.0.0.1:3000
+      ACCEPTANCE_SERVER_MODE: production preview
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+
+      - name: Verify requested commit
+        id: commit
+        run: |
+          if ! printf '%s' "$CAPTURE_COMMIT" | grep --extended-regexp --quiet '^[0-9a-fA-F]{40}$'; then
+            echo 'The commit input must be an exact 40-character SHA.' >&2
+            exit 1
+          fi
+          requested="$(git rev-parse --verify "${CAPTURE_COMMIT}^{commit}")"
+          checked_out="$(git rev-parse HEAD)"
+          if [ "$requested" != "$checked_out" ]; then
+            echo "Checkout did not resolve to the requested commit." >&2
+            echo "requested=$requested checked_out=$checked_out" >&2
+            exit 1
+          fi
+          git diff --quiet
+          printf 'sha=%s\n' "$checked_out" >> "$GITHUB_OUTPUT"
+          printf 'CAPTURE_COMMIT=%s\n' "$checked_out" >> "$GITHUB_ENV"
+          printf 'MEDIA_CAPTURE_OUTPUT_DIR=artifacts/media-captures/%s/%s\n' "$CAPTURE_KIND" "$checked_out" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Select npm version
+        run: |
+          npm install --global npm@11.18.0
+          node --version
+          npm --version
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.114.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start and rebuild local Supabase
+        run: |
+          npm run db:start
+          npm run env:local
+          npm run db:reset:local
+          npm run fixtures:users:local
+
+      - name: Install Chromium
+        run: npm exec -- playwright install --with-deps chromium
+
+      - name: Build production application
+        run: npm run build
+
+      - name: Start production preview
+        run: |
+          # env:local creates this controlled local-only file. Adapter-node reads
+          # these values at process start, not from the Vite build environment.
+          set -a
+          . ./.env
+          set +a
+          npm run preview > "$RUNNER_TEMP/brac-preview.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/brac-preview.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error "$APP_URL/login" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/brac-preview.log" >&2
+          exit 1
+
+      - name: Capture selected evidence
+        run: |
+          case "$CAPTURE_KIND" in
+            screenshots) npm run screenshots ;;
+            motion-proof) npm run motion:proof:capture ;;
+            scene-acceptance) npm run scene:acceptance:capture ;;
+            *) echo "Unsupported capture kind: $CAPTURE_KIND" >&2; exit 1 ;;
+          esac
+
+      - name: Validate capture package
+        run: npm run media:evidence:validate -- --directory "$MEDIA_CAPTURE_OUTPUT_DIR"
+
+      - name: Upload candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-evidence-${{ inputs.capture_kind }}-${{ steps.commit.outputs.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            artifacts/media-captures/
+            ${{ runner.temp }}/brac-preview.log
+
+      - name: Stop production preview
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/brac-preview.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/brac-preview.pid")" || true
+          fi
+
+      - name: Stop local Supabase
+        if: always()
+        run: npm run db:stop

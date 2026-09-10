@@ -22,7 +22,7 @@ The generated scenes are decorative atmosphere. Patron identity, relationship, s
 
 ## Motion-proof scene assets
 
-Issue [#7](https://github.com/dutycaws/ByRookAndCrook/issues/7) establishes the canonical Brewery and Bakery inputs for issue #8's layered-motion proofs. All generated PNG masters remain outside the runtime bundle under `/home/hosm/.codex/generated_images/01a07a19-440d-7091-9a4c-a71dbcf9257f`. Runtime derivatives were exported with Pillow 10.2 as quality-84 opaque WebP or quality-88-and-higher alpha WebP.
+Issue [#7](https://github.com/dutycaws/ByRookAndCrook/issues/7) establishes the canonical Brewery and Bakery inputs for issue #8's layered-motion proofs. All generated PNG masters remain outside the runtime bundle and are registered in the [source-master catalog](source-master-catalog.json) by logical `exec-…` ID and immutable content-addressed `storageKey`; the IDs cited below resolve there rather than to a workstation path. Runtime derivatives were exported with Pillow 10.2 as quality-84 opaque WebP or quality-88-and-higher alpha WebP.
 
 ### Brewery
 
@@ -122,7 +122,7 @@ The issue-#13 [assembled-scene acceptance record](../quality/scene-acceptance.md
 - Use the common `1672 × 941` design space and preserve the exact layer bounds in the JSON contract.
 - Name area assets `<area>-<object>-<state>.webp`; use two-digit suffixes for ordered states such as `groove-01`.
 - Opaque environment plates use quality-84 WebP. Alpha cutouts use quality-88 or higher WebP with the `exact` transparency option.
-- Keep generated lossless PNG masters outside the repository runtime bundle. Record their source path, prompt brief, date, and derivative relationship here.
+- Keep generated lossless PNG masters outside the repository runtime bundle. Record the catalog logical ID, immutable storage key, prompt brief, date, and derivative relationship here; never record a workstation path.
 - A mask is a separate white-alpha asset. A foreground occluder contains the reviewed environment pixels that must appear in front of a moving layer.
 - Every cutout has one documented local anchor and one design-space placement. State variants share dimensions and anchors.
 - Generated variants represent durable phase poses only. Continuous motion uses transforms, masks, and bounded procedural effects.

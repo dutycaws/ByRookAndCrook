@@ -1,6 +1,16 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import { mediaPolicy } from './media/policy.js';
+
+const RUNTIME_ASSET_DIRECTORY = 'static/assets';
+const RUNTIME_METADATA_FILES = new Set([
+  'static/assets/scenes/motion-proof-contract.json'
+]);
+const MAX_RUNTIME_RASTER_BYTES = mediaPolicy.runtime.maxRasterBytes;
+const MAX_RUNTIME_MEDIA_BYTES = mediaPolicy.runtime.maxTotalMediaBytes;
+const RASTER_EXTENSIONS = new Set(mediaPolicy.runtime.rasterExtensions);
+const VIDEO_EXTENSIONS = new Set(mediaPolicy.git.forbiddenVideoExtensions);
 
 type ExpectedAsset = {
   path: string;
@@ -9,6 +19,7 @@ type ExpectedAsset = {
   alpha: boolean;
   sha256: string;
   maxBytes: number;
+  sceneContract?: boolean;
 };
 
 type SceneLayer = {
@@ -104,6 +115,8 @@ const runtimeAssets: ExpectedAsset[] = [
   { path: 'static/assets/scenes/brewery/brewery-steam.webp', width: 680, height: 453, alpha: true, sha256: 'e1790cb06a023076c0eda879f5f79e6b6414206e06206aea4142cb955de8dce5', maxBytes: 120_000 },
   { path: 'static/assets/scenes/brewery/brewery-wort-mask.webp', width: 782, height: 235, alpha: true, sha256: '5a1b69fa4636cb6300c3b8e484ff43e7c2cc6118355c83b29395c2a2ccc39859', maxBytes: 20_000 },
   { path: 'static/assets/scenes/brewery/brewery-wort-surface.webp', width: 782, height: 235, alpha: true, sha256: '9d9c35c65eadfe109269c0f441e1a6e289e854b5e7d0e78091c9774b2e9c9e88', maxBytes: 100_000 },
+  { path: 'static/assets/scenes/lira-tavern.webp', width: 1672, height: 941, alpha: false, sha256: '89970122af0f72144f75260fc22b1547d881a1912a8d7166afed1a355b746337', maxBytes: 500_000, sceneContract: false },
+  { path: 'static/assets/scenes/torvin-tavern.webp', width: 1672, height: 941, alpha: false, sha256: 'f39423ff92118d6d02f14304135ae67259356fe114517829e423810ebd048516', maxBytes: 500_000, sceneContract: false },
   { path: 'static/assets/scenes/bakery-environment.webp', width: 1672, height: 941, alpha: false, sha256: '8669352fbb4edb26a4e5ca92248ea17ddbc00d467ae65239ff64165aae36e5eb', maxBytes: 350_000 },
   { path: 'static/assets/scenes/bakery/bakery-dough-fold-active.webp', width: 480, height: 250, alpha: true, sha256: '489892411f081ce0fee0ec4c83abdcc5fc8d8d1f6df62dcc9840fb34d56b8ffa', maxBytes: 60_000 },
   { path: 'static/assets/scenes/bakery/bakery-dough-fold-confirmed.webp', width: 480, height: 250, alpha: true, sha256: 'fa47d37e2d169b0884dc8ea59abfad5cede645d1b5d953af847414d79489d4b7', maxBytes: 60_000 },
@@ -180,14 +193,46 @@ async function assertAsset(expected: ExpectedAsset) {
   console.log(`ok ${expected.path} ${metadata.width}x${metadata.height} ${buffer.length} bytes`);
 }
 
-async function findRuntimePngs(directory: string): Promise<string[]> {
+type RuntimeFile = {
+  path: string;
+  bytes: number;
+  extension: string;
+};
+
+async function inventoryRuntimeFiles(directory: string): Promise<RuntimeFile[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map(async (entry) => {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) return findRuntimePngs(path);
-    return entry.isFile() && extname(entry.name).toLowerCase() === '.png' ? [path] : [];
+    if (entry.isDirectory()) return inventoryRuntimeFiles(path);
+    if (!entry.isFile()) return [];
+    const info = await stat(path);
+    return [{ path, bytes: info.size, extension: extname(entry.name).toLowerCase() }];
   }));
   return nested.flat();
+}
+
+function assertRuntimeInventory(files: RuntimeFile[]) {
+  const expectedByPath = new Map(runtimeAssets.map((asset) => [asset.path, asset]));
+  const mediaFiles = files.filter((file) => RASTER_EXTENSIONS.has(file.extension) || VIDEO_EXTENSIONS.has(file.extension));
+  const unreviewed = files.filter((file) => !expectedByPath.has(file.path) && !RUNTIME_METADATA_FILES.has(file.path));
+  const pngs = mediaFiles.filter((file) => file.extension === '.png');
+  const videos = mediaFiles.filter((file) => VIDEO_EXTENSIONS.has(file.extension));
+  const oversizedRasters = mediaFiles.filter((file) => RASTER_EXTENSIONS.has(file.extension) && file.bytes > MAX_RUNTIME_RASTER_BYTES);
+  // The architectural ceiling covers the complete runtime asset tree, including
+  // small contracts or future SVG/audio/font files, not only raster/video files.
+  const totalRuntimeBytes = files.reduce((total, file) => total + file.bytes, 0);
+  const errors = [
+    unreviewed.length ? `unreviewed runtime asset files: ${unreviewed.map((file) => file.path).join(', ')}` : null,
+    pngs.length ? `source PNG masters must stay outside the runtime bundle: ${pngs.map((file) => file.path).join(', ')}` : null,
+    videos.length ? `runtime video must be stored as review evidence instead: ${videos.map((file) => file.path).join(', ')}` : null,
+    oversizedRasters.length ? `runtime raster exceeds ${MAX_RUNTIME_RASTER_BYTES} bytes: ${oversizedRasters.map((file) => `${file.path} (${file.bytes})`).join(', ')}` : null,
+    totalRuntimeBytes > MAX_RUNTIME_MEDIA_BYTES ? `runtime asset total ${totalRuntimeBytes} exceeds ${MAX_RUNTIME_MEDIA_BYTES} bytes` : null
+  ].filter(Boolean);
+
+  const largest = [...files].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
+  console.log(`runtime inventory: ${files.length} files; ${mediaFiles.length} raster/video media; ${totalRuntimeBytes} total runtime bytes; ${MAX_RUNTIME_MEDIA_BYTES - totalRuntimeBytes} bytes headroom`);
+  console.log(`runtime inventory largest files: ${largest.map((file) => `${file.path} (${file.bytes} bytes)`).join(', ')}`);
+  if (errors.length) throw new Error(errors.join('; '));
 }
 
 async function assertContract() {
@@ -216,7 +261,7 @@ async function assertContract() {
     }
   }
 
-  const expectedByRuntimePath = new Map(runtimeAssets.map((asset) => [
+  const expectedByRuntimePath = new Map(runtimeAssets.filter((asset) => asset.sceneContract !== false).map((asset) => [
     `/${asset.path.replace(/^static\//, '')}`,
     asset
   ]));
@@ -286,8 +331,8 @@ async function assertContract() {
 }
 
 await Promise.all([...references, ...runtimeAssets].map(assertAsset));
-const runtimePngs = await findRuntimePngs('static/assets');
-if (runtimePngs.length) throw new Error(`source PNG masters must stay outside the runtime bundle: ${runtimePngs.join(', ')}`);
+const runtimeFiles = await inventoryRuntimeFiles(RUNTIME_ASSET_DIRECTORY);
+assertRuntimeInventory(runtimeFiles);
 await stat('static/assets/scenes/motion-proof-contract.json');
 await assertContract();
 console.log(`validated ${references.length} references and ${runtimeAssets.length} optimized runtime assets`);
