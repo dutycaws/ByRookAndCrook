@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>Rook and Crook raven</title>
+  <path fill="#e6c46d" d="M7 53 16 35c4-8 11-12 19-13l3-9c2-6 8-9 14-6 3 1 5 4 5 7l6 6-12-1-2 6 3 5-5-1 2 6-5-2c-1 9-6 15-14 17l-12 9 2-9-13 3Z"/>
+  <path d="M36 28c-7 0-13 5-17 13l15-7-11 12c8-2 14-7 16-13" stroke="#1a1308" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="49" cy="13" r="1.8" fill="#1a1308"/>
+  <path d="m33 48 1 8m8-12-1 12M29 57h8m1 0h7M16 60h37" stroke="#e6c46d" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

@@ -65,7 +65,7 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variable files
+# Project-managed secrets (use the root .env; keep only the example tracked)
 .env
 .env.*
 !.env.example
@@ -125,9 +125,6 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
-# pnpm
-.pnpm-store
-
 # yarn v3
 .pnp.*
 .yarn/*
@@ -141,3 +138,15 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# SvelteKit build output
+build/
+
+# Playwright
+playwright-report/
+test-results/
+artifacts/npc-evals/
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
