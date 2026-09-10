@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   STIR_DECAY_MS,
+  STIR_MAX_RPM,
   advanceStirPhase,
-  angularSpeedPercent,
+  angularSpeedRpm,
   beginCircularStir,
+  classifyStirRpm,
   createCircularStirState,
   foldPreviewTransform,
   gestureDistancePercent,
@@ -33,9 +35,19 @@ describe('layered scene motion', () => {
     expect(unwrapAngleDelta(Math.PI * 1.9)).toBeCloseTo(-Math.PI * 0.1);
   });
 
-  it('maps either-direction half-revolutions per second to speed 50', () => {
-    expect(angularSpeedPercent(Math.PI / 2, 500)).toBeCloseTo(50);
-    expect(angularSpeedPercent(-Math.PI / 2, 500)).toBeCloseTo(50);
+  it('maps either-direction angular movement to low, bounded RPM', () => {
+    expect(angularSpeedRpm(Math.PI / 2, 1000)).toBeCloseTo(15);
+    expect(angularSpeedRpm(-Math.PI / 2, 1000)).toBeCloseTo(15);
+    expect(angularSpeedRpm(Math.PI * 2, 500)).toBe(STIR_MAX_RPM);
+  });
+
+  it('classifies the exact low-RPM quality boundaries', () => {
+    expect(classifyStirRpm(5.99)).toBe('slow');
+    expect(classifyStirRpm(6)).toBe('good');
+    expect(classifyStirRpm(10)).toBe('perfect');
+    expect(classifyStirRpm(20)).toBe('perfect');
+    expect(classifyStirRpm(24)).toBe('good');
+    expect(classifyStirRpm(24.01)).toBe('fast');
   });
 
   it('ignores the inner dead zone and reanchors after long event gaps', () => {
@@ -49,13 +61,28 @@ describe('layered scene motion', () => {
     expect(update.state.speed).toBe(0);
   });
 
-  it('rejects nonpositive time and smooths accepted samples over 120ms', () => {
+  it('rejects nonpositive time and smooths accepted samples over 500ms', () => {
     let state = beginCircularStir(createCircularStirState(), ellipsePoint(0, 100), ellipse);
     const rejected = sampleCircularStir(state, ellipsePoint(.1 * Math.PI, 100), ellipse);
     expect(rejected.accepted).toBe(false);
     state = sampleCircularStir(state, ellipsePoint(.1 * Math.PI, 200), ellipse).state;
     state = sampleCircularStir(state, ellipsePoint(.2 * Math.PI, 300), ellipse).state;
-    expect(state.speed).toBeCloseTo(50);
+    expect(state.speed).toBeCloseTo(30);
+  });
+
+  it('keeps irregular clockwise and counter-clockwise 15 RPM input in the perfect band', () => {
+    for (const direction of [-1, 1]) {
+      let timestamp = 0;
+      let angle = 0;
+      let state = beginCircularStir(createCircularStirState(), ellipsePoint(angle, timestamp), ellipse);
+      for (const elapsed of [80, 125, 95, 140, 60]) {
+        timestamp += elapsed;
+        angle += direction * 15 * Math.PI * 2 * elapsed / 60_000;
+        state = sampleCircularStir(state, ellipsePoint(angle, timestamp), ellipse).state;
+      }
+      expect(state.speed).toBeCloseTo(15);
+      expect(classifyStirRpm(state.speed)).toBe('perfect');
+    }
   });
 
   it('decays released and idle motion to zero over 400ms', () => {
@@ -71,8 +98,8 @@ describe('layered scene motion', () => {
   });
 
   it('advances visual phase from the same speed while bounding fold previews', () => {
-    expect(advanceStirPhase(0, 50, 1, 1000)).toBeCloseTo(Math.PI);
-    expect(advanceStirPhase(0, 50, -1, 1000)).toBeCloseTo(Math.PI);
+    expect(advanceStirPhase(0, 15, 1, 1000)).toBeCloseTo(Math.PI / 2);
+    expect(advanceStirPhase(0, 15, -1, 1000)).toBeCloseTo(Math.PI * 1.5);
     expect(gestureDistancePercent(10, 90, 100)).toBe(80);
     expect(foldPreviewTransform(0, 200, 100)).toEqual({
       translatePercent: 5,

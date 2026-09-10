@@ -11,6 +11,7 @@ interface BrewerySnapshot {
     revision: number;
     currentDay: number;
     dayMinigameCompleted: boolean;
+    dailyCraftKind: 'brew' | 'bake' | null;
   };
   cells: Array<{ id: string; layoutKey: string }>;
   ingredients: Array<{ id: string; plantKey: string; quantity: number }>;
@@ -181,5 +182,38 @@ describe('brewery RPC', () => {
       gold_multiplier: 2
     });
     expect(directRewardWrite.error).not.toBeNull();
+  });
+
+  it('allows two sequential brews on the same day and retains both outputs', async () => {
+    const player = await createTestPlayer('brew-repeat');
+    createdUsers.push(player);
+    const { snapshot, ingredient } = await provisionFennel(player);
+    let current = snapshot;
+
+    for (let index = 0; index < 2; index += 1) {
+      const started = await player.client.rpc('start_brew', {
+        p_save_id: current.save.id, p_ingredient_batch_id: ingredient.id,
+        p_action_id: crypto.randomUUID(), p_expected_revision: current.save.revision
+      });
+      expect(started.error).toBeNull();
+      const sessionId = (started.data as { sessionId: string }).sessionId;
+      expect((await player.admin.from('brew_sessions').update({
+        started_at: new Date(Date.now() - 31_000).toISOString()
+      }).eq('id', sessionId)).error).toBeNull();
+      expect((await player.client.rpc('complete_brew', {
+        p_save_id: current.save.id, p_session_id: sessionId,
+        p_action_id: crypto.randomUUID(),
+        p_expected_revision: (started.data as { committedRevision: number }).committedRevision,
+        p_perfect_ticks: 120, p_good_ticks: 0, p_total_ticks: 120
+      })).error).toBeNull();
+      current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+      expect(current.save).toEqual(expect.objectContaining({
+        currentDay: 1, dayMinigameCompleted: true, dailyCraftKind: null
+      }));
+    }
+
+    expect(current.brewery.beverages).toHaveLength(2);
+    expect(current.brewery.beverages.every((beverage) => beverage.dayNumber === 1)).toBe(true);
+    expect(current.ingredients).toEqual([]);
   });
 });

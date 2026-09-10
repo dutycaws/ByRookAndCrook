@@ -10,6 +10,8 @@
     createCircularStirState,
     releaseCircularStir,
     sampleCircularStir,
+    stirRpmPercent,
+    STIR_MAX_RPM,
     tickCircularStir,
     type CircularStirState,
     type ScenePoint
@@ -68,7 +70,7 @@
   }
 
   function publish(next: number) {
-    const bounded = clamp(next, 0, 100);
+    const bounded = clamp(next, 0, STIR_MAX_RPM);
     if (Math.abs(bounded - speed) >= .05) onspeed(bounded);
   }
 
@@ -176,11 +178,12 @@
   let displayPhase = $derived(reducedMotion ? Math.PI / 2 : motionPhase);
   let motionSpeed = $derived(mode === 'physical' ? tracker.speed : speed);
   let effectSpeed = $derived(reducedMotion ? 0 : motionSpeed);
+  let effectStrength = $derived(stirRpmPercent(effectSpeed) / 100);
   let paddleX = $derived(Math.cos(displayPhase) * 205);
   let paddleY = $derived(Math.sin(displayPhase) * 45);
   let paddleRotation = $derived(clamp(Math.cos(displayPhase) * 12, -12, 12));
-  let liquidX = $derived(Math.cos(displayPhase) * 3 * (effectSpeed / 100));
-  let liquidY = $derived(Math.sin(displayPhase) * 3 * (effectSpeed / 100));
+  let liquidX = $derived(Math.cos(displayPhase) * 3 * effectStrength);
+  let liquidY = $derived(Math.sin(displayPhase) * 3 * effectStrength);
 </script>
 
 <AreaScene
@@ -201,12 +204,12 @@
   onpointercancel={release}
 >
   <SceneLayer src="/assets/scenes/brewery-environment.webp" name="Brewery environment" essential />
-  <img class="layer brazier-fire" class:heated src="/assets/scenes/brewery/brewery-fire.webp" alt="" draggable="false" style={`--heat:${Math.max(.3, effectSpeed / 100)}`} />
-  <img class="layer wort" src="/assets/scenes/brewery/brewery-wort-surface.webp" alt="" draggable="false" style={`--liquid-x:${liquidX / 782 * 100}%;--liquid-y:${liquidY / 235 * 100}%;--agitation:${effectSpeed / 100}`} />
-  <img class="layer immersion-shadow" src="/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp" alt="" draggable="false" style={`--paddle-x:${paddleX / 260 * 100}%;--paddle-y:${paddleY / 100 * 100}%;--agitation:${effectSpeed / 100}`} />
+  <img class="layer brazier-fire" class:heated src="/assets/scenes/brewery/brewery-fire.webp" alt="" draggable="false" style={`--heat:${Math.max(.3, effectStrength)}`} />
+  <img class="layer wort" src="/assets/scenes/brewery/brewery-wort-surface.webp" alt="" draggable="false" style={`--liquid-x:${liquidX / 782 * 100}%;--liquid-y:${liquidY / 235 * 100}%;--agitation:${effectStrength}`} />
+  <img class="layer immersion-shadow" src="/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp" alt="" draggable="false" style={`--paddle-x:${paddleX / 260 * 100}%;--paddle-y:${paddleY / 100 * 100}%;--agitation:${effectStrength}`} />
   <img class="layer paddle" src="/assets/scenes/brewery/brewery-paddle.webp" alt="" draggable="false" style={`--paddle-x:${paddleX / 184 * 100}%;--paddle-y:${paddleY / 570 * 100}%;--paddle-rotation:${paddleRotation}deg`} />
   <img class="layer rim" src="/assets/scenes/brewery/brewery-cauldron-foreground-rim.webp" alt="" draggable="false" />
-  <img class="layer steam" class:heated src="/assets/scenes/brewery/brewery-steam.webp" alt="" draggable="false" style={`--agitation:${effectSpeed / 100}`} />
+  <img class="layer steam" class:heated src="/assets/scenes/brewery/brewery-steam.webp" alt="" draggable="false" style={`--agitation:${effectStrength}`} />
   <div class="scene-shade" aria-hidden="true"></div>
   {#if visual.pending || visual.error || visual.phase === 'empty' || visual.phase === 'blocked' || visual.phase === 'result'}
     <div class="phase-banner" class:error={Boolean(visual.error)} aria-hidden="true">

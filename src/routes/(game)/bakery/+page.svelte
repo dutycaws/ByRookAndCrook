@@ -41,6 +41,7 @@
   let latestCard = $derived(
     data.snapshot?.bakery.intentCards.find((card) => card.sourceFoodId === latestFood?.id) ?? null
   );
+  let bakedToday = $derived(latestFood?.dayNumber === data.snapshot?.save.currentDay);
   let ovenBand = $derived(classifyOven(elapsedMs));
   let ovenMarker = $derived(Math.min(100, elapsedMs / 500));
   let visualError = $derived(transportError ?? (form?.message && !form?.success ? form.message : null));
@@ -179,32 +180,10 @@
       {#snippet scene()}
       <section class="bakery-workbench panel" aria-labelledby="bakery-stage">
         <BakeryScene {visual} disabled={pending || !!unresolved} oncommit={commitSceneGesture} />
-        {#if snapshot.save.dayMinigameCompleted && snapshot.save.dailyCraftKind === 'bake'}
-          <div class="bake-result" aria-live="polite">
-            <span class="bread-result" aria-hidden="true">🥖</span>
-            <p class="eyebrow">Day {snapshot.save.currentDay} bake complete</p>
-            <h2 id="bakery-stage">{latestFood?.name ?? 'Loaf finished'}</h2>
-            {#if latestFood}<p class="quality-display">{qualityLabel(latestFood.qualityIndex)}</p>{/if}
-            {#if latestCard}
-              <div class="card-reward">
-                <span aria-hidden="true">🃏</span>
-                <div><p class="eyebrow">Intent card earned · {latestCard.tier}</p>
-                  <strong>{latestCard.displayName}</strong><small>{latestCard.description}</small></div>
-              </div>
-            {/if}
-            <div class="result-actions">
-              <a class="primary-button inline-button" href="/bar">Offer food at the bar</a>
-              <form method="POST" action="?/advance" use:enhance={enhanceAdvance}>
-                <button class="text-button" type="submit" disabled={!hydrated || pending}>
-                  {retrying('advance') ? 'Retry resting' : 'Rest and begin next day'}
-                </button>
-              </form>
-            </div>
-          </div>
-        {:else if snapshot.save.dailyCraftKind === 'brew'}
+        {#if snapshot.save.dailyCraftKind === 'brew'}
           <div class="empty-state">
-            <span aria-hidden="true">🍺</span><h2 id="bakery-stage">Today’s craft is in the brewery</h2>
-            <p>Only one brew or bake may use the tavern kitchen each day.</p>
+            <span aria-hidden="true">🍺</span><h2 id="bakery-stage">A brew is active in the brewery</h2>
+            <p>Finish the current brew before starting another craft.</p>
             <a class="primary-button inline-button" href="/brewery">Return to the brewery</a>
           </div>
         {:else if session?.status === 'folding'}
@@ -262,9 +241,26 @@
         {:else if snapshot.ingredients.length === 0}
           <div class="empty-state"><span aria-hidden="true">🧺</span><h2 id="bakery-stage">The pantry is empty</h2>
             <p>Harvest a mature crop before beginning today’s loaf.</p>
+            {#if bakedToday && latestFood}
+              <p class="recent-craft" aria-live="polite">
+                Latest: <strong>{latestFood.name}</strong> · {qualityLabel(latestFood.qualityIndex)}
+                <a href="/bar">Offer it at the bar →</a>
+              </p>
+            {/if}
             <a class="primary-button inline-button" href="/garden">Visit the garden</a></div>
         {:else}
           <div class="bake-setup">
+            {#if bakedToday && latestFood}
+              <div class="recent-craft" aria-live="polite">
+                <div><p class="eyebrow">Latest loaf · Day {snapshot.save.currentDay}</p>
+                  <h2>{latestFood.name}</h2><span>{qualityLabel(latestFood.qualityIndex)}</span>
+                  {#if latestCard}
+                    <p class="recent-card"><span>Intent card earned · {latestCard.tier}</span>
+                      <strong>{latestCard.displayName}</strong><small>{latestCard.description}</small></p>
+                  {/if}</div>
+                <a href="/bar">Offer food at the bar →</a>
+              </div>
+            {/if}
             <p class="eyebrow">Choose one unit</p><h2 id="bakery-stage">Mix an herb loaf</h2>
             <p>Ingredient quality and its baking affinity set the loaf’s potential.</p>
             <form method="POST" action="?/start" use:enhance={enhanceStart}>
@@ -301,9 +297,9 @@
         </section>
         {#if !session && snapshot.save.dailyCraftKind === null}
           <form method="POST" action="?/advance" use:enhance={enhanceAdvance} class="rest-without-craft">
-            <p>Crafting is optional. The tavern may close without brewing or baking.</p>
+            <p>{snapshot.save.dayMinigameCompleted ? 'Craft another batch or close the tavern for today.' : 'Crafting is optional. The tavern may close without brewing or baking.'}</p>
             <button class="text-button full-button" type="submit" disabled={!hydrated || pending}>
-              {retrying('advance') ? 'Retry resting' : 'Rest without crafting'}
+              {retrying('advance') ? 'Retry resting' : snapshot.save.dayMinigameCompleted ? 'Close tavern for today' : 'Rest without crafting'}
             </button>
           </form>
         {/if}
@@ -313,8 +309,8 @@
       {#snippet action()}
         <ContextualActionStrip
           eyebrow="Bakery action"
-          title={visual.phase === 'folding' ? 'Fold the dough six times' : visual.phase === 'scoring' ? 'Score the loaf three times' : visual.phase === 'ready' ? 'Put the scored loaf in the oven' : visual.phase === 'baking' ? 'Watch the oven clock' : visual.phase === 'result' ? 'The loaf is ready' : 'Prepare today’s loaf'}
-          description={visual.phase === 'folding' || visual.phase === 'scoring' ? 'Drag directly across the illustrated dough or use the keyboard action in the scene panel.' : visual.phase === 'ready' ? 'The prepared loaf and peel are waiting at the stone oven.' : visual.phase === 'baking' ? 'The oven uses its server-backed start time and survives reloads.' : visual.phase === 'blocked' ? 'Today’s kitchen work is already underway in the Brewery.' : 'Choose one pantry ingredient; the familiar full-width Bakery workbench remains the preparation surface.'}
+          title={visual.phase === 'folding' ? 'Fold the dough six times' : visual.phase === 'scoring' ? 'Score the loaf three times' : visual.phase === 'ready' ? 'Put the scored loaf in the oven' : visual.phase === 'baking' ? 'Watch the oven clock' : visual.phase === 'result' ? 'Loaf finished · prepare another' : 'Prepare a loaf'}
+          description={visual.phase === 'folding' || visual.phase === 'scoring' ? 'Drag directly across the illustrated dough or use the keyboard action in the scene panel.' : visual.phase === 'ready' ? 'The prepared loaf and peel are waiting at the stone oven.' : visual.phase === 'baking' ? 'The oven uses its server-backed start time and survives reloads.' : visual.phase === 'blocked' ? 'The Brewery has an active batch.' : 'Choose one pantry ingredient; the familiar full-width Bakery workbench remains the preparation surface.'}
           status={pending ? 'Updating…' : visual.error ?? (visual.phase === 'baking' ? `${(visual.oven.elapsedMs / 1000).toFixed(1)} seconds` : `${snapshot.bakery.foods.length} loaves ready`)}
         >
           <a class="secondary-link compact-link" href="/ingredients">Pantry overview <span aria-hidden="true">→</span></a>
@@ -328,14 +324,14 @@
   .bakery-workbench { min-height:600px; padding:30px; }
   .bakery-ledger { display:flex; flex-direction:column; gap:18px; }
   .stage-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
-  .stage-heading h2,.bake-result h2,.oven-ready h2,.bake-setup h2 { margin:5px 0 8px; color:var(--gold-bright); font-family:'Cinzel',serif; }
+  .stage-heading h2,.oven-ready h2,.bake-setup h2 { margin:5px 0 8px; color:var(--gold-bright); font-family:'Cinzel',serif; }
   .stage-heading>strong { color:var(--gold-bright); font-family:'Cinzel',serif; font-size:24px; }
   .bakery-workbench p { color:var(--muted); }
   .step-pips { display:flex; justify-content:center; gap:9px; margin-top:18px; }
   .step-pips i { width:38px; height:5px; background:#3e2d17; }
   .step-pips i.done { background:var(--gold); }
-  .oven-ready,.bake-result { display:grid; min-height:500px; place-items:center; align-content:center; text-align:center; }
-  .oven-ready>span,.bread-result { font-size:76px; filter:drop-shadow(0 12px 20px #000); }
+  .oven-ready { display:grid; min-height:500px; place-items:center; align-content:center; text-align:center; }
+  .oven-ready>span { font-size:76px; filter:drop-shadow(0 12px 20px #000); }
   .timing-labels { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
   .timing-track { position:relative; display:flex; height:18px; margin:7px 0 14px; overflow:hidden; border:1px solid #80602f; background:#6f271d; }
   .timing-track i.yellow-one { width:16%; margin-left:40%; background:#b8892e; }
@@ -344,9 +340,6 @@
   .timing-track b { position:absolute; top:-5px; width:6px; height:28px; background:#fff3c7; box-shadow:0 0 8px #fff; }
   .oven-readout { display:flex; justify-content:space-between; margin-bottom:16px; padding:11px 14px; border:1px solid var(--border); }
   .oven-readout.red strong { color:#d9775e; }.oven-readout.yellow strong { color:#dbb95c; }.oven-readout.green strong { color:#8fbd6e; }
-  .card-reward { display:flex; max-width:480px; align-items:center; gap:14px; margin:20px auto; padding:14px 18px; border:1px solid #614823; background:#1e160c; text-align:left; }
-  .card-reward>span { font-size:32px; }.card-reward small,.card-reward strong { display:block; }
-  .result-actions { display:flex; align-items:center; justify-content:center; gap:12px; flex-wrap:wrap; }
   .bake-history { display:grid; gap:10px; margin:16px 0 0; padding:0; list-style:none; }
   .bake-history li { display:flex; gap:11px; padding:11px; border:1px solid var(--border); background:#100c07; }
   .bake-history strong,.bake-history small { display:block; }.bake-history small { color:var(--muted); }

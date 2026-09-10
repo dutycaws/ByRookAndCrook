@@ -3,9 +3,10 @@ export const SCENE_HEIGHT = 941;
 
 export const STIR_DEAD_ZONE = 0.25;
 export const STIR_REANCHOR_GAP_MS = 200;
-export const STIR_SMOOTHING_WINDOW_MS = 120;
+export const STIR_SMOOTHING_WINDOW_MS = 500;
 export const STIR_IDLE_MS = 120;
 export const STIR_DECAY_MS = 400;
+export const STIR_MAX_RPM = 40;
 
 export interface ScenePoint {
   x: number;
@@ -29,8 +30,11 @@ export interface NormalizedEllipsePoint {
 
 interface SpeedSample {
   timestamp: number;
-  speed: number;
+  radians: number;
+  elapsedMs: number;
 }
+
+export type StirZone = 'slow' | 'good' | 'perfect' | 'fast';
 
 export interface CircularStirState {
   dragging: boolean;
@@ -81,10 +85,20 @@ export function unwrapAngleDelta(delta: number): number {
   return unwrapped;
 }
 
-export function angularSpeedPercent(deltaRadians: number, elapsedMs: number): number {
+export function angularSpeedRpm(deltaRadians: number, elapsedMs: number): number {
   if (elapsedMs <= 0) return 0;
-  const revolutionsPerSecond = Math.abs(deltaRadians) / (Math.PI * 2) / (elapsedMs / 1000);
-  return clamp(revolutionsPerSecond * 100, 0, 100);
+  const revolutionsPerMinute = Math.abs(deltaRadians) / (Math.PI * 2) / (elapsedMs / 60_000);
+  return clamp(revolutionsPerMinute, 0, STIR_MAX_RPM);
+}
+
+export function classifyStirRpm(rpm: number): StirZone {
+  if (rpm >= 10 && rpm <= 20) return 'perfect';
+  if (rpm >= 6 && rpm <= 24) return 'good';
+  return rpm < 6 ? 'slow' : 'fast';
+}
+
+export function stirRpmPercent(rpm: number): number {
+  return clamp(rpm / STIR_MAX_RPM * 100, 0, 100);
 }
 
 function anchorState(
@@ -152,10 +166,11 @@ export function sampleCircularStir(
     };
   }
 
-  const speedSample = angularSpeedPercent(delta, elapsedMs);
-  const samples = [...state.samples, { timestamp: point.timestamp, speed: speedSample }]
+  const samples = [...state.samples, { timestamp: point.timestamp, radians: Math.abs(delta), elapsedMs }]
     .filter((sample) => point.timestamp - sample.timestamp <= STIR_SMOOTHING_WINDOW_MS);
-  const speed = samples.reduce((total, sample) => total + sample.speed, 0) / samples.length;
+  const totalRadians = samples.reduce((total, sample) => total + sample.radians, 0);
+  const totalElapsedMs = samples.reduce((total, sample) => total + sample.elapsedMs, 0);
+  const speed = angularSpeedRpm(totalRadians, totalElapsedMs);
   return {
     state: {
       ...state,
@@ -227,7 +242,7 @@ export function advanceStirPhase(
   elapsedMs: number
 ): number {
   if (elapsedMs <= 0 || speed <= 0) return phase;
-  const radians = direction * Math.PI * 2 * (speed / 100) * (elapsedMs / 1000);
+  const radians = direction * Math.PI * 2 * (speed / 60) * (elapsedMs / 1000);
   const next = (phase + radians) % (Math.PI * 2);
   return next < 0 ? next + Math.PI * 2 : next;
 }

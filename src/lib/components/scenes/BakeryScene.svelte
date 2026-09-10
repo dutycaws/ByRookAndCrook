@@ -23,6 +23,7 @@
   let startX = $state(0);
   let currentX = $state(0);
   let currentY = $state(0);
+  let pointerMoved = $state(false);
   let settling = $state(false);
   let reducedMotion = $state(false);
   let frozenOven = $state<{ appearance: 'pale' | 'ideal' | 'overbaked'; riseProgress: number }>({
@@ -31,6 +32,13 @@
   });
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   let trackedPhase: BakeVisualState['phase'] | null = null;
+
+  const scoringBounds = {
+    left: SCENE_WIDTH * .356,
+    right: SCENE_WIDTH * .644,
+    top: SCENE_HEIGHT * .55,
+    bottom: SCENE_HEIGHT * .835
+  };
 
   let phase = $derived(visual.phase);
   let interaction = $derived(phase === 'folding' || phase === 'scoring' ? phase : null);
@@ -100,11 +108,16 @@
   function begin(event: PointerEvent) {
     if (disabled || !scene || !interaction) return;
     const point = scenePoint(event);
+    if (interaction === 'scoring' && (
+      point.x < scoringBounds.left || point.x > scoringBounds.right
+      || point.y < scoringBounds.top || point.y > scoringBounds.bottom
+    )) return;
     pointerId = event.pointerId;
     pointerType = event.pointerType || 'unknown';
     startX = point.x;
     currentX = point.x;
     currentY = point.y;
+    pointerMoved = false;
     try {
       gestureSurface?.setPointerCapture(event.pointerId);
     } catch {
@@ -119,6 +132,7 @@
   function move(event: PointerEvent) {
     if (pointerId !== event.pointerId || !scene || !interaction) return;
     const point = scenePoint(event);
+    if (Math.hypot(point.x - startX, point.y - currentY) >= 1) pointerMoved = true;
     currentX = point.x;
     currentY = point.y;
     if (interaction === 'scoring') {
@@ -134,6 +148,9 @@
     if (gestureSurface?.hasPointerCapture(event.pointerId)) gestureSurface.releasePointerCapture(event.pointerId);
     pointerId = null;
     pointerType = 'none';
+    const validScore = kind !== 'scoring' || pointerMoved && value >= 10;
+    pointerMoved = false;
+    if (!validScore) return;
     settling = kind === 'folding';
     clearTimeout(settleTimer);
     if (settling) settleTimer = setTimeout(() => (settling = false), reducedMotion ? 0 : 260);
@@ -145,13 +162,14 @@
     if (pointerId !== null && gestureSurface?.hasPointerCapture(pointerId)) gestureSurface.releasePointerCapture(pointerId);
     pointerId = null;
     pointerType = 'none';
+    pointerMoved = false;
     settling = false;
   }
 
-  function keyboardCommit(event: MouseEvent) {
-    if (event.detail === 0 && !disabled && interaction) {
-      oncommit(interaction === 'folding' ? 'fold' : 'score', 70);
-    }
+  function keyboardCommit(event: KeyboardEvent) {
+    if (event.repeat || !['Enter', ' '].includes(event.key) || disabled || !interaction) return;
+    event.preventDefault();
+    oncommit(interaction === 'folding' ? 'fold' : 'score', 70);
   }
 
   function freezeOvenVisual() {
@@ -254,9 +272,9 @@
   {#if interaction}
     <button bind:this={gestureSurface} class="gesture-surface" type="button" {disabled}
       aria-label={interaction === 'folding'
-        ? `Fold dough, ${visual.folds.complete} of 6 complete. Drag horizontally or press Enter for a keyboard fold.`
-        : `Score loaf, ${visual.scores.complete} of 3 complete. Drag horizontally or press Enter for a keyboard score.`}
-      onpointerdown={begin} onpointermove={move} onpointerup={finish} onpointercancel={resetGesture} onclick={keyboardCommit}></button>
+        ? `Fold dough, ${visual.folds.complete} of 6 complete. Drag horizontally or press Enter or Space for a keyboard fold.`
+        : `Score loaf, ${visual.scores.complete} of 3 complete. Drag across the loaf or press Enter or Space for a keyboard score.`}
+      onpointerdown={begin} onpointermove={move} onpointerup={finish} onpointercancel={resetGesture} onkeydown={keyboardCommit}></button>
     <div class="gesture-hint" aria-hidden="true"><span>{interaction === 'folding' ? '↔' : '╱'}</span>
       {interaction === 'folding' ? 'Drag to fold' : 'Swipe to score'}</div>
   {/if}
@@ -281,15 +299,15 @@
   .oven-embers.heated { opacity:.72; animation:ember-breathe 1.1s ease-in-out infinite alternate; }
   .oven-steam { left:38.158%; top:12.009%; z-index:7; width:29.007%; height:34.325%; opacity:0; mix-blend-mode:screen; filter:sepia(.12) brightness(.92); }
   .oven-steam.heated { opacity:.26; animation:steam-rise 3.6s ease-in-out infinite alternate; }
-  .oven-peel { left:30.024%; top:31.881%; z-index:8; width:55.024%; height:63.762%; transform:translate(8%,20%) scale(.9); transform-origin:42% 48%; filter:drop-shadow(8px 14px 10px #0009); }
+  .oven-peel { left:30.024%; top:31.881%; z-index:9; width:55.024%; height:63.762%; transform:translate(8%,20%) scale(.9); transform-origin:42% 48%; filter:drop-shadow(8px 14px 10px #0009); }
   .oven-peel.inserting { animation:peel-in 1.15s cubic-bezier(.2,.72,.2,1) both; }
   .oven-peel.extracted { z-index:10; animation:peel-out .72s cubic-bezier(.2,.72,.2,1) both; }
-  .loaf-stack { position:absolute; left:34.51%; top:27.949%; z-index:8; width:31.1%; height:44.102%; transform:translateY(calc((1 - var(--rise)) * 6%)) scale(calc(.86 + var(--rise) * .14)); transform-origin:50% 82%; filter:drop-shadow(0 14px 10px #000a); }
+  .loaf-stack { position:absolute; left:34.51%; top:27.949%; z-index:9; width:31.1%; height:44.102%; transform:translateY(calc((1 - var(--rise)) * 6%)) scale(calc(.86 + var(--rise) * .14)); transform-origin:50% 82%; filter:drop-shadow(0 14px 10px #000a); }
   .loaf-stack.inserting { animation:loaf-in 1.15s cubic-bezier(.2,.72,.2,1) both; }
   .loaf-stack.extracted { z-index:11; animation:loaf-out .72s cubic-bezier(.2,.72,.2,1) both; }
   .loaf { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transition:opacity 1.1s linear; }
   .loaf.pale { opacity:var(--pale); }.loaf.ideal { opacity:var(--ideal); }.loaf.overbaked { opacity:var(--overbaked); }
-  .oven-foreground { left:23.086%; top:45.696%; z-index:9; width:53.828%; height:31.881%; }
+  .oven-foreground { left:23.086%; top:45.696%; z-index:8; width:53.828%; height:31.881%; }
   .scene-shade { position:absolute; inset:0; z-index:12; box-shadow:inset 0 0 44px 18px #08040166; pointer-events:none; }
   .phase-banner { position:absolute; left:50%; bottom:4%; z-index:14; padding:.45rem .8rem; border:1px solid #a47a38aa; color:#f0d295; background:#100b06df; font:600 .78rem 'Cinzel',serif; letter-spacing:.08em; text-transform:uppercase; transform:translateX(-50%); }
   .phase-banner.error { border-color:#a85f49; color:#ffd2c4; }

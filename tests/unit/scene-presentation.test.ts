@@ -62,12 +62,17 @@ describe('scene presentation contracts', () => {
       id: 'brew-1', ingredientBatchId: 'ingredient-1', plantKey: 'fennel', plantName: 'Fennel', icon: '🌿',
       ingredientQualityIndex: 3, ingredientBrewBonus: 1, startedAt: '2026-09-10T00:00:00Z', durationSeconds: 30
     };
-    expect(deriveBrewVisualState(game, input)).toMatchObject({ phase: 'active', agitation: { speed: 100 } });
+    expect(deriveBrewVisualState(game, input)).toMatchObject({ phase: 'active', agitation: { speed: 40 } });
     expect(deriveBrewVisualState(game, { ...input, remainingMs: 0 }).phase).toBe('ready');
     game.save.dailyCraftKind = 'bake';
     expect(deriveBrewVisualState(game, input).phase).toBe('blocked');
-    game.save.dailyCraftKind = 'brew';
+    game.brewery.activeSession = null;
+    game.save.dailyCraftKind = null;
     game.save.dayMinigameCompleted = true;
+    game.brewery.beverages.push({
+      id: 'beverage-1', name: 'Fennel mead', qualityIndex: 4,
+      ingredientBatchId: 'ingredient-1', dayNumber: 2, createdAt: '2026-09-10T00:00:00Z'
+    });
     expect(deriveBrewVisualState(game, input).phase).toBe('result');
   });
 
@@ -116,7 +121,7 @@ describe('scene presentation contracts', () => {
     game.bakery.activeSession = null;
     game.save.dailyCraftKind = 'brew';
     expect(deriveBakeVisualState(game, input).phase).toBe('blocked');
-    game.save.dailyCraftKind = 'bake';
+    game.save.dailyCraftKind = null;
     game.save.dayMinigameCompleted = true;
     game.bakery.foods.push({
       id: 'food-1', name: 'Hearth loaf', recipeKey: 'herb-loaf', qualityIndex: 4,

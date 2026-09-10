@@ -68,6 +68,8 @@ test('harvested ingredients become persistent food through the reload-safe baker
     await expect(page.locator('[data-motion-proof="bakery"]')).toHaveAttribute('data-bakery-phase', 'result');
     await expect(page.getByText('Intent card earned · exceptional')).toBeVisible();
     await expect(page.getByText('Insight', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Begin today’s loaf' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close tavern for today' })).toBeVisible();
 
     await page.route('**/assets/scenes/bakery-environment.webp', (route) => route.abort());
     await page.reload();

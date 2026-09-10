@@ -32,7 +32,7 @@ async function sceneProjection(scene: Locator) {
   };
 }
 
-async function dragCircle(page: Page, clockwise: boolean) {
+async function dragCircle(page: Page, clockwise: boolean, stepDelayMs = 14) {
   const scene = page.locator('[data-motion-proof="brewery"]');
   const projection = await sceneProjection(scene);
   const center = projection.point(836, 463);
@@ -44,8 +44,8 @@ async function dragCircle(page: Page, clockwise: boolean) {
   await page.mouse.move(points[0].x, points[0].y);
   await page.mouse.down();
   for (const point of points.slice(1)) {
+    await page.waitForTimeout(stepDelayMs);
     await page.mouse.move(point.x, point.y);
-    await page.waitForTimeout(14);
   }
   return scene;
 }
@@ -122,8 +122,9 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
     await expect(scene.locator('img')).toHaveCount(7);
     await expect(scene.locator('.brazier-fire')).toHaveClass(/heated/);
     await expect(scene.locator('.steam')).toHaveClass(/heated/);
-    await dragCircle(page, true);
-    await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThan(10);
+    await dragCircle(page, true, 160);
+    await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThanOrEqual(10);
+    expect(Number(await scene.getAttribute('data-speed'))).toBeLessThanOrEqual(20);
     await expect(scene).toHaveAttribute('data-pointer-type', 'mouse');
     await page.getByRole('radio', { name: /Assisted control/ }).evaluate((control: HTMLInputElement) => control.click());
     await expect(scene).toHaveAttribute('data-input-mode', 'assisted');
@@ -147,19 +148,19 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
 
     await dragCircle(page, false);
     await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThan(10);
-    expect(Number(await scene.getAttribute('data-speed'))).toBeLessThanOrEqual(100);
+    expect(Number(await scene.getAttribute('data-speed'))).toBeLessThanOrEqual(40);
     await page.mouse.up();
     await expect.poll(async () => Number(await scene.getAttribute('data-speed')), { timeout: 1_200 }).toBe(0);
 
     await page.getByRole('radio', { name: /Assisted control/ }).check();
     await expect(scene).toHaveAttribute('data-input-mode', 'assisted');
-    const slider = page.getByLabel('Stirring speed');
+    const slider = page.getByLabel('Stirring speed in RPM', { exact: true });
     await slider.evaluate((control) => {
       const input = control as HTMLInputElement;
-      input.value = '50';
+      input.value = '15';
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await expect(scene).toHaveAttribute('data-speed', '50');
+    await expect(scene).toHaveAttribute('data-speed', '15');
     await expect(page.locator('.zone-readout strong')).toHaveText('Perfect');
 
     await page.getByRole('radio', { name: /Physical stirring/ }).check();
@@ -272,7 +273,10 @@ test('the Bakery scene preserves pointer, touch, pen, keyboard, cancellation, an
     await page.waitForTimeout(300);
     await expect(page.locator('.stage-heading > strong')).toHaveText('2/6');
 
-    for (let count = 3; count <= 6; count += 1) {
+    await swipeBakeryPointer(page, 'pen', { x: 652, y: 649 }, { x: 1104, y: 649 }, true);
+    await expect(page.locator('.stage-heading > strong')).toHaveText('3/6');
+
+    for (let count = 4; count <= 6; count += 1) {
       await page.getByRole('button', { name: 'Fold dough with keyboard' }).click();
       if (count < 6) await expect(page.locator('.stage-heading > strong')).toHaveText(`${count}/6`);
     }
@@ -280,34 +284,82 @@ test('the Bakery scene preserves pointer, touch, pen, keyboard, cancellation, an
     scene = page.locator('[data-motion-proof="bakery"]');
     await expect(scene).toHaveAttribute('data-bakery-phase', 'scoring');
     projection = await sceneProjection(scene);
+    const scoreRequests: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/bakery' && url.search === '?/score') scoreRequests.push(request.postData() ?? '');
+    });
+    const scoreSurface = scene.locator('.gesture-surface');
+
+    point = projection.point(760, 620);
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(page.locator('.stage-heading > strong')).toHaveText('0/3');
+    expect(scoreRequests).toHaveLength(0);
+
+    const jitterEnd = projection.point(830, 620);
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.down();
+    await page.mouse.move(jitterEnd.x, jitterEnd.y);
+    await page.mouse.up();
+    await expect(page.locator('.stage-heading > strong')).toHaveText('0/3');
+    expect(scoreRequests).toHaveLength(0);
+
+    const outside = projection.point(220, 620);
+    await page.mouse.move(outside.x, outside.y);
+    await page.mouse.down();
+    await page.mouse.move(point.x, point.y);
+    await page.mouse.up();
+    await expect(page.locator('.stage-heading > strong')).toHaveText('0/3');
+    expect(scoreRequests).toHaveLength(0);
+
+    await scoreSurface.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.stage-heading > strong')).toHaveText('1/3');
+    await scoreSurface.focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator('.stage-heading > strong')).toHaveText('2/3');
+    await expect.poll(() => scoreRequests.length).toBe(2);
+    await page.waitForLoadState('networkidle');
+
+    scene = page.locator('[data-motion-proof="bakery"]');
+    projection = await sceneProjection(scene);
     point = projection.point(652, 621);
     await page.mouse.move(point.x, point.y);
     await page.mouse.down();
     point = projection.point(1020, 574);
     await page.mouse.move(point.x, point.y, { steps: 8 });
-    await expect(scene.locator('.scoring-tool')).toBeVisible();
     await page.mouse.up();
-    await expect(page.locator('.stage-heading > strong')).toHaveText('1/3');
-    await expect(scene.locator('.groove')).toHaveCount(1);
-
-    await swipeBakeryPointer(page, 'pen', { x: 652, y: 621 }, { x: 1020, y: 574 }, true);
-    await expect(page.locator('.stage-heading > strong')).toHaveText('2/3');
-    await expect(scene.locator('.groove')).toHaveCount(2);
-
-    await page.getByRole('button', { name: 'Score loaf with keyboard' }).click();
     await expect(scene).toHaveAttribute('data-bakery-phase', 'ready');
+    expect(scoreRequests).toHaveLength(3);
     await expect(scene.locator('.oven-peel')).toBeVisible();
     await expect(scene.locator('.loaf.pale')).toBeVisible();
+    await expect(scene.locator('.oven-foreground')).toHaveCSS('z-index', '8');
+    await expect(scene.locator('.oven-peel')).toHaveCSS('z-index', '9');
+    await expect(scene.locator('.loaf-stack')).toHaveCSS('z-index', '9');
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(scene.locator('.oven-foreground')).toHaveCSS('z-index', '8');
+    await expect(scene.locator('.oven-peel')).toHaveCSS('z-index', '9');
+    await expect(scene.locator('.loaf-stack')).toHaveCSS('z-index', '9');
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(scene).toHaveAttribute('data-reduced-motion', 'true');
     await page.getByRole('button', { name: 'Put loaf in oven' }).click();
     await expect(scene).toHaveAttribute('data-bakery-phase', 'baking');
+    await expect(scene.locator('.oven-foreground')).toHaveCSS('z-index', '8');
+    await expect(scene.locator('.oven-peel')).toHaveCSS('z-index', '9');
+    await expect(scene.locator('.loaf-stack')).toHaveCSS('z-index', '9');
     await expect(scene.locator('.oven-embers')).toHaveCSS('animation-name', 'none');
     await expect(scene.locator('.oven-steam')).toHaveCSS('animation-name', 'none');
-    const staticLoafStyle = await scene.locator('.loaf-stack').getAttribute('style');
+    const staticLoafRise = await scene.locator('.loaf-stack').evaluate((element) =>
+      getComputedStyle(element).getPropertyValue('--rise')
+    );
     await page.waitForTimeout(350);
-    await expect(scene.locator('.loaf-stack')).toHaveAttribute('style', staticLoafStyle!);
+    expect(await scene.locator('.loaf-stack').evaluate((element) =>
+      getComputedStyle(element).getPropertyValue('--rise')
+    )).toBe(staticLoafRise);
     await expect(scene).toBeVisible();
     await expectNoHorizontalOverflow(page);
   } finally {

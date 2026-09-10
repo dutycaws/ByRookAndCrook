@@ -117,11 +117,12 @@ export function deriveBrewVisualState(
   }
 ): BrewVisualState {
   const session = snapshot?.brewery.activeSession ?? null;
+  const latestBeverage = snapshot?.brewery.beverages[0] ?? null;
   let phase: BrewVisualPhase = 'empty';
   if (snapshot) {
     if (snapshot.save.dailyCraftKind === 'bake') phase = 'blocked';
-    else if (snapshot.save.dayMinigameCompleted) phase = 'result';
     else if (session) phase = input.remainingMs <= 0 ? 'ready' : 'active';
+    else if (latestBeverage?.dayNumber === snapshot.save.currentDay) phase = 'result';
     else phase = snapshot.ingredients.length > 0 ? 'setup' : 'empty';
   }
   return {
@@ -129,7 +130,7 @@ export function deriveBrewVisualState(
     designSize: SCENE_DESIGN_SIZE,
     phase,
     session: session ? { id: session.id, startedAt: session.startedAt, durationSeconds: session.durationSeconds } : null,
-    agitation: { speed: Math.min(100, Math.max(0, input.speed)), zone: input.zone },
+    agitation: { speed: Math.min(40, Math.max(0, input.speed)), zone: input.zone },
     pending: input.pending,
     error: input.error
   };
@@ -145,6 +146,7 @@ export function deriveBakeVisualState(
   }
 ): BakeVisualState {
   const session = snapshot?.bakery.activeSession ?? null;
+  const latestFood = snapshot?.bakery.foods[0] ?? null;
   const rules = snapshot?.bakery.rules;
   const elapsedMs = Math.max(0, input.elapsedMs);
   const idealMs = (rules?.idealSeconds ?? 30) * 1000;
@@ -157,8 +159,8 @@ export function deriveBakeVisualState(
   let phase: BakeVisualPhase = 'empty';
   if (snapshot) {
     if (snapshot.save.dailyCraftKind === 'brew') phase = 'blocked';
-    else if (snapshot.save.dayMinigameCompleted && snapshot.save.dailyCraftKind === 'bake') phase = 'result';
     else if (session) phase = session.status;
+    else if (latestFood?.dayNumber === snapshot.save.currentDay) phase = 'result';
     else phase = snapshot.ingredients.length > 0 ? 'setup' : 'empty';
   }
   return {

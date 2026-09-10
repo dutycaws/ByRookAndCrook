@@ -5,6 +5,7 @@
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import BreweryScene from '$lib/components/scenes/BreweryScene.svelte';
   import { qualityLabel } from '$lib/game/contracts';
+  import { classifyStirRpm, stirRpmPercent, STIR_MAX_RPM } from '$lib/game/scene-motion';
   import { deriveBrewVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
 
@@ -24,6 +25,7 @@
   let transportError = $state<string | null>(null);
   let inputMode = $state<'physical' | 'assisted'>('physical');
   let hydrated = $state(false);
+  const classifySpeed = classifyStirRpm;
 
   onMount(() => {
     hydrated = true;
@@ -34,6 +36,7 @@
   let latestCard = $derived(
     data.snapshot?.brewery.intentCards.find((card) => card.sourceBeverageId === latestBeverage?.id) ?? null
   );
+  let brewedToday = $derived(latestBeverage?.dayNumber === data.snapshot?.save.currentDay);
   let zone = $derived(classifySpeed(speed));
   let visualError = $derived(transportError ?? (form?.message && !form?.success ? form.message : null));
   let progress = $derived(
@@ -48,12 +51,6 @@
       selectedIngredientId = ingredients[0]?.id ?? '';
     }
   });
-
-  function classifySpeed(value: number): 'slow' | 'good' | 'perfect' | 'fast' {
-    if (value >= 42 && value <= 58) return 'perfect';
-    if (value >= 30 && value <= 70) return 'good';
-    return value < 30 ? 'slow' : 'fast';
-  }
 
   function randomActionId() {
     return crypto.randomUUID();
@@ -201,34 +198,9 @@
         {#if snapshot.save.dailyCraftKind === 'bake'}
           <div class="empty-state">
             <span aria-hidden="true">🥖</span>
-            <h2 id="brew-title">Today’s craft is in the bakery</h2>
-            <p>Only one brew or bake may use the tavern kitchen each day.</p>
+            <h2 id="brew-title">A loaf is active in the bakery</h2>
+            <p>Finish the current loaf before starting another craft.</p>
             <a class="primary-button inline-button" href="/bakery">Return to the bakery</a>
-          </div>
-        {:else if snapshot.save.dayMinigameCompleted}
-          <div class="brew-result" aria-live="polite">
-            <span class="large-icon" aria-hidden="true">🍺</span>
-            <p class="eyebrow">Day {snapshot.save.currentDay} craft complete</p>
-            <h2 id="brew-title">{latestBeverage?.name ?? 'Brew bottled'}</h2>
-            {#if latestBeverage}
-              <p class="quality-display">{qualityLabel(latestBeverage.qualityIndex)}</p>
-            {/if}
-            {#if latestCard}
-              <div class="card-reward">
-                <span aria-hidden="true">🃏</span>
-                <div>
-                  <p class="eyebrow">Intent card earned · {latestCard.tier}</p>
-                  <strong>{latestCard.displayName}</strong>
-                  <small>{latestCard.description}</small>
-                </div>
-              </div>
-            {/if}
-            <form method="POST" action="?/advance" use:enhance={enhanceAdvance}>
-              <button class="primary-button" type="submit" disabled={!hydrated || pending}>
-                {pending ? 'Closing the tavern…' : 'Rest and begin next day'}
-              </button>
-            </form>
-            <a class="secondary-link" href="/bar">Serve a drink at the bar →</a>
           </div>
         {:else if session}
           <div class="brew-progress-heading">
@@ -248,7 +220,7 @@
               <span>Too slow</span><span>Sweet spot</span><span>Too fast</span>
             </div>
             <div class="sweet-spot-bar">
-              <i style={`left: calc(${speed}% - 2px)`}></i>
+              <i style={`left: calc(${stirRpmPercent(speed)}% - 2px)`}></i>
             </div>
           </div>
 
@@ -265,13 +237,13 @@
           </fieldset>
 
           <label class="speed-control">
-            <span>Stirring speed <small>Assisted control holds this pace</small></span>
-            <input aria-label="Stirring speed" type="range" min="0" max="100" step="1" bind:value={speed} disabled={inputMode !== 'assisted'} />
+            <span>Stirring speed <small>Assisted control holds this pace · {Math.round(speed)} RPM</small></span>
+            <input aria-label="Stirring speed in RPM" type="range" min="0" max={STIR_MAX_RPM} step="1" bind:value={speed} disabled={inputMode !== 'assisted'} />
           </label>
 
           <div class="zone-readout {zone}" role="status" aria-live="polite">
             <strong>{zone === 'perfect' ? 'Perfect' : zone === 'good' ? 'Good' : zone === 'slow' ? 'Too slow' : 'Too fast'}</strong>
-            <span>{zone === 'perfect' ? 'Keep it here' : zone === 'good' ? 'Close to the sweet spot' : 'Move toward the green band'}</span>
+            <span>{Math.round(speed)} RPM · {zone === 'perfect' ? 'Keep it between 10 and 20 RPM' : zone === 'good' ? 'Close to the sweet spot' : 'Move toward the green band'}</span>
           </div>
 
           <form method="POST" action="?/complete" use:enhance={enhanceComplete}>
@@ -284,10 +256,33 @@
             <span aria-hidden="true">🧺</span>
             <h2 id="brew-title">The ingredient shelf is empty</h2>
             <p>Harvest a mature crop before beginning today's brew.</p>
+            {#if brewedToday && latestBeverage}
+              <p class="recent-craft" aria-live="polite">
+                Latest: <strong>{latestBeverage.name}</strong> · {qualityLabel(latestBeverage.qualityIndex)}
+                <a href="/bar">Serve it at the bar →</a>
+              </p>
+            {/if}
             <a class="primary-button inline-button" href="/garden">Visit the garden</a>
           </div>
         {:else}
           <div class="brew-setup">
+            {#if brewedToday && latestBeverage}
+              <div class="recent-craft" aria-live="polite">
+                <div>
+                  <p class="eyebrow">Latest batch · Day {snapshot.save.currentDay}</p>
+                  <h2>{latestBeverage.name}</h2>
+                  <span>{qualityLabel(latestBeverage.qualityIndex)}</span>
+                  {#if latestCard}
+                    <p class="recent-card">
+                      <span>Intent card earned · {latestCard.tier}</span>
+                      <strong>{latestCard.displayName}</strong>
+                      <small>{latestCard.description}</small>
+                    </p>
+                  {/if}
+                </div>
+                <a href="/bar">Serve a drink at the bar →</a>
+              </div>
+            {/if}
             <p class="eyebrow">Choose one unit</p>
             <h2 id="brew-title">Prepare today's infusion</h2>
             <p>Higher ingredient quality raises the starting potential. Your stirring determines the finish.</p>
@@ -342,14 +337,22 @@
           {/if}
         </section>
 
+        {#if !session && snapshot.save.dailyCraftKind === null}
+          <form method="POST" action="?/advance" use:enhance={enhanceAdvance} class="close-tavern">
+            <p>{snapshot.save.dayMinigameCompleted ? 'Craft another batch or close the tavern for today.' : 'Crafting is optional. The tavern may close now.'}</p>
+            <button class="text-button full-button" type="submit" disabled={!hydrated || pending}>
+              {pending ? 'Closing the tavern…' : snapshot.save.dayMinigameCompleted ? 'Rest and begin next day' : 'Rest without crafting'}
+            </button>
+          </form>
+        {/if}
         <a class="secondary-link" href="/ingredients">Choose from the pantry <span aria-hidden="true">→</span></a>
       </div>
       {/snippet}
       {#snippet action()}
         <ContextualActionStrip
           eyebrow="Brewery action"
-          title={visual.phase === 'active' || visual.phase === 'ready' ? 'Keep the paddle moving' : visual.phase === 'result' ? 'The batch is bottled' : 'Prepare the next infusion'}
-          description={visual.phase === 'active' || visual.phase === 'ready' ? 'Use physical circular input or the assisted slider; both feed the same live speed.' : visual.phase === 'blocked' ? 'Today’s kitchen work is already underway in the Bakery.' : 'Select a pantry ingredient in the scene panel.'}
+          title={visual.phase === 'active' || visual.phase === 'ready' ? 'Keep the paddle moving' : visual.phase === 'result' ? 'Batch bottled · prepare another' : 'Prepare the next infusion'}
+          description={visual.phase === 'active' || visual.phase === 'ready' ? 'Use physical circular input or the assisted slider; both feed the same live speed.' : visual.phase === 'blocked' ? 'The Bakery has an active loaf.' : 'Select a pantry ingredient in the scene panel.'}
           status={pending ? 'Updating…' : visual.error ?? (session ? `${Math.ceil(remainingMs / 1000)} seconds remain` : `${snapshot.brewery.beverages.length} bottled`)}
         >
           <a class="secondary-link compact-link" href="/ingredients">Pantry overview <span aria-hidden="true">→</span></a>

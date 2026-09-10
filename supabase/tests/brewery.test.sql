@@ -73,8 +73,8 @@ select throws_ok(
       '52000000-0000-4000-8000-000000000002', 2
     )
   $$,
-  'PT409', 'A brew already exists for this tavern day',
-  'a second brew cannot start on the same day'
+  'PT409', 'Finish the active brew before starting another craft',
+  'a second brew cannot start while one is active'
 );
 select throws_ok(
   $$
@@ -117,7 +117,7 @@ select is((select count(*) from public.intent_cards where source_kind='brew'), 1
 select is((select tier from public.intent_cards where source_kind='brew'), 'exceptional', 'Resplendent brew earns an exceptional intent card');
 select is((select card_key from public.intent_cards where source_kind='brew'), 'resolve', 'a Resplendent brew rewards Resolve');
 select is((select revision from public.tavern_saves), 3::bigint, 'completion advances revision once');
-select is((select day_minigame_completed from public.tavern_saves), true, 'completion closes the daily minigame');
+select is((select day_minigame_completed from public.tavern_saves), true, 'completion records that a craft finished today');
 select ok((public.get_tavern_snapshot() #>> '{brewery,activeSession}') is null, 'completed brew is no longer active');
 
 select lives_ok(
@@ -143,17 +143,8 @@ select throws_ok(
   'PT409', 'Action identifier was already used for a different request',
   'a completion action cannot be reused with changed telemetry'
 );
-select throws_ok(
-  $$
-    select public.start_brew(
-      (select value from test_ids where key = 'save-one'),
-      (select value from test_ids where key = 'fennel-batch'),
-      '52000000-0000-4000-8000-000000000003', 3
-    )
-  $$,
-  'PT422', 'The daily tavern minigame is already complete',
-  'no second minigame can start before the next day'
-);
+select ok((select daily_craft_kind is null from public.tavern_saves),
+  'completion releases the craft slot for another same-day batch');
 
 select lives_ok(
   $$ select public.advance_tavern_day(
@@ -184,7 +175,7 @@ select lives_ok(
   $$,
   'the remaining ingredient can start the next day brew'
 );
-select is((select count(*) from public.brew_sessions), 2::bigint, 'one session is stored for each tavern day');
+select is((select count(*) from public.brew_sessions), 2::bigint, 'completed history is retained across tavern days');
 select is((select revision from public.tavern_saves), 5::bigint, 'the next brew start advances revision');
 select throws_ok(
   $$ update public.brew_sessions set status = 'completed' where true $$,

@@ -49,7 +49,7 @@ try {
   await page.getByRole('radio', { name: /Assisted control/ }).check();
   await page.getByLabel('Stirring speed').evaluate((control) => {
     const slider = control as HTMLInputElement;
-    slider.value = '50';
+    slider.value = '15';
     slider.dispatchEvent(new Event('input', { bubbles: true }));
     slider.dispatchEvent(new Event('change', { bubbles: true }));
   });

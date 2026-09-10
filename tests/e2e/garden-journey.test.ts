@@ -216,7 +216,7 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await expect(page.locator('.zone-readout strong')).toHaveText('Too slow');
     await slider.evaluate((control) => {
       const input = control as HTMLInputElement;
-      input.value = '50';
+      input.value = '15';
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await expect(page.locator('.zone-readout strong')).toHaveText('Perfect');
@@ -243,6 +243,8 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await expect(page.getByText('Intent card earned · fine')).toBeVisible();
     await expect(page.getByText('Charm', { exact: true })).toBeVisible();
     await expect(page.getByText('Frame the keeper’s words with warmth and personal appeal.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Begin 30-second brew' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Rest and begin next day' })).toBeVisible();
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Honest Mead' })).toBeVisible();

@@ -272,12 +272,12 @@ async function startBenchmarkInteraction(page: Page, area: Area) {
   }
   if (area === 'brewery') {
     await page.evaluate(`(() => {
-      const slider = document.querySelector('input[type="range"][aria-label="Stirring speed"]');
+      const slider = document.querySelector('input[type="range"][aria-label="Stirring speed in RPM"]');
       if (!slider) throw new Error('The assisted Brewery slider is unavailable.');
       let high = false;
       window.__sceneAcceptanceDriver = setInterval(() => {
         high = !high;
-        slider.value = high ? '56' : '44';
+        slider.value = high ? '18' : '12';
         slider.dispatchEvent(new Event('input', { bubbles: true }));
       }, 140);
     })()`);
