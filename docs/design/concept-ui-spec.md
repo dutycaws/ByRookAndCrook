@@ -107,12 +107,12 @@ Normal idle, completion, and reduced-motion views use the same paddle at its sta
 
 ### Bakery layer and motion contract
 
-The Bakery holds one fixed view of a soot-dark stone oven. A removable kneading board establishes the preparation phase without changing cameras, then the board and dough layers may be hidden for the existing oven phase. Fire orange, flour, dough, stone, and timber retain distinct material values.
+The Bakery holds one fixed view of a soot-dark stone oven. The preferred broad foreground workbench returns as a removable preparation layer, preserving its original full-width composition while still allowing the surface and dough to disappear for the existing oven phase. Fire orange, flour, dough, stone, and timber retain distinct material values.
 
 | Z | Layer | Design bounds | Purpose |
 | ---: | --- | --- | --- |
 | 0 | `bakery-environment.webp` | `0, 0, 1672, 941` | Opaque fixed oven room without hands, bread, tools, UI, or text |
-| 1 | `bakery-preparation-surface.webp` | `356, 570, 960, 320` | Removable oak kneading board for folding, scoring, and ready phases |
+| 1 | `bakery-preparation-surface.webp` | `0, 550, 1672, 391` | Removable full-width oak workbench for folding, scoring, and ready phases |
 | 2 | `bakery-dough-shadow.webp` | `596, 605, 480, 250` | Stable contact shadow independent of the dough texture |
 | 3 | Rest, active-fold, or confirmed-fold dough | `596, 535, 480, 250` | Three matching poses cropped from one canonical generated pose sheet |
 | 4 | `bakery-score-groove-01.webp` | `596, 535, 480, 250` | First confirmed score overlay; it is never painted into a replacement loaf |
@@ -136,7 +136,7 @@ The artwork is presentational. Existing server actions, immutable command IDs, r
 ### Motion-proof review evidence
 
 - [`motion-assets-brewery.jpg`](../screenshots/motion-assets-brewery.jpg) verifies the paddle behind the generated front-rim occluder in the fixed Brewery camera.
-- [`motion-assets-bakery.jpg`](../screenshots/motion-assets-bakery.jpg) verifies the preparation board, shadow, confirmed dough, scoring tool, and groove in the fixed Bakery camera.
+- [`motion-assets-bakery.jpg`](../screenshots/motion-assets-bakery.jpg) verifies the full-width preparation workbench, shadow, confirmed dough, scoring tool, and groove in the fixed Bakery camera.
 - [`motion-asset-contact-sheet.png`](../screenshots/motion-asset-contact-sheet.png) shows the two assembled scenes and each alpha cutout against a checker field.
 
 These images prove layer compatibility and art direction. Interactive motion, rapid reversal, display-density checks, and demonstration clips remain the acceptance work of issue #8.

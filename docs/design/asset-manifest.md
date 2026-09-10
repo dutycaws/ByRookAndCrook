@@ -45,7 +45,7 @@ The wort surface and foreground rim are extracted from the same reviewed environ
 | Runtime asset | Dimensions | Alpha | SHA-256 | Source and use |
 | --- | ---: | :---: | --- | --- |
 | `static/assets/scenes/bakery-environment.webp` | 1,672 × 941 | No | `8669352fbb4edb26a4e5ca92248ea17ddbc00d467ae65239ff64165aae36e5eb` | Generated master `exec-0c386dc5-6f2f-4237-b583-75ef46b8fd7a.png`; fixed oven room with the preparation surface removed. |
-| `static/assets/scenes/bakery/bakery-preparation-surface.webp` | 960 × 320 | Yes | `8c8c10300f907ac37a06f52842ef74205b1e2b274327698638d81f5822cdadc4` | Generated master `exec-33f4ba0f-f02f-4eef-ba4c-9a1f42ae6400.png`; isolated worn oak kneading board. |
+| `static/assets/scenes/bakery/bakery-preparation-surface.webp` | 1,672 × 391 | Yes | `d40a540982cb46c8579ff95c5cbe67939cb692d949ebcfcf0628cc4d89584bd5` | Transparent extraction master `exec-6d3ff418-c134-4a9f-87cb-e38adf974ac4.png`, derived from the preferred full-width workbench in original Bakery master `exec-419873df-5c96-42a6-9712-64511739f1fe.png`. |
 | `static/assets/scenes/bakery/bakery-dough-rest.webp` | 480 × 250 | Yes | `c6b220acf8dbe29857a9bdb1498c4602ce9c70a9697eb15aa0352f42df76d2b4` | First cell of canonical pose-sheet master `exec-8357efe5-91b2-49fb-b25e-e04408e47c15.png`. |
 | `static/assets/scenes/bakery/bakery-dough-fold-active.webp` | 480 × 250 | Yes | `489892411f081ce0fee0ec4c83abdcc5fc8d8d1f6df62dcc9840fb34d56b8ffa` | Second cell of the same pose sheet; one lifted, controlled fold. |
 | `static/assets/scenes/bakery/bakery-dough-fold-confirmed.webp` | 480 × 250 | Yes | `fa47d37e2d169b0884dc8ea59abfad5cede645d1b5d953af847414d79489d4b7` | Third cell of the same pose sheet; one settled confirmed fold. |
@@ -53,13 +53,13 @@ The wort surface and foreground rim are extracted from the same reviewed environ
 | `static/assets/scenes/bakery/bakery-scoring-tool.webp` | 310 × 70 | Yes | `36a9ac292097b988424d2271d59e02349d213b3732a60b2f88fcaf07cbcce96d` | Generated master `exec-5c82dd47-6e10-4ebf-99ed-b786d4675e56.png`; isolated baker's lame with left blade-tip anchor. |
 | `static/assets/scenes/bakery/bakery-score-groove-01.webp` | 480 × 250 | Yes | `492f88db7932099d4ea7d7e0af120524aaae79a62a54f0e9b062e524c8e35805` | Procedural first-score overlay aligned to the common dough anchor. |
 
-**Bakery environment brief:** Create a fixed-camera soot-dark stone oven room with a clear oven mouth, restrained fire bed, aged timber, side shelves, flour sacks, and warm lantern fill. Include no person, hand, dough, bread, peel, scoring tool, interface, text, logo, meter, or fabricated game state. The final environment edit removes the foreground bench so the canonical preparation board can be shown only during the relevant phases.
+**Bakery environment brief:** Create a fixed-camera soot-dark stone oven room with a clear oven mouth, restrained fire bed, aged timber, side shelves, flour sacks, and warm lantern fill. Include no person, hand, dough, bread, peel, scoring tool, interface, text, logo, meter, or fabricated game state. The final environment edit removes the foreground bench so the canonical full-width workbench can be shown only during the relevant phases.
 
 **Dough pose-sheet brief:** Create exactly three isolated views of the same lightly floured herb dough under one camera and light: a low rest pose, one active left-to-center fold, and one tighter settled fold. Keep scale, material, flour pattern family, herb inclusion, and light direction compatible. The three runtime cutouts are crops from this single generated sheet; they are not independently generated intermediate frames.
 
-**Preparation surface and scoring-tool briefs:** The surface is one broad low-profile dark-oak kneading board with a worn bevel and restrained flour traces. The tool is one horizontal worn-wood baker's lame with a readable left blade tip. Both match the oven light and contain no hand, dough, room, interface, text, symbol, or gameplay information.
+**Preparation surface and scoring-tool briefs:** Preserve the broad foreground dark-oak workbench from the first Bakery environment, including its full-width perspective, worn planks, front apron, edge wear, and oven highlights. Extract it onto real transparency without changing its camera or scale. The tool is one horizontal worn-wood baker's lame with a readable left blade tip. Both contain no hand, dough, interface, text, symbol, or gameplay information.
 
-The generated pose sheet, scoring tool, and preparation surface initially contained a rendered checker field. Export removed that field and produced real alpha pixels. The checked runtime files contain alpha, while both environment plates are deliberately opaque.
+The generated pose sheet and scoring tool initially contained a rendered checker field. Export removed that field and produced real alpha pixels. The replacement preparation surface was generated directly with real transparency from the preferred original workbench. The checked runtime files contain alpha, while both environment plates are deliberately opaque.
 
 ### Contract and review evidence
 

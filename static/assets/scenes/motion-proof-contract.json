@@ -79,8 +79,8 @@
         "id": "preparation-surface",
         "path": "/assets/scenes/bakery/bakery-preparation-surface.webp",
         "z": 1,
-        "bounds": { "x": 356, "y": 570, "width": 960, "height": 320 },
-        "anchor": { "x": 480, "y": 160 },
+        "bounds": { "x": 0, "y": 550, "width": 1672, "height": 391 },
+        "anchor": { "x": 836, "y": 180 },
         "worldAnchor": { "x": 836, "y": 730 }
       },
       {

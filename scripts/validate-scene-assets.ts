@@ -75,7 +75,7 @@ const runtimeAssets: ExpectedAsset[] = [
   { path: 'static/assets/scenes/bakery/bakery-dough-fold-confirmed.webp', width: 480, height: 250, alpha: true, sha256: 'fa47d37e2d169b0884dc8ea59abfad5cede645d1b5d953af847414d79489d4b7', maxBytes: 60_000 },
   { path: 'static/assets/scenes/bakery/bakery-dough-rest.webp', width: 480, height: 250, alpha: true, sha256: 'c6b220acf8dbe29857a9bdb1498c4602ce9c70a9697eb15aa0352f42df76d2b4', maxBytes: 60_000 },
   { path: 'static/assets/scenes/bakery/bakery-dough-shadow.webp', width: 480, height: 250, alpha: true, sha256: 'fe11db96ac086f5cafc5c0df839624867754510210afdc62cdd992f714af3ac1', maxBytes: 20_000 },
-  { path: 'static/assets/scenes/bakery/bakery-preparation-surface.webp', width: 960, height: 320, alpha: true, sha256: '8c8c10300f907ac37a06f52842ef74205b1e2b274327698638d81f5822cdadc4', maxBytes: 120_000 },
+  { path: 'static/assets/scenes/bakery/bakery-preparation-surface.webp', width: 1672, height: 391, alpha: true, sha256: 'd40a540982cb46c8579ff95c5cbe67939cb692d949ebcfcf0628cc4d89584bd5', maxBytes: 200_000 },
   { path: 'static/assets/scenes/bakery/bakery-score-groove-01.webp', width: 480, height: 250, alpha: true, sha256: '492f88db7932099d4ea7d7e0af120524aaae79a62a54f0e9b062e524c8e35805', maxBytes: 20_000 },
   { path: 'static/assets/scenes/bakery/bakery-scoring-tool.webp', width: 310, height: 70, alpha: true, sha256: '36a9ac292097b988424d2271d59e02349d213b3732a60b2f88fcaf07cbcce96d', maxBytes: 30_000 }
 ];
