@@ -71,6 +71,8 @@ The review uses the existing server contracts rather than visual substitutes.
 | Server-owned results | Brewery and Bakery integration tests backdate only the saved server timestamp, then assert canonical duration, quality, inventory consumption, rewards, and one committed receipt. |
 | Brewery reload telemetry | `motion-proof.test.ts` verifies reload resets in-memory paddle speed and samples while preserving the active server timer; exact completion retry reuses the captured telemetry payload. |
 
+Garden, Brewery, Bakery, and Bar mutation controls remain disabled until hydration attaches their save, subject, action, and revision fields. The no-input tavern creation form remains available from server-rendered HTML.
+
 No helper chat, card-cost or deck control, fabricated task/reputation/XP display, watering/fertilizer action, heat control, foam-skimming control, or steam control appears in the three crafting routes. Garden health and water are read-only values already persisted in `garden_cells` and used by the authored harvest rule; this delivery adds no care action. Decorative bees, leaves, embers, steam, and liquid response cannot update the save, submit brewing samples, or alter server time.
 
 ## Measured rendering performance

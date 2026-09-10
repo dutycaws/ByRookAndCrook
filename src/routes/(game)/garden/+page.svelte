@@ -1,6 +1,6 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import CropDetails from '$lib/components/garden/CropDetails.svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
@@ -18,6 +18,11 @@
   let harvestEffect = $state<{ token: number; cellId: string; plantKey: string; stage: number } | null>(null);
   let harvestEffectTimer: ReturnType<typeof setTimeout> | null = null;
   let transportError = $state<string | null>(null);
+  let hydrated = $state(false);
+
+  onMount(() => {
+    hydrated = true;
+  });
 
   let selected = $derived(
     data.snapshot?.cells.find((cell) => cell.id === selectedId) ?? data.snapshot?.cells[0] ?? null
@@ -141,7 +146,7 @@
                 type="submit"
                 icon="✦"
                 loading={pending}
-                disabled={!selected.harvestable}
+                disabled={!hydrated || !selected.harvestable}
               >
                 {pending
                   ? 'Gathering…'

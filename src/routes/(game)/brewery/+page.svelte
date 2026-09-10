@@ -1,6 +1,6 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import BreweryScene from '$lib/components/scenes/BreweryScene.svelte';
@@ -23,6 +23,11 @@
   let pending = $state(false);
   let transportError = $state<string | null>(null);
   let inputMode = $state<'physical' | 'assisted'>('physical');
+  let hydrated = $state(false);
+
+  onMount(() => {
+    hydrated = true;
+  });
 
   let session = $derived(data.snapshot?.brewery.activeSession ?? null);
   let latestBeverage = $derived(data.snapshot?.brewery.beverages[0] ?? null);
@@ -219,7 +224,7 @@
               </div>
             {/if}
             <form method="POST" action="?/advance" use:enhance={enhanceAdvance}>
-              <button class="primary-button" type="submit" disabled={pending}>
+              <button class="primary-button" type="submit" disabled={!hydrated || pending}>
                 {pending ? 'Closing the tavern…' : 'Rest and begin next day'}
               </button>
             </form>
@@ -270,7 +275,7 @@
           </div>
 
           <form method="POST" action="?/complete" use:enhance={enhanceComplete}>
-            <button class="primary-button full-button" type="submit" disabled={!canBottle}>
+            <button class="primary-button full-button" type="submit" disabled={!hydrated || !canBottle}>
               {pending ? 'Bottling…' : remainingMs > 0 ? `Stir for ${Math.ceil(remainingMs / 1000)}s` : 'Bottle this brew'}
             </button>
           </form>
@@ -301,7 +306,7 @@
                   </label>
                 {/each}
               </fieldset>
-              <button class="primary-button full-button" type="submit" disabled={!selectedIngredientId || pending}>
+              <button class="primary-button full-button" type="submit" disabled={!hydrated || !selectedIngredientId || pending}>
                 {pending ? 'Preparing the wort…' : 'Begin 30-second brew'}
               </button>
             </form>
