@@ -3,7 +3,7 @@
   import { untrack } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
-  import BakeryMotionProof from '$lib/components/scenes/BakeryMotionProof.svelte';
+  import BakeryScene from '$lib/components/scenes/BakeryScene.svelte';
   import { qualityLabel } from '$lib/game/contracts';
   import { deriveBakeVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
@@ -38,7 +38,8 @@
   );
   let ovenBand = $derived(classifyOven(elapsedMs));
   let ovenMarker = $derived(Math.min(100, elapsedMs / 500));
-  let visual = $derived(deriveBakeVisualState(data.snapshot ?? null, { elapsedMs, ovenBand, pending, error: transportError }));
+  let visualError = $derived(transportError ?? (form?.message && !form?.success ? form.message : null));
+  let visual = $derived(deriveBakeVisualState(data.snapshot ?? null, { elapsedMs, ovenBand, pending, error: visualError }));
 
   $effect(() => {
     const ingredients = data.snapshot?.ingredients ?? [];
@@ -172,6 +173,7 @@
       {/snippet}
       {#snippet scene()}
       <section class="bakery-workbench panel" aria-labelledby="bakery-stage">
+        <BakeryScene {visual} disabled={pending || !!unresolved} oncommit={commitSceneGesture} />
         {#if snapshot.save.dayMinigameCompleted && snapshot.save.dailyCraftKind === 'bake'}
           <div class="bake-result" aria-live="polite">
             <span class="bread-result" aria-hidden="true">🥖</span>
@@ -206,8 +208,6 @@
           <p>Drag across the dough for each fold. Longer, deliberate folds earn a steadier crumb.</p>
           <form bind:this={foldForm} method="POST" action="?/fold" use:enhance={enhanceFold}>
             <input type="hidden" name="distance" value={gestureValue} />
-            <BakeryMotionProof phase="folding" foldCount={session.foldCount} scoreCount={session.scoreCount}
-              disabled={pending || !!unresolved} oncommit={commitSceneGesture} />
             <button class="secondary-button full-button" type="submit" disabled={pending}
               onclick={() => { if (!unresolved) gestureValue = 70; }}>
               {retrying('fold') ? 'Retry fold' : 'Fold dough with keyboard'}
@@ -220,8 +220,6 @@
           <p>Swipe across the loaf exactly three times so steam can escape in the oven.</p>
           <form bind:this={scoreForm} method="POST" action="?/score" use:enhance={enhanceScore}>
             <input type="hidden" name="length" value={gestureValue} />
-            <BakeryMotionProof phase="scoring" foldCount={session.foldCount} scoreCount={session.scoreCount}
-              disabled={pending || !!unresolved} oncommit={commitSceneGesture} />
             <button class="secondary-button full-button" type="submit" disabled={pending}
               onclick={() => { if (!unresolved) gestureValue = 70; }}>
               {retrying('score') ? 'Retry score' : 'Score loaf with keyboard'}
@@ -242,7 +240,6 @@
           <div class="stage-heading"><div><p class="eyebrow">Stage 3 of 3 · Oven</p>
             <h2 id="bakery-stage">Watch the crust</h2></div><strong>{(elapsedMs / 1000).toFixed(1)}s</strong></div>
           <p>Remove it near 30 seconds. Early or late loaves still finish, but lose quality.</p>
-          <div class="oven" class:glowing={ovenBand === 'green'} aria-hidden="true"><span>🥖</span><i></i></div>
           <div class="oven-timing" aria-label={`Oven timing: ${ovenBand}`}>
             <div class="timing-labels"><span>Too soon</span><span>Ideal · 30s</span><span>Too late</span></div>
             <div class="timing-track"><i class="yellow-one"></i><i class="green"></i><i class="yellow-two"></i>
@@ -311,8 +308,8 @@
       {#snippet action()}
         <ContextualActionStrip
           eyebrow="Bakery action"
-          title={visual.phase === 'folding' ? 'Fold the dough six times' : visual.phase === 'scoring' ? 'Score the loaf three times' : visual.phase === 'baking' ? 'Watch the oven clock' : visual.phase === 'result' ? 'The loaf is ready' : 'Prepare today’s loaf'}
-          description={visual.phase === 'folding' || visual.phase === 'scoring' ? 'Drag directly across the illustrated dough or use the keyboard action in the scene panel.' : visual.phase === 'baking' ? 'The oven uses its server-backed start time and survives reloads.' : visual.phase === 'blocked' ? 'Today’s kitchen work is already underway in the Brewery.' : 'Choose one pantry ingredient; the familiar full-width Bakery workbench remains the preparation surface.'}
+          title={visual.phase === 'folding' ? 'Fold the dough six times' : visual.phase === 'scoring' ? 'Score the loaf three times' : visual.phase === 'ready' ? 'Put the scored loaf in the oven' : visual.phase === 'baking' ? 'Watch the oven clock' : visual.phase === 'result' ? 'The loaf is ready' : 'Prepare today’s loaf'}
+          description={visual.phase === 'folding' || visual.phase === 'scoring' ? 'Drag directly across the illustrated dough or use the keyboard action in the scene panel.' : visual.phase === 'ready' ? 'The prepared loaf and peel are waiting at the stone oven.' : visual.phase === 'baking' ? 'The oven uses its server-backed start time and survives reloads.' : visual.phase === 'blocked' ? 'Today’s kitchen work is already underway in the Brewery.' : 'Choose one pantry ingredient; the familiar full-width Bakery workbench remains the preparation surface.'}
           status={pending ? 'Updating…' : visual.error ?? (visual.phase === 'baking' ? `${(visual.oven.elapsedMs / 1000).toFixed(1)} seconds` : `${snapshot.bakery.foods.length} loaves ready`)}
         >
           <a class="secondary-link compact-link" href="/ingredients">Pantry overview <span aria-hidden="true">→</span></a>
@@ -334,10 +331,6 @@
   .step-pips i.done { background:var(--gold); }
   .oven-ready,.bake-result { display:grid; min-height:500px; place-items:center; align-content:center; text-align:center; }
   .oven-ready>span,.bread-result { font-size:76px; filter:drop-shadow(0 12px 20px #000); }
-  .oven { position:relative; display:grid; width:min(100%,560px); height:270px; margin:25px auto; place-items:center; overflow:hidden; border:8px solid #392615; border-radius:50% 50% 8px 8px; background:radial-gradient(circle at 50% 80%,#b54c15,#44180d 45%,#0c0805 75%); box-shadow:inset 0 0 40px #000,0 20px 35px #0008; }
-  .oven span { z-index:1; font-size:86px; filter:sepia(.35) drop-shadow(0 10px 12px #000); }
-  .oven i { position:absolute; bottom:-20px; width:80%; height:90px; border-radius:50%; background:#da6d1a; filter:blur(25px); opacity:.6; }
-  .oven.glowing { box-shadow:inset 0 0 50px #e8a74855,0 0 24px #c8943540; }
   .timing-labels { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
   .timing-track { position:relative; display:flex; height:18px; margin:7px 0 14px; overflow:hidden; border:1px solid #80602f; background:#6f271d; }
   .timing-track i.yellow-one { width:16%; margin-left:40%; background:#b8892e; }
@@ -355,5 +348,5 @@
   .rest-without-craft { padding:16px; border:1px solid var(--border); background:#151008; }
   .rest-without-craft p { margin-top:0; color:var(--muted); }
   .bake-message { margin-top:18px; }
-  @media (max-width:800px) { .bakery-workbench { min-height:520px; padding:20px; }.oven { height:220px; } }
+  @media (max-width:800px) { .bakery-workbench { min-height:520px; padding:20px; } }
 </style>

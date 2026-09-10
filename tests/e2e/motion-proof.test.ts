@@ -68,6 +68,27 @@ async function dragPointerCircle(page: Page, pointerType: 'touch' | 'pen') {
   return { scene, pointerId, point: points.at(-1)! };
 }
 
+async function swipeBakeryPointer(
+  page: Page,
+  pointerType: 'touch' | 'pen',
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  duplicateRelease = false
+) {
+  const scene = page.locator('[data-motion-proof="bakery"]');
+  const projection = await sceneProjection(scene);
+  const surface = scene.locator('.gesture-surface');
+  const from = projection.point(start.x, start.y);
+  const to = projection.point(end.x, end.y);
+  const pointerId = pointerType === 'touch' ? 51 : 52;
+  await surface.dispatchEvent('pointerdown', { clientX: from.x, clientY: from.y, pointerId, pointerType, isPrimary: true, buttons: 1 });
+  await surface.dispatchEvent('pointermove', { clientX: to.x, clientY: to.y, pointerId, pointerType, isPrimary: true, buttons: 1 });
+  await surface.dispatchEvent('pointerup', { clientX: to.x, clientY: to.y, pointerId, pointerType, isPrimary: true });
+  if (duplicateRelease) {
+    await surface.dispatchEvent('pointerup', { clientX: to.x, clientY: to.y, pointerId, pointerType, isPrimary: true });
+  }
+}
+
 async function expectNoHorizontalOverflow(page: Page) {
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -215,7 +236,7 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
   }
 });
 
-test('the Bakery proof commits one fold and one score from canonical layered poses', async ({ page }) => {
+test('the Bakery scene preserves pointer, touch, pen, keyboard, cancellation, and confirmed grooves', async ({ page }) => {
   test.setTimeout(60_000);
   const player = await createTestPlayer('bake-motion-proof');
   try {
@@ -224,7 +245,7 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
     await page.getByRole('button', { name: 'Begin today’s loaf' }).click();
 
     let scene = page.locator('[data-motion-proof="bakery"]');
-    await expect(scene).toHaveAttribute('data-phase', 'folding');
+    await expect(scene).toHaveAttribute('data-bakery-phase', 'folding');
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);
     let projection = await sceneProjection(scene);
@@ -246,13 +267,18 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
     await page.mouse.up();
     await expect(page.locator('.stage-heading > strong')).toHaveText('1/6');
 
-    for (let count = 2; count <= 6; count += 1) {
+    await swipeBakeryPointer(page, 'touch', { x: 652, y: 649 }, { x: 1104, y: 649 }, true);
+    await expect(page.locator('.stage-heading > strong')).toHaveText('2/6');
+    await page.waitForTimeout(300);
+    await expect(page.locator('.stage-heading > strong')).toHaveText('2/6');
+
+    for (let count = 3; count <= 6; count += 1) {
       await page.getByRole('button', { name: 'Fold dough with keyboard' }).click();
       if (count < 6) await expect(page.locator('.stage-heading > strong')).toHaveText(`${count}/6`);
     }
 
     scene = page.locator('[data-motion-proof="bakery"]');
-    await expect(scene).toHaveAttribute('data-phase', 'scoring');
+    await expect(scene).toHaveAttribute('data-bakery-phase', 'scoring');
     projection = await sceneProjection(scene);
     point = projection.point(652, 621);
     await page.mouse.move(point.x, point.y);
@@ -262,10 +288,26 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
     await expect(scene.locator('.scoring-tool')).toBeVisible();
     await page.mouse.up();
     await expect(page.locator('.stage-heading > strong')).toHaveText('1/3');
-    await expect(scene.locator('.groove')).toBeVisible();
+    await expect(scene.locator('.groove')).toHaveCount(1);
+
+    await swipeBakeryPointer(page, 'pen', { x: 652, y: 621 }, { x: 1020, y: 574 }, true);
+    await expect(page.locator('.stage-heading > strong')).toHaveText('2/3');
+    await expect(scene.locator('.groove')).toHaveCount(2);
+
+    await page.getByRole('button', { name: 'Score loaf with keyboard' }).click();
+    await expect(scene).toHaveAttribute('data-bakery-phase', 'ready');
+    await expect(scene.locator('.oven-peel')).toBeVisible();
+    await expect(scene.locator('.loaf.pale')).toBeVisible();
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(scene).toHaveAttribute('data-reduced-motion', 'true');
+    await page.getByRole('button', { name: 'Put loaf in oven' }).click();
+    await expect(scene).toHaveAttribute('data-bakery-phase', 'baking');
+    await expect(scene.locator('.oven-embers')).toHaveCSS('animation-name', 'none');
+    await expect(scene.locator('.oven-steam')).toHaveCSS('animation-name', 'none');
+    const staticLoafStyle = await scene.locator('.loaf-stack').getAttribute('style');
+    await page.waitForTimeout(350);
+    await expect(scene.locator('.loaf-stack')).toHaveAttribute('style', staticLoafStyle!);
     await expect(scene).toBeVisible();
     await expectNoHorizontalOverflow(page);
   } finally {

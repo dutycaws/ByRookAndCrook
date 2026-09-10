@@ -57,6 +57,13 @@ The wort surface and foreground rim are extracted from the same reviewed environ
 | `static/assets/scenes/bakery/bakery-dough-shadow.webp` | 480 × 250 | Yes | `fe11db96ac086f5cafc5c0df839624867754510210afdc62cdd992f714af3ac1` | Procedural soft contact shadow on the shared dough canvas. |
 | `static/assets/scenes/bakery/bakery-scoring-tool.webp` | 310 × 70 | Yes | `36a9ac292097b988424d2271d59e02349d213b3732a60b2f88fcaf07cbcce96d` | Generated master `exec-5c82dd47-6e10-4ebf-99ed-b786d4675e56.png`; isolated baker's lame with left blade-tip anchor. |
 | `static/assets/scenes/bakery/bakery-score-groove-01.webp` | 480 × 250 | Yes | `492f88db7932099d4ea7d7e0af120524aaae79a62a54f0e9b062e524c8e35805` | Procedural first-score overlay aligned to the common dough anchor. |
+| `static/assets/scenes/bakery/bakery-loaf-pale.webp` | 520 × 415 | Yes | `2201d447d3b74e4be6e6e256ffb17420b3f1920f682a30d2bf399c60793baea9` | Left cell from canonical three-loaf master `exec-bc209f8e-e1b6-466a-8dde-7e7438690afe.png`; pale underbaked state. |
+| `static/assets/scenes/bakery/bakery-loaf-ideal.webp` | 520 × 415 | Yes | `95314eec09b66df8ab8d909ec3b5b5effa5410549b1362f4bc3cb33c20b27460` | Center cell from the same master; fully risen golden state. |
+| `static/assets/scenes/bakery/bakery-loaf-overbaked.webp` | 520 × 415 | Yes | `d7654ac924f938af9689b155d64540eb7676eabd24061fcd1fe23d1d72736e50` | Right cell from the same master; dark, permanently overbaked but removable state. |
+| `static/assets/scenes/bakery/bakery-oven-peel.webp` | 920 × 600 | Yes | `45e9e53ef2b85b65db714a6eff5cf6204f0ee18c560813e25384b33966b488ee` | Generated real-alpha master `exec-b40c0006-46ea-4efd-b57b-f9d58b27bd9f.png`; empty walnut peel for insertion and extraction. |
+| `static/assets/scenes/bakery/bakery-oven-embers.webp` | 660 × 275 | Yes | `a725ca0ec6ef27facb581d48f12810a433469d39403dcb9b33d8e0f3d612eece` | Bakery-sized derivative of clean-alpha fire master `exec-9594178f-2f07-44b9-9a1e-1ddb0c069ee4.png`; independently suspended oven effect. |
+| `static/assets/scenes/bakery/bakery-oven-steam.webp` | 485 × 323 | Yes | `ea4a35a6b66115a39aefbcc0ef344631d23c0d97b1b68f8bd9f2cad181527ca0` | Bakery-sized derivative of clean-alpha steam master `exec-9a8a8477-f1c5-4fc5-af61-875717347cf2.png`; independently suspended oven effect. |
+| `static/assets/scenes/bakery/bakery-oven-foreground.webp` | 900 × 300 | Yes | `4848240cf00e956bb3bd557d9c5f99a79ebebfb6661489d8ed731887fe8e4126` | Alpha-masked extraction of the approved oven plate; restores stone occlusion in front of the inserted loaf. |
 
 **Bakery environment brief:** Create a fixed-camera soot-dark stone oven room with a clear oven mouth, restrained fire bed, aged timber, side shelves, flour sacks, and warm lantern fill. Include no person, hand, dough, bread, peel, scoring tool, interface, text, logo, meter, or fabricated game state. The final environment edit removes the foreground bench so the canonical full-width workbench can be shown only during the relevant phases.
 
@@ -64,11 +71,13 @@ The wort surface and foreground rim are extracted from the same reviewed environ
 
 **Preparation surface and scoring-tool briefs:** Preserve the broad foreground dark-oak workbench from the first Bakery environment, including its full-width perspective, worn planks, front apron, edge wear, and oven highlights. Extract it onto real transparency without changing its camera or scale. The tool is one horizontal worn-wood baker's lame with a readable left blade tip. Both contain no hand, dough, interface, text, symbol, or gameplay information.
 
+**Oven loaf and peel briefs:** Create three isolated views of the same rustic oval herb loaf in one row, with identical camera, silhouette, scale, three-groove scoring pattern, and light. Progress only the crust from pale cream-gold through ideal golden brown to dark overbaked edges. Create the peel separately as an empty broad walnut paddle with its handle toward the lower-right, warm oven rim light, no visible hand, loaf, room, interface, or text. Runtime alpha cleanup removes the model-rendered checker field from the loaf sheet without inventing additional frames.
+
 The generated pose sheet and scoring tool initially contained a rendered checker field. Export removed that field and produced real alpha pixels. The replacement preparation surface was generated directly with real transparency from the preferred original workbench. The checked runtime files contain alpha, while both environment plates are deliberately opaque.
 
 ### Contract and review evidence
 
-[`static/assets/scenes/motion-proof-contract.json`](../../static/assets/scenes/motion-proof-contract.json) records the design canvas, responsive crops, bounds, anchors, z-order, allowed motion, and static fallbacks. It began as the issues #8 and #9 proof contract and now includes the production Brewery layers delivered by issue #10.
+[`static/assets/scenes/motion-proof-contract.json`](../../static/assets/scenes/motion-proof-contract.json) records the design canvas, responsive crops, bounds, anchors, z-order, allowed motion, and static fallbacks. It began as the issues #8 and #9 proof contract and now includes the production Brewery and Bakery layers delivered by issues #10 and #11.
 
 | Evidence | Purpose |
 | --- | --- |

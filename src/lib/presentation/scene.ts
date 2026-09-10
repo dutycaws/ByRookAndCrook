@@ -48,7 +48,16 @@ export interface BakeVisualState {
   phase: BakeVisualPhase;
   folds: { complete: number; required: 6 };
   scores: { complete: number; required: 3 };
-  oven: { startedAt: string | null; elapsedMs: number; band: 'red' | 'yellow' | 'green' };
+  oven: {
+    startedAt: string | null;
+    elapsedMs: number;
+    band: 'red' | 'yellow' | 'green';
+    appearance: 'pale' | 'ideal' | 'overbaked';
+    riseProgress: number;
+    crustProgress: number;
+    overbakeProgress: number;
+  };
+  result: { qualityIndex: number | null };
   pending: boolean;
   error: string | null;
 }
@@ -132,6 +141,15 @@ export function deriveBakeVisualState(
   }
 ): BakeVisualState {
   const session = snapshot?.bakery.activeSession ?? null;
+  const rules = snapshot?.bakery.rules;
+  const elapsedMs = Math.max(0, input.elapsedMs);
+  const idealMs = (rules?.idealSeconds ?? 30) * 1000;
+  const yellowEndMs = rules?.yellowEndMs ?? 40_000;
+  const bounded = (value: number) => Math.min(1, Math.max(0, value));
+  const riseProgress = bounded(elapsedMs / (idealMs * .65));
+  const crustProgress = bounded(elapsedMs / idealMs);
+  const overbakeProgress = bounded((elapsedMs - yellowEndMs) / (idealMs * .35));
+  const appearance = overbakeProgress > 0 ? 'overbaked' : crustProgress >= .72 ? 'ideal' : 'pale';
   let phase: BakeVisualPhase = 'empty';
   if (snapshot) {
     if (snapshot.save.dailyCraftKind === 'brew') phase = 'blocked';
@@ -145,7 +163,16 @@ export function deriveBakeVisualState(
     phase,
     folds: { complete: session?.foldCount ?? 0, required: 6 },
     scores: { complete: session?.scoreCount ?? 0, required: 3 },
-    oven: { startedAt: session?.ovenStartedAt ?? null, elapsedMs: input.elapsedMs, band: input.ovenBand },
+    oven: {
+      startedAt: session?.ovenStartedAt ?? null,
+      elapsedMs,
+      band: input.ovenBand,
+      appearance,
+      riseProgress,
+      crustProgress,
+      overbakeProgress
+    },
+    result: { qualityIndex: snapshot?.bakery.foods[0]?.qualityIndex ?? null },
     pending: input.pending,
     error: input.error
   };

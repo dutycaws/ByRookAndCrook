@@ -79,10 +79,47 @@ describe('scene presentation contracts', () => {
     const visual = deriveBakeVisualState(game, { elapsedMs: 28_000, ovenBand: 'green', pending: true, error: null });
     expect(visual).toMatchObject({
       phase: 'baking', folds: { complete: 6, required: 6 }, scores: { complete: 3, required: 3 },
-      oven: { elapsedMs: 28_000, band: 'green' }, pending: true
+      oven: {
+        elapsedMs: 28_000, band: 'green', appearance: 'ideal',
+        riseProgress: 1, crustProgress: 28 / 30, overbakeProgress: 0
+      },
+      result: { qualityIndex: null }, pending: true
     });
     expect(JSON.stringify(visual)).not.toContain('foldPoints');
     expect(JSON.stringify(visual)).not.toContain('ingredientBatchId');
+  });
+
+  it('reconstructs every Bakery phase and bounds oven appearance from persisted state', () => {
+    const game = snapshot();
+    const input = { elapsedMs: 0, ovenBand: 'red' as const, pending: false, error: null };
+    expect(deriveBakeVisualState(game, input)).toMatchObject({ phase: 'setup', oven: { appearance: 'pale' } });
+
+    const active: NonNullable<GameSnapshot['bakery']['activeSession']> = {
+      id: 'bake-1', ingredientBatchId: 'ingredient-1', plantKey: 'fennel', plantName: 'Fennel', icon: '🌿',
+      ingredientQualityIndex: 3, ingredientBakeBonus: 1, recipeKey: 'herb-loaf',
+      rulesVersion: 'bake-v1', status: 'folding', foldCount: 0, foldPoints: 0,
+      scoreCount: 0, scorePoints: 0, ovenStartedAt: null, dayNumber: 2
+    };
+    game.bakery.activeSession = active;
+    for (const phase of ['folding', 'scoring', 'ready', 'baking'] as const) {
+      active.status = phase;
+      expect(deriveBakeVisualState(game, input).phase).toBe(phase);
+    }
+
+    const overbaked = deriveBakeVisualState(game, { ...input, elapsedMs: 50_000 });
+    expect(overbaked.oven).toMatchObject({ appearance: 'overbaked', riseProgress: 1, crustProgress: 1 });
+    expect(overbaked.oven.overbakeProgress).toBeGreaterThan(0);
+
+    game.bakery.activeSession = null;
+    game.save.dailyCraftKind = 'brew';
+    expect(deriveBakeVisualState(game, input).phase).toBe('blocked');
+    game.save.dailyCraftKind = 'bake';
+    game.save.dayMinigameCompleted = true;
+    game.bakery.foods.push({
+      id: 'food-1', name: 'Hearth loaf', recipeKey: 'herb-loaf', qualityIndex: 4,
+      dayNumber: 2, createdAt: '2026-09-10T00:00:00Z'
+    });
+    expect(deriveBakeVisualState(game, input)).toMatchObject({ phase: 'result', result: { qualityIndex: 4 } });
   });
 
   it('bounds decorative particles and exposes explicit empty/error states', () => {

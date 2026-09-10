@@ -154,6 +154,62 @@
         "bounds": { "x": 930, "y": 530, "width": 310, "height": 70 },
         "anchor": { "x": 8, "y": 35 },
         "worldAnchor": { "x": 938, "y": 565 }
+      },
+      {
+        "id": "oven-embers",
+        "path": "/assets/scenes/bakery/bakery-oven-embers.webp",
+        "z": 6,
+        "bounds": { "x": 520, "y": 290, "width": 660, "height": 275 },
+        "anchor": { "x": 330, "y": 275 },
+        "worldAnchor": { "x": 850, "y": 565 }
+      },
+      {
+        "id": "oven-steam",
+        "path": "/assets/scenes/bakery/bakery-oven-steam.webp",
+        "z": 7,
+        "bounds": { "x": 638, "y": 113, "width": 485, "height": 323 },
+        "anchor": { "x": 242, "y": 323 },
+        "worldAnchor": { "x": 880, "y": 436 }
+      },
+      {
+        "id": "oven-peel",
+        "path": "/assets/scenes/bakery/bakery-oven-peel.webp",
+        "z": 8,
+        "bounds": { "x": 502, "y": 300, "width": 920, "height": 600 },
+        "anchor": { "x": 310, "y": 260 },
+        "worldAnchor": { "x": 812, "y": 560 }
+      },
+      {
+        "id": "loaf-pale",
+        "path": "/assets/scenes/bakery/bakery-loaf-pale.webp",
+        "z": 8,
+        "bounds": { "x": 577, "y": 263, "width": 520, "height": 415 },
+        "anchor": { "x": 260, "y": 390 },
+        "worldAnchor": { "x": 837, "y": 653 }
+      },
+      {
+        "id": "loaf-ideal",
+        "path": "/assets/scenes/bakery/bakery-loaf-ideal.webp",
+        "z": 8,
+        "bounds": { "x": 577, "y": 263, "width": 520, "height": 415 },
+        "anchor": { "x": 260, "y": 390 },
+        "worldAnchor": { "x": 837, "y": 653 }
+      },
+      {
+        "id": "loaf-overbaked",
+        "path": "/assets/scenes/bakery/bakery-loaf-overbaked.webp",
+        "z": 8,
+        "bounds": { "x": 577, "y": 263, "width": 520, "height": 415 },
+        "anchor": { "x": 260, "y": 390 },
+        "worldAnchor": { "x": 837, "y": 653 }
+      },
+      {
+        "id": "oven-foreground",
+        "path": "/assets/scenes/bakery/bakery-oven-foreground.webp",
+        "z": 9,
+        "bounds": { "x": 386, "y": 430, "width": 900, "height": 300 },
+        "anchor": { "x": 0, "y": 0 },
+        "worldAnchor": { "x": 386, "y": 430 }
       }
     ],
     "motion": {
@@ -162,7 +218,10 @@
       "scoreStrokeMs": 260,
       "scoreToolTipBounds": { "x": 606, "y": 535, "width": 460, "height": 225 },
       "doughScaleDelta": 0.08,
-      "doughRotationDegrees": { "min": -3, "max": 3 }
+      "doughRotationDegrees": { "min": -3, "max": 3 },
+      "ovenInsertionMs": 1150,
+      "ovenExtractionMs": 720,
+      "loafCrossfadeMs": 1100
     },
     "fallbacks": {
       "foldIdle": "dough-rest",
@@ -170,10 +229,11 @@
       "foldConfirmed": "dough-fold-confirmed",
       "scoreIdle": "dough-fold-confirmed",
       "scoreActive": "dough-fold-confirmed-with-tool",
-      "scoreConfirmed": "dough-fold-confirmed-with-groove-01",
-      "ready": "dough-fold-confirmed-with-groove-01",
-      "baking": "environment-only",
-      "reducedMotion": "current-confirmed-static-pose"
+      "scoreConfirmed": "dough-fold-confirmed-with-confirmed-grooves",
+      "ready": "pale-loaf-on-peel",
+      "baking": "server-clock-projected-loaf-in-oven",
+      "complete": "confirmed-loaf-on-extracted-peel",
+      "reducedMotion": "current-confirmed-static-pose-without-effect-animation"
     }
   }
 }

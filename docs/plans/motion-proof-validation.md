@@ -4,7 +4,7 @@ Issue [#8](https://github.com/dutycaws/ByRookAndCrook/issues/8) validates the hi
 
 ## Architecture handoff
 
-`BreweryScene.svelte` and `BakeryMotionProof.svelte` are presentation components. They own transient pointer state, animation phase, and visual feedback. They do not own a brew session, bakery session, score, reward, item, or save revision.
+`BreweryScene.svelte` and `BakeryScene.svelte` are presentation components. They own transient pointer state, animation phase, and visual feedback. They do not own a brew session, bakery session, score, reward, item, or save revision.
 
 The route remains the authority for persisted gameplay:
 
