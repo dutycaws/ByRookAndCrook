@@ -1,8 +1,11 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { untrack } from 'svelte';
+  import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
+  import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import BakeryMotionProof from '$lib/components/scenes/BakeryMotionProof.svelte';
   import { qualityLabel } from '$lib/game/contracts';
+  import { deriveBakeVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
 
   type BakeryCommandKind = 'start' | 'fold' | 'score' | 'oven' | 'complete' | 'advance';
@@ -17,6 +20,7 @@
   }
 
   let { data, form }: PageProps = $props();
+  let snapshot = $derived(data.snapshot!);
   let selectedIngredientId = $state('');
   let pending = $state(false);
   let transportError = $state<string | null>(null);
@@ -34,6 +38,7 @@
   );
   let ovenBand = $derived(classifyOven(elapsedMs));
   let ovenMarker = $derived(Math.min(100, elapsedMs / 500));
+  let visual = $derived(deriveBakeVisualState(data.snapshot ?? null, { elapsedMs, ovenBand, pending, error: transportError }));
 
   $effect(() => {
     const ingredients = data.snapshot?.ingredients ?? [];
@@ -139,7 +144,7 @@
   <meta name="description" content="Fold, score, and bake a persistent tavern loaf." />
 </svelte:head>
 
-<main class="page-shell bakery-page">
+<main class="page-shell bakery-page crafting-page">
   <div class="page-title-row">
     <div>
       <p class="eyebrow">Tavern day {data.snapshot?.save.currentDay ?? '—'} · Daily craft</p>
@@ -156,12 +161,21 @@
       <a class="primary-button inline-button" href="/garden">Start in the garden</a>
     </section>
   {:else}
-    <div class="bakery-layout">
+    <CraftingSceneLayout area="bakery" statusTitle="Bakery ledger" inspectorTitle="Bakery inventory">
+      {#snippet status()}
+        <dl class="craft-status-list">
+          <div><dt>Day</dt><dd>{snapshot.save.currentDay}</dd></div>
+          <div><dt>Phase</dt><dd>{visual.phase}</dd></div>
+          <div><dt>Folds</dt><dd>{visual.folds.complete}/{visual.folds.required}</dd></div>
+          <div><dt>Scores</dt><dd>{visual.scores.complete}/{visual.scores.required}</dd></div>
+        </dl>
+      {/snippet}
+      {#snippet scene()}
       <section class="bakery-workbench panel" aria-labelledby="bakery-stage">
-        {#if data.snapshot.save.dayMinigameCompleted && data.snapshot.save.dailyCraftKind === 'bake'}
+        {#if snapshot.save.dayMinigameCompleted && snapshot.save.dailyCraftKind === 'bake'}
           <div class="bake-result" aria-live="polite">
             <span class="bread-result" aria-hidden="true">🥖</span>
-            <p class="eyebrow">Day {data.snapshot.save.currentDay} bake complete</p>
+            <p class="eyebrow">Day {snapshot.save.currentDay} bake complete</p>
             <h2 id="bakery-stage">{latestFood?.name ?? 'Loaf finished'}</h2>
             {#if latestFood}<p class="quality-display">{qualityLabel(latestFood.qualityIndex)}</p>{/if}
             {#if latestCard}
@@ -180,7 +194,7 @@
               </form>
             </div>
           </div>
-        {:else if data.snapshot.save.dailyCraftKind === 'brew'}
+        {:else if snapshot.save.dailyCraftKind === 'brew'}
           <div class="empty-state">
             <span aria-hidden="true">🍺</span><h2 id="bakery-stage">Today’s craft is in the brewery</h2>
             <p>Only one brew or bake may use the tavern kitchen each day.</p>
@@ -243,7 +257,7 @@
               {retrying('complete') ? 'Retry taking out bread' : 'Take out bread'}
             </button>
           </form>
-        {:else if data.snapshot.ingredients.length === 0}
+        {:else if snapshot.ingredients.length === 0}
           <div class="empty-state"><span aria-hidden="true">🧺</span><h2 id="bakery-stage">The pantry is empty</h2>
             <p>Harvest a mature crop before beginning today’s loaf.</p>
             <a class="primary-button inline-button" href="/garden">Visit the garden</a></div>
@@ -254,7 +268,7 @@
             <form method="POST" action="?/start" use:enhance={enhanceStart}>
               <fieldset class="ingredient-picker" disabled={pending || !!unresolved}>
                 <legend>Available ingredients</legend>
-                {#each data.snapshot.ingredients as ingredient (ingredient.id)}
+                {#each snapshot.ingredients as ingredient (ingredient.id)}
                   <label class:selected={selectedIngredientId === ingredient.id}>
                     <input type="radio" name="ingredient" value={ingredient.id} bind:group={selectedIngredientId} />
                     <span class="ingredient-icon" aria-hidden="true">{ingredient.icon}</span>
@@ -274,15 +288,16 @@
         {:else if form?.message}<div class="form-message bake-message" class:error={!form?.success} role={form?.success ? 'status' : 'alert'}>
           {form.message}{#if 'conflict' in form && form.conflict}<span>The latest tavern state has been loaded.</span>{/if}</div>{/if}
       </section>
-
-      <aside class="bakery-ledger">
+      {/snippet}
+      {#snippet inspector()}
+      <div class="bakery-ledger">
         <section class="detail-card"><p class="eyebrow">Bakery inventory</p><h2>Finished bread</h2>
-          {#if data.snapshot.bakery.foods.length === 0}<p class="muted">No finished loaves yet.</p>
-          {:else}<ul class="bake-history">{#each data.snapshot.bakery.foods as food (food.id)}
+          {#if snapshot.bakery.foods.length === 0}<p class="muted">No finished loaves yet.</p>
+          {:else}<ul class="bake-history">{#each snapshot.bakery.foods as food (food.id)}
             <li><span aria-hidden="true">🥖</span><div><strong>{food.name}</strong>
               <small>{qualityLabel(food.qualityIndex)} · Day {food.dayNumber}</small></div></li>{/each}</ul>{/if}
         </section>
-        {#if !session && data.snapshot.save.dailyCraftKind === null}
+        {#if !session && snapshot.save.dailyCraftKind === null}
           <form method="POST" action="?/advance" use:enhance={enhanceAdvance} class="rest-without-craft">
             <p>Crafting is optional. The tavern may close without brewing or baking.</p>
             <button class="text-button full-button" type="submit" disabled={pending}>
@@ -291,13 +306,23 @@
           </form>
         {/if}
         <a class="secondary-link" href="/ingredients">Choose from the pantry <span aria-hidden="true">→</span></a>
-      </aside>
-    </div>
+      </div>
+      {/snippet}
+      {#snippet action()}
+        <ContextualActionStrip
+          eyebrow="Bakery action"
+          title={visual.phase === 'folding' ? 'Fold the dough six times' : visual.phase === 'scoring' ? 'Score the loaf three times' : visual.phase === 'baking' ? 'Watch the oven clock' : visual.phase === 'result' ? 'The loaf is ready' : 'Prepare today’s loaf'}
+          description={visual.phase === 'folding' || visual.phase === 'scoring' ? 'Drag directly across the illustrated dough or use the keyboard action in the scene panel.' : visual.phase === 'baking' ? 'The oven uses its server-backed start time and survives reloads.' : visual.phase === 'blocked' ? 'Today’s kitchen work is already underway in the Brewery.' : 'Choose one pantry ingredient; the familiar full-width Bakery workbench remains the preparation surface.'}
+          status={pending ? 'Updating…' : visual.error ?? (visual.phase === 'baking' ? `${(visual.oven.elapsedMs / 1000).toFixed(1)} seconds` : `${snapshot.bakery.foods.length} loaves ready`)}
+        >
+          <a class="secondary-link compact-link" href="/ingredients">Pantry overview <span aria-hidden="true">→</span></a>
+        </ContextualActionStrip>
+      {/snippet}
+    </CraftingSceneLayout>
   {/if}
 </main>
 
 <style>
-  .bakery-layout { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(250px,.65fr); gap:22px; }
   .bakery-workbench { min-height:600px; padding:30px; }
   .bakery-ledger { display:flex; flex-direction:column; gap:18px; }
   .stage-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
@@ -330,5 +355,5 @@
   .rest-without-craft { padding:16px; border:1px solid var(--border); background:#151008; }
   .rest-without-craft p { margin-top:0; color:var(--muted); }
   .bake-message { margin-top:18px; }
-  @media (max-width:800px) { .bakery-layout { grid-template-columns:1fr; }.bakery-workbench { min-height:520px; padding:20px; }.oven { height:220px; } }
+  @media (max-width:800px) { .bakery-workbench { min-height:520px; padding:20px; }.oven { height:220px; } }
 </style>

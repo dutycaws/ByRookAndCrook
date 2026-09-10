@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import AreaScene from '$lib/components/scene/AreaScene.svelte';
+  import SceneLayer from '$lib/components/scene/SceneLayer.svelte';
+  import type { SceneTransform } from '$lib/presentation/scene';
   import {
     SCENE_HEIGHT,
     SCENE_WIDTH,
@@ -28,6 +31,7 @@
 
   const liquidEllipse = { centerX: 836, centerY: 463, radiusX: 391, radiusY: 118 };
   let scene = $state<HTMLDivElement>();
+  let sceneTransform = $state<SceneTransform>({ scale: 1, offsetX: 0, offsetY: 0 });
   let tracker = $state<CircularStirState>(createCircularStirState());
   let pointerId = $state<number | null>(null);
   let phase = $state(Math.PI / 2);
@@ -40,8 +44,8 @@
   function scenePoint(event: PointerEvent): ScenePoint {
     const bounds = scene!.getBoundingClientRect();
     return {
-      x: (event.clientX - bounds.left) / Math.max(1, bounds.width) * SCENE_WIDTH,
-      y: (event.clientY - bounds.top) / Math.max(1, bounds.height) * SCENE_HEIGHT,
+      x: (event.clientX - bounds.left - sceneTransform.offsetX) / Math.max(.001, sceneTransform.scale),
+      y: (event.clientY - bounds.top - sceneTransform.offsetY) / Math.max(.001, sceneTransform.scale),
       timestamp: event.timeStamp
     };
   }
@@ -147,23 +151,22 @@
   let liquidY = $derived(Math.sin(displayPhase) * 3 * (motionSpeed / 100));
 </script>
 
-<div
-  class="brewery-proof"
-  class:physical={mode === 'physical'}
-  class:disabled
-  bind:this={scene}
+<AreaScene
+  area="brewery"
+  label="Illustrated copper vat. Drag in a circle around the liquid to stir; keyboard users can select assisted stirring below."
+  class={`brewery-proof${mode === 'physical' ? ' physical' : ''}${disabled ? ' disabled' : ''}`}
+  bind:element={scene}
+  bind:transform={sceneTransform}
   data-motion-proof="brewery"
   data-input-mode={mode}
   data-reduced-motion={reducedMotion}
   data-speed={Math.round(motionSpeed)}
-  role="group"
-  aria-label="Illustrated copper vat. Drag in a circle around the liquid to stir; keyboard users can select assisted stirring below."
   onpointerdown={begin}
   onpointermove={move}
   onpointerup={release}
   onpointercancel={release}
 >
-  <img class="layer environment" src="/assets/scenes/brewery-environment.webp" alt="" draggable="false" />
+  <SceneLayer src="/assets/scenes/brewery-environment.webp" name="Brewery environment" essential />
   <img
     class="layer wort"
     src="/assets/scenes/brewery/brewery-wort-surface.webp"
@@ -183,10 +186,10 @@
   {#if mode === 'physical'}
     <div class="gesture-hint" aria-hidden="true"><span>↻</span> Circle the wort</div>
   {/if}
-</div>
+</AreaScene>
 
 <style>
-  .brewery-proof {
+  :global(.brewery-proof) {
     position: relative;
     width: 100%;
     aspect-ratio: 1672 / 941;
@@ -197,11 +200,10 @@
     isolation: isolate;
     user-select: none;
   }
-  .brewery-proof.physical { cursor: grab; touch-action: none; }
-  .brewery-proof.physical:active { cursor: grabbing; }
-  .brewery-proof.disabled { cursor: wait; opacity: .78; }
+  :global(.brewery-proof.physical) { cursor: grab; touch-action: none; }
+  :global(.brewery-proof.physical:active) { cursor: grabbing; }
+  :global(.brewery-proof.disabled) { cursor: wait; opacity: .78; }
   .layer { position: absolute; display: block; max-width: none; pointer-events: none; }
-  .environment { inset: 0; z-index: 0; width: 100%; height: 100%; }
   .wort {
     left: 26.615%;
     top: 36.663%;

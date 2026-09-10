@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { clamp, foldPreviewTransform, gestureDistancePercent } from '$lib/game/scene-motion';
+  import AreaScene from '$lib/components/scene/AreaScene.svelte';
+  import SceneLayer from '$lib/components/scene/SceneLayer.svelte';
+  import { SCENE_HEIGHT, SCENE_WIDTH, clamp, foldPreviewTransform, gestureDistancePercent } from '$lib/game/scene-motion';
+  import type { SceneTransform } from '$lib/presentation/scene';
 
   let {
     phase,
@@ -17,6 +20,7 @@
   } = $props();
 
   let scene = $state<HTMLDivElement>();
+  let sceneTransform = $state<SceneTransform>({ scale: 1, offsetX: 0, offsetY: 0 });
   let gestureSurface = $state<HTMLButtonElement>();
   let pointerId = $state<number | null>(null);
   let startX = $state(0);
@@ -26,35 +30,42 @@
   let reducedMotion = $state(false);
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
+  function scenePoint(event: PointerEvent) {
+    const bounds = scene!.getBoundingClientRect();
+    return {
+      x: (event.clientX - bounds.left - sceneTransform.offsetX) / Math.max(.001, sceneTransform.scale),
+      y: (event.clientY - bounds.top - sceneTransform.offsetY) / Math.max(.001, sceneTransform.scale)
+    };
+  }
+
   function begin(event: PointerEvent) {
     if (disabled || !scene) return;
-    const bounds = scene.getBoundingClientRect();
+    const point = scenePoint(event);
     pointerId = event.pointerId;
-    startX = event.clientX;
-    currentX = event.clientX;
-    currentY = event.clientY;
+    startX = point.x;
+    currentX = point.x;
+    currentY = point.y;
     gestureSurface?.setPointerCapture(event.pointerId);
     if (phase === 'scoring') {
-      currentX = bounds.left + clamp(event.clientX - bounds.left, bounds.width * .36, bounds.width * .64);
-      currentY = bounds.top + clamp(event.clientY - bounds.top, bounds.height * .55, bounds.height * .79);
+      currentX = clamp(point.x, SCENE_WIDTH * .36, SCENE_WIDTH * .64);
+      currentY = clamp(point.y, SCENE_HEIGHT * .55, SCENE_HEIGHT * .79);
     }
   }
 
   function move(event: PointerEvent) {
     if (pointerId !== event.pointerId || !scene) return;
-    const bounds = scene.getBoundingClientRect();
-    currentX = event.clientX;
-    currentY = event.clientY;
+    const point = scenePoint(event);
+    currentX = point.x;
+    currentY = point.y;
     if (phase === 'scoring') {
-      currentX = bounds.left + clamp(event.clientX - bounds.left, bounds.width * .36, bounds.width * .64);
-      currentY = bounds.top + clamp(event.clientY - bounds.top, bounds.height * .55, bounds.height * .79);
+      currentX = clamp(point.x, SCENE_WIDTH * .36, SCENE_WIDTH * .64);
+      currentY = clamp(point.y, SCENE_HEIGHT * .55, SCENE_HEIGHT * .79);
     }
   }
 
   function finish(event: PointerEvent) {
     if (pointerId !== event.pointerId || !scene) return;
-    const bounds = scene.getBoundingClientRect();
-    const value = gestureDistancePercent(startX, event.clientX, bounds.width);
+    const value = gestureDistancePercent(startX, scenePoint(event).x, SCENE_WIDTH);
     if (gestureSurface?.hasPointerCapture(event.pointerId)) gestureSurface.releasePointerCapture(event.pointerId);
     pointerId = null;
     settling = phase === 'folding';
@@ -86,28 +97,26 @@
   });
 
   let active = $derived(pointerId !== null);
-  let preview = $derived(foldPreviewTransform(startX, currentX, Math.max(1, scene?.getBoundingClientRect().width ?? 1)));
+  let preview = $derived(foldPreviewTransform(startX, currentX, SCENE_WIDTH));
   let showRest = $derived(phase === 'folding' && foldCount === 0 && !active && !settling);
   let showActiveFold = $derived(phase === 'folding' && active);
   let showConfirmed = $derived(phase === 'scoring' || settling || phase === 'folding' && foldCount > 0 && !active);
-  let sceneBounds = $derived(scene?.getBoundingClientRect());
-  let toolTipX = $derived(sceneBounds ? (currentX - sceneBounds.left) / sceneBounds.width * 1672 : 938);
-  let toolTipY = $derived(sceneBounds ? (currentY - sceneBounds.top) / sceneBounds.height * 941 : 565);
-  let toolLeft = $derived(clamp(toolTipX - 8, 598, 1058));
-  let toolTop = $derived(clamp(toolTipY - 35, 500, 725));
+  let toolLeft = $derived(clamp(currentX - 8, 598, 1058));
+  let toolTop = $derived(clamp(currentY - 35, 500, 725));
 </script>
 
-<div
+<AreaScene
+  area="bakery"
+  label={phase === 'folding' ? 'Illustrated dough folding surface' : 'Illustrated loaf scoring surface'}
   class="bakery-proof"
-  bind:this={scene}
+  bind:element={scene}
+  bind:transform={sceneTransform}
   data-motion-proof="bakery"
   data-phase={phase}
   data-transient={active ? 'active' : settling ? 'settling' : 'idle'}
   data-reduced-motion={reducedMotion}
-  role="group"
-  aria-label={phase === 'folding' ? 'Illustrated dough folding surface' : 'Illustrated loaf scoring surface'}
 >
-  <img class="layer environment" src="/assets/scenes/bakery-environment.webp" alt="" draggable="false" />
+  <SceneLayer src="/assets/scenes/bakery-environment.webp" name="Bakery environment" essential />
   <img class="layer surface" src="/assets/scenes/bakery/bakery-preparation-surface.webp" alt="" draggable="false" />
   <img class="layer dough shadow" src="/assets/scenes/bakery/bakery-dough-shadow.webp" alt="" draggable="false" />
   <img class="layer dough rest" class:visible={showRest} src="/assets/scenes/bakery/bakery-dough-rest.webp" alt="" draggable="false" />
@@ -151,10 +160,10 @@
     <span>{phase === 'folding' ? '↔' : '╱'}</span>
     {phase === 'folding' ? 'Drag to fold' : 'Swipe to score'}
   </div>
-</div>
+</AreaScene>
 
 <style>
-  .bakery-proof {
+  :global(.bakery-proof) {
     position: relative;
     width: 100%;
     aspect-ratio: 1672 / 941;
@@ -166,7 +175,6 @@
     user-select: none;
   }
   .layer { position: absolute; display: block; max-width: none; pointer-events: none; }
-  .environment { inset: 0; z-index: 0; width: 100%; height: 100%; }
   .surface { left: 0; top: 58.448%; z-index: 1; width: 100%; height: 41.552%; }
   .dough { left: 35.646%; top: 56.854%; width: 28.708%; height: 26.567%; }
   .shadow { top: 64.293%; z-index: 2; opacity: .82; }

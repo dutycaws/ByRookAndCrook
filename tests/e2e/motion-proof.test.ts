@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createTestPlayer } from '../helpers/local-supabase';
 
 async function loginAndHarvest(page: Page, email: string, password: string) {
@@ -12,15 +12,31 @@ async function loginAndHarvest(page: Page, email: string, password: string) {
   await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
 }
 
+async function sceneProjection(scene: Locator) {
+  await scene.scrollIntoViewIfNeeded();
+  await expect.poll(async () => Number(await scene.getAttribute('data-scene-scale'))).toBeGreaterThan(0);
+  await scene.evaluate(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  const bounds = await scene.boundingBox();
+  if (!bounds) throw new Error('The crafting scene has no rendered bounds.');
+  const scale = Number(await scene.getAttribute('data-scene-scale'));
+  const offsetX = Number(await scene.getAttribute('data-scene-offset-x'));
+  const offsetY = Number(await scene.getAttribute('data-scene-offset-y'));
+  if (![scale, offsetX, offsetY].every(Number.isFinite)) throw new Error('The crafting scene has no usable projection.');
+  return {
+    scale,
+    point(x: number, y: number) {
+      return { x: bounds.x + offsetX + x * scale, y: bounds.y + offsetY + y * scale };
+    }
+  };
+}
+
 async function dragCircle(page: Page, clockwise: boolean) {
   const scene = page.locator('[data-motion-proof="brewery"]');
-  const bounds = await scene.boundingBox();
-  if (!bounds) throw new Error('The Brewery proof has no rendered bounds.');
-  const center = {
-    x: bounds.x + bounds.width * (836 / 1672),
-    y: bounds.y + bounds.height * (463 / 941)
-  };
-  const radius = { x: bounds.width * (330 / 1672), y: bounds.height * (96 / 941) };
+  const projection = await sceneProjection(scene);
+  const center = projection.point(836, 463);
+  const radius = { x: 330 * projection.scale, y: 96 * projection.scale };
   const points = Array.from({ length: 25 }, (_, index) => {
     const angle = (clockwise ? 1 : -1) * Math.PI * 2 * index / 24;
     return { x: center.x + Math.cos(angle) * radius.x, y: center.y + Math.sin(angle) * radius.y };
@@ -100,6 +116,12 @@ test('the Brewery proof uses circular motion, bounded reversal, decay, assisted 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(scene).toBeVisible();
     await expectNoHorizontalOverflow(page);
+    await dragCircle(page, true);
+    await expect.poll(async () => Number(await scene.getAttribute('data-speed'))).toBeGreaterThan(10);
+    await page.mouse.up();
+    await page.route('**/assets/scenes/brewery-environment.webp', (route) => route.abort());
+    await page.reload();
+    await expect(page.getByRole('img', { name: 'Brewery environment artwork could not be loaded' })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -115,9 +137,11 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
 
     let scene = page.locator('[data-motion-proof="bakery"]');
     await expect(scene).toHaveAttribute('data-phase', 'folding');
-    const foldBounds = await scene.boundingBox();
-    if (!foldBounds) throw new Error('The Bakery fold proof has no rendered bounds.');
-    await page.mouse.move(foldBounds.x + foldBounds.width * .42, foldBounds.y + foldBounds.height * .69);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoHorizontalOverflow(page);
+    let projection = await sceneProjection(scene);
+    let point = projection.point(702, 649);
+    await page.mouse.move(point.x, point.y);
     await page.mouse.down();
     await expect(scene).toHaveAttribute('data-transient', 'active');
     await scene.locator('.gesture-surface').dispatchEvent('pointercancel', { pointerId: 1 });
@@ -125,9 +149,11 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
     await expect(scene).toHaveAttribute('data-transient', 'idle');
     await expect(page.locator('.stage-heading > strong')).toHaveText('0/6');
 
-    await page.mouse.move(foldBounds.x + foldBounds.width * .39, foldBounds.y + foldBounds.height * .69);
+    point = projection.point(652, 649);
+    await page.mouse.move(point.x, point.y);
     await page.mouse.down();
-    await page.mouse.move(foldBounds.x + foldBounds.width * .66, foldBounds.y + foldBounds.height * .69, { steps: 8 });
+    point = projection.point(1104, 649);
+    await page.mouse.move(point.x, point.y, { steps: 8 });
     await expect(scene).toHaveAttribute('data-transient', 'active');
     await page.mouse.up();
     await expect(page.locator('.stage-heading > strong')).toHaveText('1/6');
@@ -139,11 +165,12 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
 
     scene = page.locator('[data-motion-proof="bakery"]');
     await expect(scene).toHaveAttribute('data-phase', 'scoring');
-    const scoreBounds = await scene.boundingBox();
-    if (!scoreBounds) throw new Error('The Bakery score proof has no rendered bounds.');
-    await page.mouse.move(scoreBounds.x + scoreBounds.width * .39, scoreBounds.y + scoreBounds.height * .66);
+    projection = await sceneProjection(scene);
+    point = projection.point(652, 621);
+    await page.mouse.move(point.x, point.y);
     await page.mouse.down();
-    await page.mouse.move(scoreBounds.x + scoreBounds.width * .61, scoreBounds.y + scoreBounds.height * .61, { steps: 8 });
+    point = projection.point(1020, 574);
+    await page.mouse.move(point.x, point.y, { steps: 8 });
     await expect(scene.locator('.scoring-tool')).toBeVisible();
     await page.mouse.up();
     await expect(page.locator('.stage-heading > strong')).toHaveText('1/3');
@@ -151,7 +178,6 @@ test('the Bakery proof commits one fold and one score from canonical layered pos
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(scene).toHaveAttribute('data-reduced-motion', 'true');
-    await page.setViewportSize({ width: 390, height: 844 });
     await expect(scene).toBeVisible();
     await expectNoHorizontalOverflow(page);
   } finally {

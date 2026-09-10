@@ -10,10 +10,12 @@
   let {
     cells,
     selectedId,
+    scale = 1,
     onselect
   }: {
     cells: GardenCell[];
     selectedId: string | null;
+    scale?: number;
     onselect: (cellId: string) => void;
   } = $props();
 
@@ -30,7 +32,7 @@
   <div
     class="garden-grid"
     aria-label="Tavern garden plots"
-    style={`--hex-width: ${GARDEN_HEX_WIDTH}px; --hex-height: ${GARDEN_HEX_HEIGHT}px; width: ${bounds.width}px; height: ${bounds.height}px`}
+    style={`--hex-width: ${GARDEN_HEX_WIDTH * scale}px; --hex-height: ${GARDEN_HEX_HEIGHT * scale}px; width: ${bounds.width * scale}px; height: ${bounds.height * scale}px`}
   >
     <div class="sunwash" aria-hidden="true"></div>
     {#each cells as cell (cell.id)}
@@ -40,7 +42,7 @@
         class="hex-cell {cell.kind}"
         class:selected={cell.id === selectedId}
         class:mature={cell.harvestable}
-        style={`--cell-x: ${position.x}px; --cell-y: ${position.y}px`}
+        style={`--cell-x: ${position.x * scale}px; --cell-y: ${position.y * scale}px`}
         data-layout-key={cell.layoutKey}
         data-col={cell.col}
         data-row={cell.row}

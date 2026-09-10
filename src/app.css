@@ -59,6 +59,7 @@ input:focus-visible {
 
 .game-shell {
   min-height: 100vh;
+  overflow-x: clip;
 }
 
 .game-header {
@@ -180,6 +181,28 @@ input:focus-visible {
   margin: 0 auto;
   padding: 52px 0 72px;
 }
+
+.page-shell.crafting-page {
+  width: min(1600px, calc(100% - 24px));
+}
+
+.craft-status-list {
+  display: grid;
+  gap: .7rem;
+  margin: 0;
+}
+
+.craft-status-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: .55rem;
+  border-bottom: 1px solid #342812;
+}
+
+.craft-status-list dt { color: var(--muted); }
+.craft-status-list dd { margin: 0; color: var(--gold-bright); font-family: 'Cinzel', serif; text-transform: capitalize; }
+.compact-link { margin: 0; white-space: nowrap; }
 
 .page-title-row {
   display: flex;

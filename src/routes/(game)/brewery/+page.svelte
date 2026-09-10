@@ -1,11 +1,15 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { untrack } from 'svelte';
+  import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
+  import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import BreweryMotionProof from '$lib/components/scenes/BreweryMotionProof.svelte';
   import { qualityLabel } from '$lib/game/contracts';
+  import { deriveBrewVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
+  let snapshot = $derived(data.snapshot!);
   let selectedIngredientId = $state('');
   let speed = $state(0);
   let perfectTicks = $state(0);
@@ -30,6 +34,7 @@
     session ? Math.min(100, Math.max(0, 100 - (remainingMs / (session.durationSeconds * 1000)) * 100)) : 0
   );
   let canBottle = $derived(Boolean(session && remainingMs <= 0 && !pending));
+  let visual = $derived(deriveBrewVisualState(data.snapshot ?? null, { speed, zone, remainingMs, pending, error: transportError }));
 
   $effect(() => {
     const ingredients = data.snapshot?.ingredients ?? [];
@@ -155,7 +160,7 @@
   <meta name="description" content="Stir garden ingredients into a tavern mead." />
 </svelte:head>
 
-<main class="page-shell">
+<main class="page-shell crafting-page">
   <div class="page-title-row">
     <div>
       <p class="eyebrow">Tavern day {data.snapshot?.save.currentDay ?? '—'} · Daily craft</p>
@@ -175,19 +180,28 @@
       <a class="primary-button inline-button" href="/garden">Start in the garden</a>
     </section>
   {:else}
-    <div class="brewery-layout">
+    <CraftingSceneLayout area="brewery" statusTitle="Brewery ledger" inspectorTitle="Cellar inventory">
+      {#snippet status()}
+        <dl class="craft-status-list">
+          <div><dt>Day</dt><dd>{snapshot.save.currentDay}</dd></div>
+          <div><dt>Phase</dt><dd>{visual.phase}</dd></div>
+          <div><dt>Pantry</dt><dd>{snapshot.ingredients.length}</dd></div>
+          <div><dt>Bottled</dt><dd>{snapshot.brewery.beverages.length}</dd></div>
+        </dl>
+      {/snippet}
+      {#snippet scene()}
       <section class="brew-panel panel" aria-labelledby="brew-title">
-        {#if data.snapshot.save.dailyCraftKind === 'bake'}
+        {#if snapshot.save.dailyCraftKind === 'bake'}
           <div class="empty-state">
             <span aria-hidden="true">🥖</span>
             <h2 id="brew-title">Today’s craft is in the bakery</h2>
             <p>Only one brew or bake may use the tavern kitchen each day.</p>
             <a class="primary-button inline-button" href="/bakery">Return to the bakery</a>
           </div>
-        {:else if data.snapshot.save.dayMinigameCompleted}
+        {:else if snapshot.save.dayMinigameCompleted}
           <div class="brew-result" aria-live="polite">
             <span class="large-icon" aria-hidden="true">🍺</span>
-            <p class="eyebrow">Day {data.snapshot.save.currentDay} craft complete</p>
+            <p class="eyebrow">Day {snapshot.save.currentDay} craft complete</p>
             <h2 id="brew-title">{latestBeverage?.name ?? 'Brew bottled'}</h2>
             {#if latestBeverage}
               <p class="quality-display">{qualityLabel(latestBeverage.qualityIndex)}</p>
@@ -260,7 +274,7 @@
               {pending ? 'Bottling…' : remainingMs > 0 ? `Stir for ${Math.ceil(remainingMs / 1000)}s` : 'Bottle this brew'}
             </button>
           </form>
-        {:else if data.snapshot.ingredients.length === 0}
+        {:else if snapshot.ingredients.length === 0}
           <div class="empty-state">
             <span aria-hidden="true">🧺</span>
             <h2 id="brew-title">The ingredient shelf is empty</h2>
@@ -276,7 +290,7 @@
             <form method="POST" action="?/start" use:enhance={enhanceStart}>
               <fieldset class="ingredient-picker">
                 <legend>Available ingredients</legend>
-                {#each data.snapshot.ingredients as ingredient (ingredient.id)}
+                {#each snapshot.ingredients as ingredient (ingredient.id)}
                   <label class:selected={selectedIngredientId === ingredient.id}>
                     <input type="radio" name="ingredient" value={ingredient.id} bind:group={selectedIngredientId} />
                     <span class="ingredient-icon" aria-hidden="true">{ingredient.icon}</span>
@@ -303,16 +317,17 @@
           </div>
         {/if}
       </section>
-
-      <aside class="brew-ledger">
+      {/snippet}
+      {#snippet inspector()}
+      <div class="brew-ledger">
         <section class="detail-card">
           <p class="eyebrow">Cellar inventory</p>
           <h2>Bottled mead</h2>
-          {#if data.snapshot.brewery.beverages.length === 0}
+          {#if snapshot.brewery.beverages.length === 0}
             <p class="muted">No finished batches yet.</p>
           {:else}
             <ul class="brew-history">
-              {#each data.snapshot.brewery.beverages as beverage (beverage.id)}
+              {#each snapshot.brewery.beverages as beverage (beverage.id)}
                 <li>
                   <span aria-hidden="true">🍺</span>
                   <div><strong>{beverage.name}</strong><small>{qualityLabel(beverage.qualityIndex)} · Day {beverage.dayNumber}</small></div>
@@ -323,7 +338,18 @@
         </section>
 
         <a class="secondary-link" href="/ingredients">Choose from the pantry <span aria-hidden="true">→</span></a>
-      </aside>
-    </div>
+      </div>
+      {/snippet}
+      {#snippet action()}
+        <ContextualActionStrip
+          eyebrow="Brewery action"
+          title={visual.phase === 'active' || visual.phase === 'ready' ? 'Keep the paddle moving' : visual.phase === 'result' ? 'The batch is bottled' : 'Prepare the next infusion'}
+          description={visual.phase === 'active' || visual.phase === 'ready' ? 'Use physical circular input or the assisted slider; both feed the same live speed.' : visual.phase === 'blocked' ? 'Today’s kitchen work is already underway in the Bakery.' : 'Select a pantry ingredient in the scene panel.'}
+          status={pending ? 'Updating…' : visual.error ?? (session ? `${Math.ceil(remainingMs / 1000)} seconds remain` : `${snapshot.brewery.beverages.length} bottled`)}
+        >
+          <a class="secondary-link compact-link" href="/ingredients">Pantry overview <span aria-hidden="true">→</span></a>
+        </ContextualActionStrip>
+      {/snippet}
+    </CraftingSceneLayout>
   {/if}
 </main>
