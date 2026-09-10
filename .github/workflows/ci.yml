@@ -48,6 +48,9 @@ jobs:
       - name: Audit secret placement
         run: npm run secrets:audit
 
+      - name: Validate canonical scene assets
+        run: npm run art:assets:check
+
       - name: Check generated database types
         run: npm run db:types:check
 

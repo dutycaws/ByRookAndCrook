@@ -33,7 +33,8 @@
     "npc:content:migration": "tsx scripts/npc-content.ts",
     "npc:eval:live": "tsx scripts/evaluate-npc-dialogue.ts --live",
     "screenshots": "tsx scripts/capture-screenshots.ts",
-    "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live"
+    "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live",
+    "art:assets:check": "tsx scripts/validate-scene-assets.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.6",

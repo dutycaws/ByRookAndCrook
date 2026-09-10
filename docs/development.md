@@ -76,7 +76,7 @@ Public sign-up is disabled. Hosted pilot accounts must be provisioned outside th
 10. In **Bar**, ask about a quest or suggest a plan. Choose an optional intent card to characterize your words and, independently, optional food or drink. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew or bake must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
 11. Sign into the other pilot account to see an independent onboarding state.
 
-Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar at 1,672 pixels](screenshots/bar-1672.png), [bar at 1,440 pixels](screenshots/bar-1440.png), [tablet bar](screenshots/bar-768.png), [mobile bar](screenshots/bar-390.png), [serving result](screenshots/bar-result.png), and the [annotated before/after comparison](screenshots/bar-comparison.png). See the [concept-art UI specification](design/concept-ui-spec.md) and [asset manifest](design/asset-manifest.md) for the composition, breakpoints, provenance, and maintenance rules. With the dev server running, regenerate the route captures using `npm run screenshots`; the script provisions and removes its own user.
+Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar at 1,672 pixels](screenshots/bar-1672.png), [bar at 1,440 pixels](screenshots/bar-1440.png), [tablet bar](screenshots/bar-768.png), [mobile bar](screenshots/bar-390.png), [serving result](screenshots/bar-result.png), and the [annotated before/after comparison](screenshots/bar-comparison.png). The issue-#7 visual handoff adds the [Brewery layered composite](screenshots/motion-assets-brewery.jpg), [Bakery layered composite](screenshots/motion-assets-bakery.jpg), and [canonical cutout contact sheet](screenshots/motion-asset-contact-sheet.png). See the [concept-art UI specification](design/concept-ui-spec.md) and [asset manifest](design/asset-manifest.md) for the composition, fixed camera, layer coordinates, provenance, and maintenance rules. With the dev server running, regenerate the route captures using `npm run screenshots`; the script provisions and removes its own user.
 
 The starter crops are finite. Starting an existing tavern never refills harvested cells. Use the explicit local reset when you need the original demonstration state.
 
@@ -94,6 +94,7 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run env:local` | Safely write `.env` from this local stack. |
 | `npm run credentials:local` | Print the two local pilot credentials from the ignored `.env` file. |
 | `npm run secrets:audit` | Verify secret-file count, Git ignore coverage, and absence of configured secrets in tracked files. |
+| `npm run art:assets:check` | Verify supplied-reference checksums and canonical scene dimensions, alpha, derivative checksums, file-size ceilings, and runtime encoding. |
 | `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
 | `npm run fixtures:users:local` | Create or refresh the two local pilot identities. |
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
@@ -117,6 +118,7 @@ npm run env:local
 npm run db:reset:local
 npm run fixtures:users:local
 npm run secrets:audit
+npm run art:assets:check
 npm run db:types:check
 npm run check
 npm run test:db
