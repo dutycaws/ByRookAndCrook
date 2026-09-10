@@ -1,0 +1,62 @@
+{
+  "name": "by-rook-and-crook",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": "^22.20.0 || ^24.0.0 || >=26.0.0",
+    "npm": "11.18.0"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "brac-app:dev": "node --import tsx scripts/brac-app-dev.ts",
+    "build": "vite build",
+    "preview": "node build",
+    "prepare": "svelte-kit sync",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:db": "DO_NOT_TRACK=1 supabase test db",
+    "test:integration": "vitest run tests/integration --reporter=default --reporter=junit --outputFile.junit=test-results/integration/junit.xml",
+    "test:e2e": "playwright test",
+    "db:start": "DO_NOT_TRACK=1 supabase start",
+    "db:stop": "DO_NOT_TRACK=1 supabase stop",
+    "db:reset:local": "DO_NOT_TRACK=1 supabase db reset --local",
+    "db:status": "DO_NOT_TRACK=1 supabase status",
+    "db:types": "DO_NOT_TRACK=1 supabase gen types typescript --local --schema public",
+    "db:types:check": "tsx scripts/check-database-types.ts",
+    "env:local": "tsx scripts/write-local-env.ts",
+    "fixtures:users:local": "tsx scripts/seed-local-users.ts",
+    "credentials:local": "tsx scripts/show-local-credentials.ts",
+    "secrets:audit": "tsx scripts/audit-local-secrets.ts",
+    "npc:content:check": "tsx scripts/npc-content.ts",
+    "npc:content:migration": "tsx scripts/npc-content.ts",
+    "npc:eval:live": "tsx scripts/evaluate-npc-dialogue.ts --live",
+    "screenshots": "tsx scripts/capture-screenshots.ts",
+    "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.6",
+    "@supabase/supabase-js": "2.115.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@sveltejs/adapter-node": "5.5.7",
+    "@sveltejs/kit": "2.70.3",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "22.20.0",
+    "svelte": "5.57.0",
+    "svelte-check": "4.3.6",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  },
+  "packageManager": "npm@11.18.0",
+  "allowScripts": {
+    "esbuild": true,
+    "fsevents": false
+  }
+}

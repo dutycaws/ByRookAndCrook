@@ -1,0 +1,98 @@
+name: Tavern MVP slices
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      DO_NOT_TRACK: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Select npm version
+        run: |
+          npm install --global npm@11.18.0
+          node --version
+          npm --version
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.114.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start and rebuild local Supabase
+        run: |
+          npm run db:start
+          npm run env:local
+          npm run db:reset:local
+          npm run fixtures:users:local
+
+      - name: Audit secret placement
+        run: npm run secrets:audit
+
+      - name: Check generated database types
+        run: npm run db:types:check
+
+      - name: Check application
+        run: npm run check
+
+      - name: Validate versioned NPC content
+        run: npm run npc:content:check
+
+      - name: Test unit behavior
+        run: npm run test:unit
+
+      - name: Test database
+        run: npm run test:db
+
+      - name: Test real RPC concurrency
+        run: npm run test:integration
+
+      - name: Upload integration failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-evidence
+          if-no-files-found: ignore
+          path: test-results/integration/
+
+      - name: Install Chromium
+        run: npm exec -- playwright install --with-deps chromium
+
+      - name: Test browser journey
+        run: npm run test:e2e
+
+      - name: Build application
+        run: npm run build
+
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence
+          if-no-files-found: ignore
+          path: |
+            test-results/
+            playwright-report/
+
+      - name: Stop local Supabase
+        if: always()
+        run: npm run db:stop
