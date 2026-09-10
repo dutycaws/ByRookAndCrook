@@ -97,7 +97,7 @@ These numbers show no material interaction stall under the recorded machine and 
 | `npm run test:unit` | Passed: 48 tests in 8 files |
 | `npm run test:db` | Passed: 270 assertions in 5 pgTAP files |
 | `npm run test:integration` | Passed: 31 authenticated RPC tests in 5 files |
-| `npm run test:e2e` | Passed: 40 Chromium and emulated Pixel 7 journeys with four bounded workers |
+| `npm run test:e2e` | Passed: 40 Chromium and emulated Pixel 7 journeys with bounded concurrency (4 local workers; 2 in CI) |
 | `npm run build` | Passed: adapter-node production bundle generated |
 
 ## Reproduction
