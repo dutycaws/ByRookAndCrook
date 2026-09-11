@@ -932,6 +932,17 @@ input:focus-visible {
   background: linear-gradient(90deg, #7c2519 0 20%, #bd6f24 30%, #b99839 42%, #579844 46% 54%, #b99839 58%, #bd6f24 70%, #7c2519 80% 100%);
 }
 
+.sweet-spot-bar.guide-relative {
+  background: linear-gradient(90deg,
+    #7c2519 0 18%,
+    #bd6f24 18% 25%,
+    #b99839 25% 37.5%,
+    #579844 37.5% 62.5%,
+    #b99839 62.5% 75%,
+    #bd6f24 75% 82%,
+    #7c2519 82% 100%);
+}
+
 .sweet-spot-bar i {
   position: absolute;
   top: -4px;
@@ -990,67 +1001,6 @@ input:focus-visible {
   filter: drop-shadow(0 0 10px #bd4b18);
 }
 
-.speed-control {
-  display: grid;
-  gap: 5px;
-  margin: 4px auto 10px;
-  color: var(--gold);
-  font-family: 'Cinzel', serif;
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.speed-control input {
-  width: 100%;
-  accent-color: #69a64f;
-}
-
-.stir-mode {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin: 15px 0 0;
-  padding: 0;
-  border: 0;
-}
-
-.stir-mode legend {
-  grid-column: 1 / -1;
-  margin-bottom: 2px;
-  color: var(--gold);
-  font-family: 'Cinzel', serif;
-  font-size: 9px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-
-.stir-mode label {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 9px;
-  min-height: 48px;
-  padding: 8px 10px;
-  border: 1px solid #4b371b;
-  background: #0d0905;
-  cursor: pointer;
-}
-
-.stir-mode label.active {
-  border-color: #b38737;
-  background: #261b0c;
-  box-shadow: inset 3px 0 #c89435;
-}
-
-.stir-mode input { accent-color: var(--gold); }
-.stir-mode strong,
-.stir-mode small,
-.speed-control small { display: block; }
-.stir-mode strong { color: var(--ink); font-family: 'Cinzel', serif; font-size: 11px; }
-.stir-mode small,
-.speed-control small { margin-top: 2px; color: var(--muted); font-family: 'EB Garamond', serif; font-size: 11px; letter-spacing: 0; text-transform: none; }
-
 .zone-readout {
   display: flex;
   align-items: baseline;
@@ -1059,6 +1009,23 @@ input:focus-visible {
   min-height: 34px;
   margin-bottom: 12px;
 }
+
+.guided-instructions {
+  display: grid;
+  gap: 3px;
+  margin: 14px 0 8px;
+  text-align: center;
+}
+
+.guided-instructions strong {
+  color: var(--gold-bright);
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.guided-instructions span { color: var(--muted); }
 
 .zone-readout strong {
   font-family: 'Cinzel', serif;
@@ -1071,8 +1038,11 @@ input:focus-visible {
 
 .zone-readout.perfect strong { color: #9ddf79; }
 .zone-readout.good strong { color: #e0b750; }
-.zone-readout.slow strong,
-.zone-readout.fast strong { color: #dd7658; }
+.zone-readout.grace strong { color: #d6c977; }
+.zone-readout.ready strong,
+.zone-readout.choose-direction strong,
+.zone-readout.finding-rhythm strong { color: var(--gold-bright); }
+.zone-readout.catch-guide strong { color: #dd7658; }
 
 .brew-message {
   margin-top: 16px;

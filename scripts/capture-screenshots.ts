@@ -40,19 +40,14 @@ try {
   await page.getByRole('heading', { name: "Prepare today's infusion" }).waitFor();
   await page.screenshot({ path: `${outputDirectory}/brewery-setup.png`, fullPage: true });
 
-  await page.getByRole('button', { name: 'Begin 30-second brew' }).click();
+  await page.getByRole('button', { name: 'Begin guided brew' }).click();
   await page.getByRole('heading', { name: 'Stir the wort' }).waitFor();
-  await page.waitForFunction(() => {
-    const timer = document.querySelector('.brew-progress-heading strong');
-    return timer !== null && timer.textContent !== '30s';
-  });
-  await page.getByRole('radio', { name: /Assisted control/ }).check();
-  await page.getByLabel('Stirring speed').evaluate((control) => {
-    const slider = control as HTMLInputElement;
-    slider.value = '15';
-    slider.dispatchEvent(new Event('input', { bubbles: true }));
-    slider.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  await page.locator('[data-motion-proof="brewery"][data-stir-phase="scored"]').waitFor();
+  const beat = page.getByRole('button', { name: 'Stir on the beat' });
+  await beat.focus();
+  await beat.press('ArrowRight');
+  await page.waitForTimeout(500);
+  await beat.press('Space');
   await page.getByText('Perfect', { exact: true }).waitFor();
   await page.screenshot({ path: `${outputDirectory}/brewery-active.png`, fullPage: true });
 
@@ -63,7 +58,7 @@ try {
   if (!activeSession) throw new Error('Expected an active brew session while capturing screenshots.');
   const backdated = await player.admin
     .from('brew_sessions')
-    .update({ started_at: new Date(Date.now() - 31_000).toISOString() })
+    .update({ started_at: new Date(Date.now() - 18_000).toISOString() })
     .eq('id', activeSession.id);
   if (backdated.error) throw backdated.error;
 

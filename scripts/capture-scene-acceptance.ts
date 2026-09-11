@@ -81,7 +81,7 @@ async function prepareBrewery(browser: Awaited<ReturnType<typeof chromium.launch
   await loginAndCreate(page, player);
   await harvestStarter(page);
   await page.goto(`${appUrl}/brewery`);
-  await page.getByRole('button', { name: 'Begin 30-second brew' }).click();
+  await page.getByRole('button', { name: 'Begin guided brew' }).click();
   await page.locator('[data-motion-proof="brewery"][data-brew-phase="active"]').waitFor();
   return { context, page };
 }
@@ -273,16 +273,15 @@ async function startBenchmarkInteraction(page: Page, area: Area) {
   }
   if (area === 'brewery') {
     await page.evaluate(`(() => {
-      const slider = document.querySelector('input[type="range"][aria-label="Stirring speed in RPM"]');
-      if (!slider) throw new Error('The assisted Brewery slider is unavailable.');
-      let high = false;
+      const beat = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.includes('Stir on the beat'));
+      if (!beat) throw new Error('The Brewery rhythm control is unavailable.');
+      beat.focus();
+      beat.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
       window.__sceneAcceptanceDriver = setInterval(() => {
-        high = !high;
-        slider.value = high ? '18' : '12';
-        slider.dispatchEvent(new Event('input', { bubbles: true }));
-      }, 140);
+        beat.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      }, 1000);
     })()`);
-    return 'live assisted stirring alternated inside the perfect band every 140ms';
+    return 'live keyboard rhythm input followed the fixed one-second guide beat';
   }
   const phase = await page.locator('[data-motion-proof="bakery"]').getAttribute('data-bakery-phase');
   if (phase !== 'baking') throw new Error(`The Bakery benchmark requires the live oven phase, received ${phase}.`);
@@ -363,8 +362,10 @@ try {
   const breweryStorage = await brewery.context.storageState();
   const bakeryStorage = await bakery.context.storageState();
 
-  if (await brewery.page.getByRole('radio', { name: /Assisted control/ }).isVisible()) {
-    await brewery.page.getByRole('radio', { name: /Assisted control/ }).check();
+  const rhythmControl = brewery.page.getByRole('button', { name: 'Stir on the beat' });
+  if (await rhythmControl.isVisible()) {
+    await rhythmControl.focus();
+    await rhythmControl.press('ArrowRight');
   }
   const benchmarkViewports = [viewports[1], viewports[3]];
   const benchmarks = [];

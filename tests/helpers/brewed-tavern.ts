@@ -21,11 +21,11 @@ export async function createBrewedTavern(prefix: string) {
     if (started.error) throw started.error;
     const session = parseStartBrewReceipt(started.data);
     const backdated = await player.admin.from('brew_sessions')
-      .update({ started_at: new Date(Date.now() - 31_000).toISOString() }).eq('id', session.sessionId);
+      .update({ started_at: new Date(Date.now() - 18_000).toISOString() }).eq('id', session.sessionId);
     if (backdated.error) throw backdated.error;
     const completed = await player.client.rpc('complete_brew', {
       p_save_id: initial.save.id, p_session_id: session.sessionId, p_expected_revision: 2,
-      p_action_id: crypto.randomUUID(), p_perfect_ticks: 120, p_good_ticks: 0, p_total_ticks: 120
+      p_action_id: crypto.randomUUID(), p_perfect_ticks: 60, p_good_ticks: 0, p_total_ticks: 60
     });
     if (completed.error) throw completed.error;
     return { ...player, saveId: initial.save.id, brew: parseCompleteBrewReceipt(completed.data) };

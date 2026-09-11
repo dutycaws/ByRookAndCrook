@@ -392,13 +392,13 @@ describe('bakery RPC', () => {
     expect(brew.error).toBeNull();
     const brewSessionId = (brew.data as { sessionId: string }).sessionId;
     expect((await player.admin.from('brew_sessions').update({
-      started_at: new Date(Date.now() - 31_000).toISOString()
+      started_at: new Date(Date.now() - 18_000).toISOString()
     }).eq('id', brewSessionId)).error).toBeNull();
     expect((await player.client.rpc('complete_brew', {
       p_save_id: current.save.id, p_session_id: brewSessionId,
       p_action_id: crypto.randomUUID(),
       p_expected_revision: (brew.data as { committedRevision: number }).committedRevision,
-      p_perfect_ticks: 120, p_good_ticks: 0, p_total_ticks: 120
+      p_perfect_ticks: 60, p_good_ticks: 0, p_total_ticks: 60
     })).error).toBeNull();
 
     current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);

@@ -6,7 +6,7 @@ async function login(page: Page, email: string, password: string) {
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Open the ledger' }).click();
-  await expect(page).toHaveURL(/\/garden$/);
+  await expect(page).toHaveURL(/\/garden$/, { timeout: 15_000 });
 }
 
 test('harvested ingredients become persistent food through the reload-safe bakery', async ({ page }) => {

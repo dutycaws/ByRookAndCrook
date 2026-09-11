@@ -8,7 +8,7 @@ export default defineConfig({
   workers: process.env.CI ? 2 : 4,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:3000',
+    baseURL: process.env.APP_URL ?? 'http://127.0.0.1:3000',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'
   },
@@ -21,7 +21,7 @@ export default defineConfig({
     // Dialogue journeys intercept provider-bound HTTP requests with test-only fixtures.
     // This non-secret sentinel enables the form in CI without granting provider access.
     env: { OPENAI_API_KEY: 'unused-playwright-fixture-sentinel', NPC_PROVIDER: 'openai' },
-    url: 'http://127.0.0.1:3000/login',
+    url: `${process.env.APP_URL ?? 'http://127.0.0.1:3000'}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
   }

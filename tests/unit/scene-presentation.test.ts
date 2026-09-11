@@ -54,15 +54,18 @@ describe('scene presentation contracts', () => {
 
   it('derives Brewery setup, active, ready, blocked, and result phases', () => {
     const game = snapshot();
-    const input = { speed: 125, zone: 'fast' as const, remainingMs: 12_000, pending: false, error: null };
+    const input = { remainingMs: 12_000, pending: false, error: null };
     expect(deriveBrewVisualState(game, input).phase).toBe('setup');
     expect(deriveBrewVisualState(game, { ...input, pending: true })).toMatchObject({ phase: 'setup', pending: true });
     expect(deriveBrewVisualState(game, { ...input, error: 'ledger offline' })).toMatchObject({ phase: 'setup', error: 'ledger offline' });
     game.brewery.activeSession = {
       id: 'brew-1', ingredientBatchId: 'ingredient-1', plantKey: 'fennel', plantName: 'Fennel', icon: '🌿',
-      ingredientQualityIndex: 3, ingredientBrewBonus: 1, startedAt: '2026-09-10T00:00:00Z', durationSeconds: 30
+      ingredientQualityIndex: 3, ingredientBrewBonus: 1, startedAt: '2026-09-10T00:00:00Z',
+      durationSeconds: 15, countdownSeconds: 2, stirRulesVersion: 'guide-v2'
     };
-    expect(deriveBrewVisualState(game, input)).toMatchObject({ phase: 'active', agitation: { speed: 40 } });
+    expect(deriveBrewVisualState(game, input)).toMatchObject({
+      phase: 'active', session: { durationSeconds: 15, countdownSeconds: 2, stirRulesVersion: 'guide-v2' }
+    });
     expect(deriveBrewVisualState(game, { ...input, remainingMs: 0 }).phase).toBe('ready');
     game.save.dailyCraftKind = 'bake';
     expect(deriveBrewVisualState(game, input).phase).toBe('blocked');
@@ -133,7 +136,7 @@ describe('scene presentation contracts', () => {
   it('bounds decorative particles and exposes explicit empty/error states', () => {
     expect(MAX_DECORATIVE_PARTICLES).toBeLessThanOrEqual(40);
     expect(deriveGardenVisualState(null, null, false, 'Scene failed').status).toBe('error');
-    expect(deriveBrewVisualState(null, { speed: 0, zone: 'slow', remainingMs: 0, pending: false, error: null }).phase).toBe('empty');
+    expect(deriveBrewVisualState(null, { remainingMs: 0, pending: false, error: null }).phase).toBe('empty');
     expect(deriveBakeVisualState(null, { elapsedMs: 0, ovenBand: 'red', pending: false, error: null }).phase).toBe('empty');
   });
 });

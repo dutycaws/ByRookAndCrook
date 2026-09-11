@@ -1,31 +1,33 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import BreweryScene from '$lib/components/scenes/BreweryScene.svelte';
   import { qualityLabel } from '$lib/game/contracts';
-  import { classifyStirRpm, stirRpmPercent, STIR_MAX_RPM } from '$lib/game/scene-motion';
+  import {
+    clamp,
+    shortestAngleDelta,
+    type GuidedStirPerformance,
+    type GuidedStirTelemetry
+  } from '$lib/game/scene-motion';
   import { deriveBrewVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
   let snapshot = $derived(data.snapshot!);
   let selectedIngredientId = $state('');
-  let speed = $state(0);
-  let perfectTicks = $state(0);
-  let goodTicks = $state(0);
-  let totalTicks = $state(0);
-  let remainingMs = $state(30_000);
-  let trackedSessionId = $state<string | null>(null);
+  let stirring = $state<GuidedStirTelemetry>({
+    phase: 'countdown', inputKind: 'none', direction: null, performance: 'ready',
+    remainingMs: 17_000, perfectTicks: 0, goodTicks: 0, totalTicks: 0,
+    targetTicks: 60, progress: 0, paddleAngle: Math.PI / 2, guideAngle: Math.PI / 2
+  });
   let startActionId = $state<string | null>(null);
   let completionActionId = $state<string | null>(null);
   let advanceActionId = $state<string | null>(null);
   let pending = $state(false);
   let transportError = $state<string | null>(null);
-  let inputMode = $state<'physical' | 'assisted'>('physical');
   let hydrated = $state(false);
-  const classifySpeed = classifyStirRpm;
 
   onMount(() => {
     hydrated = true;
@@ -37,13 +39,24 @@
     data.snapshot?.brewery.intentCards.find((card) => card.sourceBeverageId === latestBeverage?.id) ?? null
   );
   let brewedToday = $derived(latestBeverage?.dayNumber === data.snapshot?.save.currentDay);
-  let zone = $derived(classifySpeed(speed));
+  let remainingMs = $derived(stirring.remainingMs);
   let visualError = $derived(transportError ?? (form?.message && !form?.success ? form.message : null));
-  let progress = $derived(
-    session ? Math.min(100, Math.max(0, 100 - (remainingMs / (session.durationSeconds * 1000)) * 100)) : 0
+  let progress = $derived(stirring.progress);
+  let canBottle = $derived(Boolean(
+    session && stirring.phase === 'complete' && stirring.totalTicks === stirring.targetTicks && !pending
+  ));
+  let visual = $derived(deriveBrewVisualState(data.snapshot ?? null, { remainingMs, pending, error: visualError }));
+  let guideOffset = $derived(
+    stirring.direction
+      ? shortestAngleDelta(stirring.paddleAngle - stirring.guideAngle) * stirring.direction
+      : 0
   );
-  let canBottle = $derived(Boolean(session && remainingMs <= 0 && !pending));
-  let visual = $derived(deriveBrewVisualState(data.snapshot ?? null, { speed, zone, remainingMs, pending, error: visualError }));
+  let guideMeterPercent = $derived(clamp(50 + guideOffset / (Math.PI / 4) * 50, 0, 100));
+  let countdownRemaining = $derived(
+    session && stirring.phase === 'countdown'
+      ? Math.max(0, Math.ceil((remainingMs - session.durationSeconds * 1000) / 1000))
+      : 0
+  );
 
   $effect(() => {
     const ingredients = data.snapshot?.ingredients ?? [];
@@ -56,40 +69,11 @@
     return crypto.randomUUID();
   }
 
-  $effect(() => {
-    const active = session;
-    if (!active) return;
-
-    return untrack(() => {
-      if (trackedSessionId !== active.id) {
-        trackedSessionId = active.id;
-        speed = 0;
-        perfectTicks = 0;
-        goodTicks = 0;
-        totalTicks = 0;
-        completionActionId = null;
-      }
-
-      const sample = () => {
-        const finishAt = Date.parse(active.startedAt) + active.durationSeconds * 1000;
-        remainingMs = Math.max(0, finishAt - Date.now());
-        if (remainingMs <= 0 || totalTicks >= 160 || document.visibilityState !== 'visible') return;
-
-        totalTicks += 1;
-        const currentZone = classifySpeed(speed);
-        if (currentZone === 'perfect') perfectTicks += 1;
-        if (currentZone === 'good') goodTicks += 1;
-      };
-
-      sample();
-      const timer = window.setInterval(sample, 250);
-      return () => window.clearInterval(timer);
-    });
-  });
-
-  function selectInputMode(mode: 'physical' | 'assisted') {
-    inputMode = mode;
-    speed = 0;
+  function performanceLabel(performance: GuidedStirPerformance) {
+    if (performance === 'choose-direction') return 'Choose a direction';
+    if (performance === 'finding-rhythm') return 'Finding rhythm';
+    if (performance === 'catch-guide') return 'Catch the guide';
+    return performance[0].toUpperCase() + performance.slice(1);
   }
 
   const enhanceStart: SubmitFunction = ({ formData }) => {
@@ -120,9 +104,9 @@
     formData.set('sessionId', session.id);
     formData.set('actionId', completionActionId);
     formData.set('expectedRevision', String(data.snapshot.save.revision));
-    formData.set('perfectTicks', String(perfectTicks));
-    formData.set('goodTicks', String(goodTicks));
-    formData.set('totalTicks', String(totalTicks));
+    formData.set('perfectTicks', String(stirring.perfectTicks));
+    formData.set('goodTicks', String(stirring.goodTicks));
+    formData.set('totalTicks', String(stirring.totalTicks));
     pending = true;
     transportError = null;
 
@@ -168,7 +152,7 @@
     <div>
       <p class="eyebrow">Tavern day {data.snapshot?.save.currentDay ?? '—'} · Daily craft</p>
       <h1>The brewery</h1>
-      <p>Stir the wort for thirty seconds. Ingredient quality and a steady hand shape the result.</p>
+      <p>Follow the 15 RPM guide for fifteen seconds. Ingredient quality and steady rhythm shape the result.</p>
     </div>
     {#if data.snapshot}
       <div class="revision-badge">{data.snapshot.ingredients.length} pantry batch{data.snapshot.ingredients.length === 1 ? '' : 'es'}</div>
@@ -193,8 +177,13 @@
         </dl>
       {/snippet}
       {#snippet scene()}
-      <section class="brew-panel panel" aria-labelledby="brew-title" data-brew-sample-ticks={totalTicks}>
-        <BreweryScene {visual} mode={inputMode} disabled={pending} onspeed={(value) => (speed = value)} />
+      <section class="brew-panel panel" aria-labelledby="brew-title" data-brew-sample-ticks={stirring.totalTicks}>
+        <BreweryScene
+          {visual}
+          saveId={snapshot.save.id}
+          disabled={pending}
+          ontelemetry={(value) => (stirring = value)}
+        />
         {#if snapshot.save.dailyCraftKind === 'bake'}
           <div class="empty-state">
             <span aria-hidden="true">🥖</span>
@@ -208,7 +197,7 @@
               <p class="eyebrow">{session.icon} {session.plantName} infusion</p>
               <h2 id="brew-title">Stir the wort</h2>
             </div>
-            <strong>{Math.ceil(remainingMs / 1000)}s</strong>
+            <strong>{stirring.phase === 'countdown' ? `${countdownRemaining}s ready` : `${Math.ceil(remainingMs / 1000)}s`}</strong>
           </div>
 
           <div class="brew-progress" aria-label="Brewing progress">
@@ -217,38 +206,34 @@
 
           <div class="sweet-spot-wrap">
             <div class="sweet-spot-labels" aria-hidden="true">
-              <span>Too slow</span><span>Sweet spot</span><span>Too fast</span>
+              <span>Behind</span><span>With the guide</span><span>Ahead</span>
             </div>
-            <div class="sweet-spot-bar">
-              <i style={`left: calc(${stirRpmPercent(speed)}% - 2px)`}></i>
+            <div class="sweet-spot-bar guide-relative">
+              <i style={`left: calc(${guideMeterPercent}% - 2px)`}></i>
             </div>
           </div>
 
-          <fieldset class="stir-mode">
-            <legend>Stirring input</legend>
-            <label class:active={inputMode === 'physical'}>
-              <input type="radio" name="stir-mode" checked={inputMode === 'physical'} onchange={() => selectInputMode('physical')} />
-              <span><strong>Physical stirring</strong><small>Circle the paddle through the wort</small></span>
-            </label>
-            <label class:active={inputMode === 'assisted'}>
-              <input type="radio" name="stir-mode" checked={inputMode === 'assisted'} onchange={() => selectInputMode('assisted')} />
-              <span><strong>Assisted control</strong><small>Hold a selected pace with the slider</small></span>
-            </label>
-          </fieldset>
+          <div class="guided-instructions">
+            <strong>Target: 15 RPM · one beat per second</strong>
+            <span>Drag the paddle with the marker, or focus “Stir on the beat” and choose Left or Right.</span>
+          </div>
 
-          <label class="speed-control">
-            <span>Stirring speed <small>Assisted control holds this pace · {Math.round(speed)} RPM</small></span>
-            <input aria-label="Stirring speed in RPM" type="range" min="0" max={STIR_MAX_RPM} step="1" bind:value={speed} disabled={inputMode !== 'assisted'} />
-          </label>
-
-          <div class="zone-readout {zone}" role="status" aria-live="polite">
-            <strong>{zone === 'perfect' ? 'Perfect' : zone === 'good' ? 'Good' : zone === 'slow' ? 'Too slow' : 'Too fast'}</strong>
-            <span>{Math.round(speed)} RPM · {zone === 'perfect' ? 'Keep it between 10 and 20 RPM' : zone === 'good' ? 'Close to the sweet spot' : 'Move toward the green band'}</span>
+          <div class="zone-readout {stirring.performance}" role="status" aria-live="polite">
+            <strong>{performanceLabel(stirring.performance)}</strong>
+            <span>
+              {stirring.phase === 'countdown'
+                ? 'Get ready. The guide begins after the countdown.'
+                : stirring.inputKind === 'keyboard'
+                  ? `${stirring.perfectTicks + stirring.goodTicks} of ${stirring.targetTicks} rhythm ticks earned`
+                  : stirring.direction
+                    ? `${stirring.direction === 1 ? 'Clockwise' : 'Counterclockwise'} · keep the paddle inside the guide arcs`
+                    : 'Move at least 15° clockwise or counterclockwise to choose a direction'}
+            </span>
           </div>
 
           <form method="POST" action="?/complete" use:enhance={enhanceComplete}>
             <button class="primary-button full-button" type="submit" disabled={!hydrated || !canBottle}>
-              {pending ? 'Bottling…' : remainingMs > 0 ? `Stir for ${Math.ceil(remainingMs / 1000)}s` : 'Bottle this brew'}
+              {pending ? 'Bottling…' : stirring.phase === 'countdown' ? `Ready in ${countdownRemaining}s` : remainingMs > 0 ? `Follow the guide for ${Math.ceil(remainingMs / 1000)}s` : 'Bottle this brew'}
             </button>
           </form>
         {:else if snapshot.ingredients.length === 0}
@@ -302,7 +287,7 @@
                 {/each}
               </fieldset>
               <button class="primary-button full-button" type="submit" disabled={!hydrated || !selectedIngredientId || pending}>
-                {pending ? 'Preparing the wort…' : 'Begin 30-second brew'}
+                {pending ? 'Preparing the wort…' : 'Begin guided brew'}
               </button>
             </form>
           </div>
@@ -352,8 +337,8 @@
         <ContextualActionStrip
           eyebrow="Brewery action"
           title={visual.phase === 'active' || visual.phase === 'ready' ? 'Keep the paddle moving' : visual.phase === 'result' ? 'Batch bottled · prepare another' : 'Prepare the next infusion'}
-          description={visual.phase === 'active' || visual.phase === 'ready' ? 'Use physical circular input or the assisted slider; both feed the same live speed.' : visual.phase === 'blocked' ? 'The Bakery has an active loaf.' : 'Select a pantry ingredient in the scene panel.'}
-          status={pending ? 'Updating…' : visual.error ?? (session ? `${Math.ceil(remainingMs / 1000)} seconds remain` : `${snapshot.brewery.beverages.length} bottled`)}
+          description={visual.phase === 'active' || visual.phase === 'ready' ? 'Hold and drag the paddle with the marker, or use the keyboard rhythm control.' : visual.phase === 'blocked' ? 'The Bakery has an active loaf.' : 'Select a pantry ingredient in the scene panel.'}
+          status={pending ? 'Updating…' : visual.error ?? (session ? `${performanceLabel(stirring.performance)} · ${Math.ceil(remainingMs / 1000)} seconds remain` : `${snapshot.brewery.beverages.length} bottled`)}
         >
           <a class="secondary-link compact-link" href="/ingredients">Pantry overview <span aria-hidden="true">→</span></a>
         </ContextualActionStrip>

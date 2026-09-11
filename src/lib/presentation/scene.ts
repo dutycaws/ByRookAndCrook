@@ -1,4 +1,5 @@
 import type { BakeStatus, GameSnapshot, GardenCell } from '$lib/game/contracts';
+import type { GuidedStirTelemetry } from '$lib/game/scene-motion';
 
 export const SCENE_DESIGN_SIZE = { width: 1672, height: 941 } as const;
 export const MAX_DECORATIVE_PARTICLES = 40;
@@ -38,8 +39,13 @@ export interface BrewVisualState {
   area: 'brewery';
   designSize: typeof SCENE_DESIGN_SIZE;
   phase: BrewVisualPhase;
-  session: { id: string; startedAt: string; durationSeconds: number } | null;
-  agitation: { speed: number; zone: 'slow' | 'good' | 'perfect' | 'fast' };
+  session: {
+    id: string;
+    startedAt: string;
+    durationSeconds: number;
+    countdownSeconds: number;
+    stirRulesVersion: 'rpm-v1' | 'guide-v2';
+  } | null;
   pending: boolean;
   error: string | null;
 }
@@ -69,7 +75,7 @@ export interface GardenSceneCallbacks {
 }
 
 export interface BrewSceneCallbacks {
-  onStirSpeed: (speed: number) => void;
+  onStirTelemetry: (telemetry: GuidedStirTelemetry) => void;
 }
 
 export interface BakeSceneCallbacks {
@@ -109,8 +115,6 @@ export function deriveGardenVisualState(
 export function deriveBrewVisualState(
   snapshot: GameSnapshot | null,
   input: {
-    speed: number;
-    zone: BrewVisualState['agitation']['zone'];
     remainingMs: number;
     pending: boolean;
     error: string | null;
@@ -129,8 +133,13 @@ export function deriveBrewVisualState(
     area: 'brewery',
     designSize: SCENE_DESIGN_SIZE,
     phase,
-    session: session ? { id: session.id, startedAt: session.startedAt, durationSeconds: session.durationSeconds } : null,
-    agitation: { speed: Math.min(40, Math.max(0, input.speed)), zone: input.zone },
+    session: session ? {
+      id: session.id,
+      startedAt: session.startedAt,
+      durationSeconds: session.durationSeconds,
+      countdownSeconds: session.countdownSeconds,
+      stirRulesVersion: session.stirRulesVersion
+    } : null,
     pending: input.pending,
     error: input.error
   };

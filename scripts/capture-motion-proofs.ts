@@ -75,7 +75,7 @@ try {
   const breweryPage = await breweryContext.newPage();
   await loginAndHarvest(breweryPage, breweryPlayer.email, breweryPlayer.password);
   await breweryPage.getByRole('link', { name: 'Brewery', exact: true }).click();
-  await breweryPage.getByRole('button', { name: 'Begin 30-second brew' }).click();
+  await breweryPage.getByRole('button', { name: 'Begin guided brew' }).click();
   const breweryScene = breweryPage.locator('[data-motion-proof="brewery"]');
   await breweryScene.waitFor();
   const breweryStorage = await breweryContext.storageState();

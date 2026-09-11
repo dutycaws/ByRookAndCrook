@@ -71,6 +71,9 @@ describe('brewery RPC', () => {
     expect(started.error).toBeNull();
     expect(startReplay.error).toBeNull();
     expect(started.data).toEqual(startReplay.data);
+    expect(started.data).toEqual(expect.objectContaining({
+      durationSeconds: 15, countdownSeconds: 2, stirRulesVersion: 'guide-v2'
+    }));
 
     const brewing = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
     expect(brewing.save.revision).toBe(2);
@@ -79,7 +82,7 @@ describe('brewery RPC', () => {
     const sessionId = brewing.brewery.activeSession!.id;
     const backdated = await player.admin
       .from('brew_sessions')
-      .update({ started_at: new Date(Date.now() - 31_000).toISOString() })
+      .update({ started_at: new Date(Date.now() - 18_000).toISOString() })
       .eq('id', sessionId);
     expect(backdated.error).toBeNull();
 
@@ -88,9 +91,9 @@ describe('brewery RPC', () => {
       p_session_id: sessionId,
       p_action_id: crypto.randomUUID(),
       p_expected_revision: brewing.save.revision,
-      p_perfect_ticks: 120,
+      p_perfect_ticks: 60,
       p_good_ticks: 0,
-      p_total_ticks: 120
+      p_total_ticks: 60
     };
     const [completed, completionReplay] = await Promise.all([
       player.client.rpc('complete_brew', completeInput),
@@ -198,13 +201,13 @@ describe('brewery RPC', () => {
       expect(started.error).toBeNull();
       const sessionId = (started.data as { sessionId: string }).sessionId;
       expect((await player.admin.from('brew_sessions').update({
-        started_at: new Date(Date.now() - 31_000).toISOString()
+        started_at: new Date(Date.now() - 18_000).toISOString()
       }).eq('id', sessionId)).error).toBeNull();
       expect((await player.client.rpc('complete_brew', {
         p_save_id: current.save.id, p_session_id: sessionId,
         p_action_id: crypto.randomUUID(),
         p_expected_revision: (started.data as { committedRevision: number }).committedRevision,
-        p_perfect_ticks: 120, p_good_ticks: 0, p_total_ticks: 120
+        p_perfect_ticks: 60, p_good_ticks: 0, p_total_ticks: 60
       })).error).toBeNull();
       current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
       expect(current.save).toEqual(expect.objectContaining({

@@ -204,22 +204,13 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await expect(page.getByRole('heading', { name: "Prepare today's infusion" })).toBeVisible();
     await expect(page.getByText('Legendary · 2 units · Brew +2')).toBeVisible();
-    await page.getByRole('button', { name: 'Begin 30-second brew' }).click();
+    await page.getByRole('button', { name: 'Begin guided brew' }).click();
     await expect(page.getByRole('heading', { name: 'Stir the wort' })).toBeVisible();
-    await expect(page.locator('.brew-progress-heading strong')).not.toHaveText('30s');
-
-    await page.getByRole('radio', { name: /Assisted control/ }).check();
-    const slider = page.getByLabel('Stirring speed');
-    await slider.press('End');
-    await expect(page.locator('.zone-readout strong')).toHaveText('Too fast');
-    await slider.press('Home');
-    await expect(page.locator('.zone-readout strong')).toHaveText('Too slow');
-    await slider.evaluate((control) => {
-      const input = control as HTMLInputElement;
-      input.value = '15';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await expect(page.locator('.zone-readout strong')).toHaveText('Perfect');
+    await expect(page.getByText('Target: 15 RPM · one beat per second')).toBeVisible();
+    const beat = page.getByRole('button', { name: 'Stir on the beat' });
+    await beat.focus();
+    await beat.press('ArrowRight');
+    await expect(page.locator('[data-motion-proof="brewery"]')).toHaveAttribute('data-input-kind', 'keyboard');
 
     const snapshotResult = await player.client.rpc('get_tavern_snapshot');
     expect(snapshotResult.error).toBeNull();
@@ -230,7 +221,7 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
 
     const backdated = await player.admin
       .from('brew_sessions')
-      .update({ started_at: new Date(Date.now() - 31_000).toISOString() })
+      .update({ started_at: new Date(Date.now() - 18_000).toISOString() })
       .eq('id', snapshot.brewery.activeSession!.id);
     expect(backdated.error).toBeNull();
 
@@ -243,7 +234,7 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await expect(page.getByText('Intent card earned · fine')).toBeVisible();
     await expect(page.getByText('Charm', { exact: true })).toBeVisible();
     await expect(page.getByText('Frame the keeper’s words with warmth and personal appeal.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Begin 30-second brew' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Begin guided brew' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Rest and begin next day' })).toBeVisible();
 
     await page.reload();

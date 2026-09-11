@@ -39,7 +39,7 @@ Each screenshot is exactly the named browser viewport. Its annotation identifies
 
 The Garden keeps the high three-quarter courtyard, dense green perimeter, warm upper-left light, and a readable central board. All twelve saved cells use one pointy-top odd-row projection for bed art, crops, selection, focus, and hit targets. The wide view preserves the status and inspector rails; tablet and phone views put the illustrated scene and immediate action before those rails.
 
-The Brewery keeps copper, amber liquid, timber, flame, and pale steam visually distinct. The paddle remains visible through the interaction path and passes behind the front rim. Live progress and speed controls stay readable without obscuring the vat. The narrow layout crops the fixed camera around the vat and places controls below it.
+The Brewery keeps copper, amber liquid, timber, flame, and pale steam visually distinct. The paddle remains visible through the interaction path and passes behind the front rim. The guide marker, angular corridors, guide-relative meter, progress, and keyboard rhythm control stay readable without obscuring the vat. The narrow layout crops the fixed camera around the vat and places status and actions below it.
 
 The Bakery retains the earlier broad oak workbench requested by the project owner. Dough, flour, timber, stone, flame, and brass remain distinct. The confirmed groove and moving lame are separate layers, and the foreground surface disappears only for the server-backed oven stage. Tablet and phone views preserve the oven, loaf, stage count, keyboard alternative, and immediate action in a single reading order.
 
@@ -53,10 +53,10 @@ Automated browser coverage complements the clips:
 
 | Concern | Evidence |
 | --- | --- |
-| Pointer, touch, pen, keyboard | `tests/e2e/motion-proof.test.ts` covers Brewery mouse/touch and assisted input plus Bakery mouse/touch/pen and keyboard actions. `tests/e2e/crafting-layout.test.ts` covers Garden mouse and keyboard selection, target size, and native touch selection plus harvest in the mobile project. |
+| Pointer, touch, pen, keyboard | `tests/e2e/motion-proof.test.ts` covers Brewery guided pointer and keyboard rhythm input plus Bakery mouse/touch/pen and keyboard actions. `tests/e2e/crafting-layout.test.ts` covers Garden mouse and keyboard selection, target size, and native touch selection plus harvest in the mobile project. |
 | Reduced motion | The same tests assert static Brewery/Bakery poses; Garden tests assert the atmosphere and harvest effect stop. |
 | Missing imagery | Garden, Brewery, and Bakery journeys abort their environment image and require the named fallback to remain usable. |
-| Hidden tabs and cleanup | Scene visibility tests require ambient animation to pause. Brewery sampling also stops while hidden; cleanup removes frame, timer, media-query, and visibility listeners. |
+| Hidden tabs and cleanup | Scene visibility tests require ambient animation to pause. Brewery score ticks elapsed while hidden receive no positive credit; cleanup removes frame, media-query, and visibility listeners. |
 | Layout | The shared-layout journey executes all three routes at the four required viewports, requires scene-first narrow ordering and zero overflow, and checks every Garden art/hit center. |
 
 ## Gameplay and recovery review
@@ -69,7 +69,7 @@ The review uses the existing server contracts rather than visual substitutes.
 | Bakery phase recovery | `bakery-journey.test.ts` reloads folding, scoring, ready, baking, and result states. It verifies early and overbaked removal and exact frozen fold, score, oven, and completion retries. |
 | Shared daily craft | `bakery-rpc.test.ts` serializes brew versus bake, permits a no-craft day to close, and requires an active craft to finish before rest. |
 | Server-owned results | Brewery and Bakery integration tests backdate only the saved server timestamp, then assert canonical duration, quality, inventory consumption, rewards, and one committed receipt. |
-| Brewery reload telemetry | `motion-proof.test.ts` verifies reload resets in-memory paddle speed and samples while preserving the active server timer; exact completion retry reuses the captured telemetry payload. |
+| Brewery reload telemetry | `motion-proof.test.ts` verifies reload preserves earned guided-stir credit while elapsed hidden ticks earn nothing; exact completion retry reuses the captured telemetry payload. |
 
 Garden, Brewery, Bakery, and Bar mutation controls remain disabled until hydration attaches their save, subject, action, and revision fields. The no-input tavern creation form remains available from server-rendered HTML.
 
@@ -77,7 +77,7 @@ No helper chat, card-cost or deck control, fabricated task/reputation/XP display
 
 ## Measured rendering performance
 
-The harness measures browser `requestAnimationFrame` intervals during deterministic live scene work: Garden alternates native plot selection every 140 ms, Brewery alternates the real assisted-input slider inside the perfect band every 140 ms, and Bakery runs its server-timed oven with live embers, steam, loaf rise, and crust progression. Pass/fail uses unrounded values. The nominal desktop target is 60 fps with a 59 fps acceptance floor for vsync sampling variance; mobile-size delivery must remain at or above 30 fps. Any frame over 50 ms fails as a material stall. Values below are rounded only for display.
+The harness measures browser `requestAnimationFrame` intervals during deterministic live scene work: Garden alternates native plot selection every 140 ms, Brewery follows the fixed guide with real pointer events, and Bakery runs its server-timed oven with live embers, steam, loaf rise, and crust progression. Pass/fail uses unrounded values. The nominal desktop target is 60 fps with a 59 fps acceptance floor for vsync sampling variance; mobile-size delivery must remain at or above 30 fps. Any frame over 50 ms fails as a material stall. Values below are rounded only for display.
 
 | Area | 1,440 × 900 target / measured | 390 × 844 target / measured | Worst frame across six trials | Frames over 50 ms |
 | --- | --- | --- | ---: | ---: |

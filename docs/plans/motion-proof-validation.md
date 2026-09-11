@@ -67,7 +67,7 @@ Regenerate this evidence against a running local stack with:
 npm run motion:proof:capture
 ```
 
-The capture script creates isolated test players and removes them after capture. `tests/unit/scene-motion.test.ts` covers the input math. `tests/e2e/motion-proof.test.ts` covers both directions, release decay, assisted input, fold and score commits, reduced motion, mobile scaling, and page overflow.
+The capture script creates isolated test players and removes them after capture. `tests/unit/scene-motion.test.ts` covers guided pointer timing, direction, grace, keyboard beats, persistence, and reduced-motion scoring. `tests/e2e/motion-proof.test.ts` covers pointer and keyboard guide paths, hidden-time and reload recovery, fold and score commits, reduced motion, mobile scaling, and page overflow.
 
 ## Production handoff
 
