@@ -14,7 +14,7 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await page.getByRole('button', {name:'Open the ledger'}).click();
     await expect(page).toHaveURL(/\/garden$/);
     await page.goto('/bar');
-    const invalid = await page.request.post('/api/dialogue', {headers:{origin:'http://127.0.0.1:3000'}, data:{message:'Missing command fields'}});
+    const invalid = await page.request.post('/api/dialogue', {headers:{origin:new URL(page.url()).origin}, data:{message:'Missing command fields'}});
     expect(invalid.status()).toBe(400);
     expect((await page.request.post('/api/dialogue', {headers:{origin:'https://foreign.example'},data:{}})).status()).toBe(403);
     expect((await page.request.get('/api/dialogue/not-a-turn')).status()).toBe(400);

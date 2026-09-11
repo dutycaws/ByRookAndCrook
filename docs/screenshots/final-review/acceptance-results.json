@@ -1,0 +1,380 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-10T09:10:48.391Z",
+  "gitCommit": "2a75ed010f87c640bc572f425d15f042e06ccbd6",
+  "appUrl": "http://127.0.0.1:4173",
+  "conditions": {
+    "serverMode": "production-preview",
+    "operatingSystem": "linux 7.1.5-76070105-generic",
+    "cpu": "AMD Ryzen 7 1700 Eight-Core Processor",
+    "logicalCpuCount": 16,
+    "totalMemoryGiB": 31.3,
+    "freeMemoryGiBAtCapture": 14,
+    "browser": "153.0.8010.12",
+    "browserMode": "headless Chromium",
+    "deviceScaleFactor": 1,
+    "throttling": "none",
+    "mobileClaim": "viewport-size emulation in desktop Chromium; no physical-device claim",
+    "benchmarkDurationMs": 2000,
+    "benchmarkTrials": 3
+  },
+  "references": {
+    "garden": {
+      "file": "CozyTavernConceptArt2.png",
+      "state": "mature c1 selected"
+    },
+    "brewery": {
+      "file": "CozyTavernConceptArt3.png",
+      "state": "active wort and paddle"
+    },
+    "bakery": {
+      "file": "CozyTavernConceptArt4.png",
+      "state": "scored dough on the broad workbench"
+    }
+  },
+  "screenshots": [
+    {
+      "file": "garden-1672x941.png",
+      "viewport": "1672x941",
+      "overflowPx": 0
+    },
+    {
+      "file": "garden-1440x900.png",
+      "viewport": "1440x900",
+      "overflowPx": 0
+    },
+    {
+      "file": "garden-768x1024.png",
+      "viewport": "768x1024",
+      "overflowPx": 0
+    },
+    {
+      "file": "garden-390x844.png",
+      "viewport": "390x844",
+      "overflowPx": 0
+    },
+    {
+      "file": "brewery-1672x941.png",
+      "viewport": "1672x941",
+      "overflowPx": 0
+    },
+    {
+      "file": "brewery-1440x900.png",
+      "viewport": "1440x900",
+      "overflowPx": 0
+    },
+    {
+      "file": "brewery-768x1024.png",
+      "viewport": "768x1024",
+      "overflowPx": 0
+    },
+    {
+      "file": "brewery-390x844.png",
+      "viewport": "390x844",
+      "overflowPx": 0
+    },
+    {
+      "file": "bakery-1672x941.png",
+      "viewport": "1672x941",
+      "overflowPx": 0
+    },
+    {
+      "file": "bakery-1440x900.png",
+      "viewport": "1440x900",
+      "overflowPx": 0
+    },
+    {
+      "file": "bakery-768x1024.png",
+      "viewport": "768x1024",
+      "overflowPx": 0
+    },
+    {
+      "file": "bakery-390x844.png",
+      "viewport": "390x844",
+      "overflowPx": 0
+    }
+  ],
+  "motionClips": [
+    "garden-interaction.webm",
+    "brewery-interaction.webm",
+    "bakery-interaction.webm"
+  ],
+  "benchmarks": [
+    {
+      "area": "brewery",
+      "viewport": "1440x900",
+      "targetFps": 60,
+      "minimumPassingFps": 59,
+      "interaction": "live assisted stirring alternated inside the perfect band every 140ms",
+      "meanFps": 60,
+      "worstFrameMs": 16.8,
+      "materialStallsOver50ms": 0,
+      "meetsTarget": true,
+      "trials": [
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.0039,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.005,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "area": "brewery",
+      "viewport": "390x844",
+      "targetFps": 30,
+      "minimumPassingFps": 30,
+      "interaction": "live assisted stirring alternated inside the perfect band every 140ms",
+      "meanFps": 60,
+      "worstFrameMs": 16.8,
+      "materialStallsOver50ms": 0,
+      "meetsTarget": true,
+      "trials": [
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.0036,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.005,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "area": "garden",
+      "viewport": "1440x900",
+      "targetFps": 60,
+      "minimumPassingFps": 59,
+      "interaction": "live native plot selection toggled every 140ms over the illustrated grid",
+      "meanFps": 60,
+      "worstFrameMs": 16.8,
+      "materialStallsOver50ms": 0,
+      "meetsTarget": true,
+      "trials": [
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.005,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.005,
+          "unroundedWorstFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "area": "garden",
+      "viewport": "390x844",
+      "targetFps": 30,
+      "minimumPassingFps": 30,
+      "interaction": "live native plot selection toggled every 140ms over the illustrated grid",
+      "meanFps": 60,
+      "worstFrameMs": 16.8,
+      "materialStallsOver50ms": 0,
+      "meetsTarget": true,
+      "trials": [
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.005,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.001,
+          "unroundedWorstFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "area": "bakery",
+      "viewport": "1440x900",
+      "targetFps": 60,
+      "minimumPassingFps": 59,
+      "interaction": "server-timed oven phase with live embers, steam, loaf rise, and crust progression",
+      "meanFps": 60,
+      "worstFrameMs": 16.8,
+      "materialStallsOver50ms": 0,
+      "meetsTarget": true,
+      "trials": [
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 120,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        }
+      ]
+    },
+    {
+      "area": "bakery",
+      "viewport": "390x844",
+      "targetFps": 30,
+      "minimumPassingFps": 30,
+      "interaction": "server-timed oven phase with live embers, steam, loaf rise, and crust progression",
+      "meanFps": 60,
+      "worstFrameMs": 16.8,
+      "materialStallsOver50ms": 0,
+      "meetsTarget": true,
+      "trials": [
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.005,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 121,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.8,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60.002,
+          "unroundedWorstFrameMs": 16.8
+        },
+        {
+          "frames": 120,
+          "fps": 60,
+          "medianFrameMs": 16.7,
+          "p95FrameMs": 16.7,
+          "worstFrameMs": 16.8,
+          "framesOver33ms": 0,
+          "framesOver50ms": 0,
+          "unroundedFps": 60,
+          "unroundedWorstFrameMs": 16.8
+        }
+      ]
+    }
+  ]
+}

@@ -205,6 +205,7 @@ export type Database = {
       brew_sessions: {
         Row: {
           completed_at: string | null
+          countdown_seconds: number
           created_at: string
           day_number: number
           duration_seconds: number
@@ -219,11 +220,13 @@ export type Database = {
           save_id: string
           started_at: string
           status: string
+          stir_rules_version: string
           stir_score: number | null
           total_ticks: number | null
         }
         Insert: {
           completed_at?: string | null
+          countdown_seconds?: number
           created_at?: string
           day_number: number
           duration_seconds?: number
@@ -238,11 +241,13 @@ export type Database = {
           save_id: string
           started_at?: string
           status?: string
+          stir_rules_version?: string
           stir_score?: number | null
           total_ticks?: number | null
         }
         Update: {
           completed_at?: string | null
+          countdown_seconds?: number
           created_at?: string
           day_number?: number
           duration_seconds?: number
@@ -257,6 +262,7 @@ export type Database = {
           save_id?: string
           started_at?: string
           status?: string
+          stir_rules_version?: string
           stir_score?: number | null
           total_ticks?: number | null
         }

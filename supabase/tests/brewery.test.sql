@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(58);
+select plan(66);
 
 create temporary table test_ids (
   key text primary key,
@@ -50,6 +50,12 @@ insert into test_ids values ('session-one', (select id from public.brew_sessions
 select is((select count(*) from public.brew_sessions), 1::bigint, 'starting creates one brew session');
 select is((select revision from public.tavern_saves), 2::bigint, 'starting advances the save revision');
 select ok((public.get_tavern_snapshot() #>> '{brewery,activeSession,id}') is not null, 'snapshot exposes the active brew');
+select is((public.get_tavern_snapshot() #>> '{brewery,activeSession,durationSeconds}')::integer, 15,
+  'new brews use a fifteen-second scored challenge');
+select is((public.get_tavern_snapshot() #>> '{brewery,activeSession,countdownSeconds}')::integer, 2,
+  'new brews expose the two-second countdown');
+select is(public.get_tavern_snapshot() #>> '{brewery,activeSession,stirRulesVersion}', 'guide-v2',
+  'new brews expose their guided rules version');
 select is((public.get_tavern_snapshot() #>> '{save,currentDay}')::integer, 1, 'the first brew occurs on day one');
 select is((public.get_tavern_snapshot() #>> '{save,dayMinigameCompleted}')::boolean, false, 'starting does not complete the daily craft');
 
@@ -73,25 +79,25 @@ select throws_ok(
       '52000000-0000-4000-8000-000000000002', 2
     )
   $$,
-  'PT409', 'A brew already exists for this tavern day',
-  'a second brew cannot start on the same day'
+  'PT409', 'Finish the active brew before starting another craft',
+  'a second brew cannot start while one is active'
 );
 select throws_ok(
   $$
     select public.complete_brew(
       (select value from test_ids where key = 'save-one'),
       (select value from test_ids where key = 'session-one'),
-      '53000000-0000-4000-8000-000000000001', 2, 120, 0, 120
+      '53000000-0000-4000-8000-000000000001', 2, 60, 0, 60
     )
   $$,
-  'PT422', 'The wort must be stirred for thirty seconds',
-  'the server rejects premature bottling'
+  'PT422', 'The guided stir is still in progress',
+  'the server rejects bottling before countdown and challenge finish'
 );
 select is((select count(*) from public.beverages), 0::bigint, 'premature bottling creates no beverage');
 select is((select consumed_quantity from public.ingredient_batches), 0, 'premature bottling consumes no ingredient');
 
 reset role;
-update public.brew_sessions set started_at = clock_timestamp() - interval '31 seconds';
+update public.brew_sessions set started_at = clock_timestamp() - interval '18 seconds';
 set local role authenticated;
 
 select lives_ok(
@@ -99,10 +105,10 @@ select lives_ok(
     select public.complete_brew(
       (select value from test_ids where key = 'save-one'),
       (select value from test_ids where key = 'session-one'),
-      '53000000-0000-4000-8000-000000000001', 2, 120, 0, 120
+      '53000000-0000-4000-8000-000000000001', 2, 60, 0, 60
     )
   $$,
-  'a fully stirred brew can be bottled after thirty seconds'
+  'a complete guided stir can be bottled after seventeen seconds'
 );
 select is((select status from public.brew_sessions), 'completed', 'the brew session is completed');
 select is((select quality_index from public.brew_sessions), 6::smallint, 'Legendary fennel plus perfect stirring reaches Resplendent');
@@ -117,7 +123,7 @@ select is((select count(*) from public.intent_cards where source_kind='brew'), 1
 select is((select tier from public.intent_cards where source_kind='brew'), 'exceptional', 'Resplendent brew earns an exceptional intent card');
 select is((select card_key from public.intent_cards where source_kind='brew'), 'resolve', 'a Resplendent brew rewards Resolve');
 select is((select revision from public.tavern_saves), 3::bigint, 'completion advances revision once');
-select is((select day_minigame_completed from public.tavern_saves), true, 'completion closes the daily minigame');
+select is((select day_minigame_completed from public.tavern_saves), true, 'completion records that a craft finished today');
 select ok((public.get_tavern_snapshot() #>> '{brewery,activeSession}') is null, 'completed brew is no longer active');
 
 select lives_ok(
@@ -125,7 +131,7 @@ select lives_ok(
     select public.complete_brew(
       (select value from test_ids where key = 'save-one'),
       (select value from test_ids where key = 'session-one'),
-      '53000000-0000-4000-8000-000000000001', 2, 120, 0, 120
+      '53000000-0000-4000-8000-000000000001', 2, 60, 0, 60
     )
   $$,
   'an identical completion retry returns its receipt'
@@ -137,23 +143,14 @@ select throws_ok(
     select public.complete_brew(
       (select value from test_ids where key = 'save-one'),
       (select value from test_ids where key = 'session-one'),
-      '53000000-0000-4000-8000-000000000001', 2, 119, 1, 120
+      '53000000-0000-4000-8000-000000000001', 2, 59, 1, 60
     )
   $$,
   'PT409', 'Action identifier was already used for a different request',
   'a completion action cannot be reused with changed telemetry'
 );
-select throws_ok(
-  $$
-    select public.start_brew(
-      (select value from test_ids where key = 'save-one'),
-      (select value from test_ids where key = 'fennel-batch'),
-      '52000000-0000-4000-8000-000000000003', 3
-    )
-  $$,
-  'PT422', 'The daily tavern minigame is already complete',
-  'no second minigame can start before the next day'
-);
+select ok((select daily_craft_kind is null from public.tavern_saves),
+  'completion releases the craft slot for another same-day batch');
 
 select lives_ok(
   $$ select public.advance_tavern_day(
@@ -184,7 +181,7 @@ select lives_ok(
   $$,
   'the remaining ingredient can start the next day brew'
 );
-select is((select count(*) from public.brew_sessions), 2::bigint, 'one session is stored for each tavern day');
+select is((select count(*) from public.brew_sessions), 2::bigint, 'completed history is retained across tavern days');
 select is((select revision from public.tavern_saves), 5::bigint, 'the next brew start advances revision');
 select throws_ok(
   $$ update public.brew_sessions set status = 'completed' where true $$,
@@ -228,6 +225,41 @@ select throws_ok(
   'PT400', 'Invalid brew completion',
   'invalid telemetry totals are rejected'
 );
+select throws_ok(
+  $$
+    select public.complete_brew(
+      (select value from test_ids where key = 'save-one'),
+      (select id from public.brew_sessions where day_number = 2),
+      '53000000-0000-4000-8000-000000000003', 5, 59, 0, 59
+    )
+  $$,
+  'PT400', 'Guided stirring requires a complete scoring record',
+  'guide-v2 rejects a partial scoring record'
+);
+
+reset role;
+update public.brew_sessions
+set stir_rules_version = 'rpm-v1', countdown_seconds = 0, duration_seconds = 30,
+    started_at = clock_timestamp() - interval '31 seconds'
+where day_number = 2;
+set local role authenticated;
+set local request.jwt.claim.sub = '50000000-0000-4000-8000-000000000001';
+select is(public.get_tavern_snapshot() #>> '{brewery,activeSession,stirRulesVersion}', 'rpm-v1',
+  'an active legacy session remains identifiable after migration');
+select is((public.get_tavern_snapshot() #>> '{brewery,activeSession,countdownSeconds}')::integer, 0,
+  'an active legacy session retains no countdown');
+select lives_ok(
+  $$
+    select public.complete_brew(
+      (select value from test_ids where key = 'save-one'),
+      (select id from public.brew_sessions where day_number = 2),
+      '53000000-0000-4000-8000-000000000004', 5, 120, 0, 120
+    )
+  $$,
+  'an active legacy thirty-second session can still complete'
+);
+select is((select stir_score from public.brew_sessions where day_number = 2), 6::smallint,
+  'the legacy 120-tick calculator remains unchanged');
 select ok(not has_table_privilege('authenticated', 'public.beverages', 'INSERT'), 'players cannot insert beverages directly');
 select is((select quantity from public.ingredient_batches), 2, 'ingredient provenance retains the original harvested quantity');
 

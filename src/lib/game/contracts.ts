@@ -59,6 +59,8 @@ export interface BrewSession {
   ingredientBrewBonus: number;
   startedAt: string;
   durationSeconds: number;
+  countdownSeconds: number;
+  stirRulesVersion: 'rpm-v1' | 'guide-v2';
 }
 
 export interface Beverage {
@@ -198,6 +200,8 @@ export interface StartBrewReceipt {
   ingredientBatchId: string;
   startedAt: string;
   durationSeconds: number;
+  countdownSeconds: number;
+  stirRulesVersion: 'rpm-v1' | 'guide-v2';
   committedRevision: number;
   dayNumber: number;
 }
@@ -339,6 +343,19 @@ export function parseSnapshot(value: Json | undefined): GameSnapshot | null {
     throw new Error('Invalid game snapshot');
   }
 
+  const activeBrew = candidate.brewery.activeSession;
+  if (activeBrew) {
+    const stirRulesVersion = activeBrew.stirRulesVersion ?? 'rpm-v1';
+    const countdownSeconds = activeBrew.countdownSeconds ?? 0;
+    const validTiming = (stirRulesVersion === 'guide-v2'
+      && activeBrew.durationSeconds === 15 && countdownSeconds === 2)
+      || (stirRulesVersion === 'rpm-v1'
+        && activeBrew.durationSeconds === 30 && countdownSeconds === 0);
+    if (!validTiming) throw new Error('Invalid active brew timing');
+    activeBrew.stirRulesVersion = stirRulesVersion;
+    activeBrew.countdownSeconds = countdownSeconds;
+  }
+
   return candidate;
 }
 
@@ -368,11 +385,17 @@ function parseCommandReceipt<T extends { actionId: string; committedRevision: nu
 }
 
 export function parseStartBrewReceipt(value: Json): StartBrewReceipt {
-  const receipt = parseCommandReceipt<StartBrewReceipt>(value);
-  if (!receipt.sessionId || !receipt.ingredientBatchId || receipt.durationSeconds !== 30) {
+  const raw = parseCommandReceipt<StartBrewReceipt>(value);
+  const stirRulesVersion = raw.stirRulesVersion ?? 'rpm-v1';
+  const countdownSeconds = raw.countdownSeconds ?? 0;
+  const validTiming = (stirRulesVersion === 'guide-v2'
+    && raw.durationSeconds === 15 && countdownSeconds === 2)
+    || (stirRulesVersion === 'rpm-v1'
+      && raw.durationSeconds === 30 && countdownSeconds === 0);
+  if (!raw.sessionId || !raw.ingredientBatchId || !validTiming) {
     throw new Error('Invalid start brew receipt');
   }
-  return receipt;
+  return { ...raw, countdownSeconds, stirRulesVersion };
 }
 
 export function parseCompleteBrewReceipt(value: Json): CompleteBrewReceipt {

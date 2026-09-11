@@ -13,8 +13,12 @@ select public.harvest_crop((select id from public.tavern_saves),
 reset role;
 
 -- Fixtures cover every quality for each patron without changing production rules.
-insert into public.brew_sessions (id, save_id, day_number, ingredient_batch_id, ingredient_quality_index, ingredient_brew_bonus, rules_version)
-select ('62000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid, s.id, n, b.id, 5, 2, 'harvest-v1'
+insert into public.brew_sessions (
+  id, save_id, day_number, ingredient_batch_id, ingredient_quality_index, ingredient_brew_bonus,
+  rules_version, status, completed_at, perfect_ticks, good_ticks, total_ticks, stir_score, quality_index
+)
+select ('62000000-0000-4000-8000-' || lpad(n::text,12,'0'))::uuid, s.id, n, b.id, 5, 2,
+  'harvest-v1', 'completed', now(), 0, 0, 0, 0, 0
 from public.tavern_saves s join public.ingredient_batches b on b.save_id = s.id cross join generate_series(1,16) n
 where s.user_id = '60000000-0000-4000-8000-000000000001';
 insert into public.beverages (id, save_id, brew_session_id, ingredient_batch_id, rules_version, name, quality_index)

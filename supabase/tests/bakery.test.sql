@@ -29,7 +29,7 @@ select throws_ok($$select public.advance_tavern_day(
 select throws_ok($$select public.start_brew(
   (select id from public.tavern_saves), (select id from public.ingredient_batches),
   '78000000-0000-4000-8000-000000000099', 2
-)$$, 'PT422', 'Today''s craft is already reserved for the bakery', 'a bake blocks a same-day brew');
+)$$, 'PT422', 'Finish the active bake before starting another craft', 'an active bake blocks a brew');
 select throws_ok($$select public.score_bake(
   (select id from public.tavern_saves), (select id from public.bake_sessions),
   '78000000-0000-4000-8000-000000000091', 2, 70
@@ -48,8 +48,8 @@ select throws_ok($$select public.fold_bake(
 )$$, 'PT400', 'Invalid dough fold', 'a null fold is a public validation error');
 select throws_ok($$select public.score_bake(
   (select id from public.tavern_saves), (select id from public.bake_sessions),
-  '78000000-0000-4000-8000-000000000095', 2, null
-)$$, 'PT400', 'Invalid loaf score', 'a null score is a public validation error');
+  '78000000-0000-4000-8000-000000000095', 2, 9
+)$$, 'PT400', 'Invalid loaf score', 'a sub-threshold score is a public validation error');
 
 select lives_ok($$
   do $prepare$
@@ -123,7 +123,7 @@ select is((select daily_craft_kind from public.tavern_saves), 'brew', 'migration
 select throws_ok($$select public.start_bake(
   (select id from public.tavern_saves), (select id from public.ingredient_batches),
   '78000000-0000-4000-8000-000000000009', 15
-)$$, 'PT422', 'Today''s brew or bake is already reserved', 'the backfilled brew prevents a second Bakery craft');
+)$$, 'PT422', 'Finish the active brew before starting another craft', 'the backfilled active brew prevents a Bakery craft');
 
 set local request.jwt.claim.sub = '80000000-0000-4000-8000-000000000002';
 select lives_ok($$select public.create_tavern()$$, 'a second keeper creates an independent tavern');

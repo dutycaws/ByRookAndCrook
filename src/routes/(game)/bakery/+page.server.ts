@@ -106,7 +106,7 @@ export const actions: Actions = {
       value: integer(data.get('length'))
     };
     if (!validBase(command) || !UUID_PATTERN.test(command.sessionId)
-      || !Number.isInteger(command.value) || command.value < 0 || command.value > 100) {
+      || !Number.isInteger(command.value) || command.value < 10 || command.value > 100) {
       return fail(400, { message: 'That score could not be recorded.' });
     }
     try {
