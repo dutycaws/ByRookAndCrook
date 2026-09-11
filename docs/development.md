@@ -19,7 +19,7 @@ The JavaScript package versions and npm version are pinned in `package.json` and
 
 ## First-time setup and normal local startup
 
-Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI and Docker Engine with Compose support as host prerequisites; the launcher checks for them and never installs or changes host tools automatically.
+Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
 
 Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. This command does not make a billable provider request to validate the key.
 
@@ -69,14 +69,14 @@ Public sign-up is disabled. Hosted pilot accounts must be provisioned outside th
 3. Select `c1`, the mature fennel plot beside the hive. The details panel previews two Legendary units, with brew +2 and bake +4 per unit.
 4. Submit **Harvest crop**. The cell becomes empty and the save revision advances once.
 5. Open **Ingredients** and verify the two-unit fennel batch.
-6. Choose one daily craft. In **Brewery**, stir a 30-second infusion and bottle it. In **Bakery**, fold six times, score three times, place the loaf in the oven, and remove it near the 30-second sweet spot. Reloading restores the active stage and cannot reset the oven.
+6. Choose a craft. In **Brewery**, follow the guided paddle for a two-second countdown and fifteen scored seconds, then bottle the infusion. In **Bakery**, fold six times, score three times, place the loaf in the oven, and remove it near the 30-second sweet spot. Reloading restores the active stage and cannot reset the oven. More sequential brews and bakes may be completed while ingredients remain.
 7. Verify the drink or food name and quality. A qualifying craft also creates an intent card such as **Charm**, **Insight**, **Resolve**, or **Rumor**. The intent remains separate from the crafted hospitality item.
 8. Open **Bar** from the craft result. Choose Lira or Torvin and serve the food or drink to receive gold and change trust/overnight hospitality. Existing saves may show a labeled legacy Pour Ale entitlement that can still accompany standalone drink service.
 9. Reload or sign into the same account in another browser. The gold, relationship, intentions, transcript and serving journal persist. The bottle and any played card are no longer available.
 10. In **Bar**, ask about a quest or suggest a plan. Choose an optional intent card to characterize your words and, independently, optional food or drink. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew or bake must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
 11. Sign into the other pilot account to see an independent onboarding state.
 
-Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar at 1,672 pixels](screenshots/bar-1672.png), [bar at 1,440 pixels](screenshots/bar-1440.png), [tablet bar](screenshots/bar-768.png), [mobile bar](screenshots/bar-390.png), [serving result](screenshots/bar-result.png), and the [annotated before/after comparison](screenshots/bar-comparison.png). See the [concept-art UI specification](design/concept-ui-spec.md) and [asset manifest](design/asset-manifest.md) for the composition, breakpoints, provenance, and maintenance rules. With the dev server running, regenerate the route captures using `npm run screenshots`; the script provisions and removes its own user.
+Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar at 1,672 pixels](screenshots/bar-1672.png), [bar at 1,440 pixels](screenshots/bar-1440.png), [tablet bar](screenshots/bar-768.png), [mobile bar](screenshots/bar-390.png), [serving result](screenshots/bar-result.png), and the [annotated before/after comparison](screenshots/bar-comparison.png). The issue-#7 visual handoff adds the [Brewery layered composite](screenshots/motion-assets-brewery.jpg), [Bakery layered composite](screenshots/motion-assets-bakery.jpg), and [canonical cutout contact sheet](screenshots/motion-asset-contact-sheet.png). The [final assembled-scene acceptance record](quality/scene-acceptance.md) adds all four required viewports for Garden, Brewery, and Bakery, direct-interaction clips, and measured rendering limits. See the [concept-art UI specification](design/concept-ui-spec.md), [asset manifest](design/asset-manifest.md), and [media lifecycle](design/media-lifecycle.md) for composition, provenance, storage, and maintenance rules. With the dev server running, regenerate candidate route captures using `npm run screenshots`; candidates are ignored until explicitly validated and promoted.
 
 The starter crops are finite. Starting an existing tavern never refills harvested cells. Use the explicit local reset when you need the original demonstration state.
 
@@ -94,6 +94,18 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run env:local` | Safely write `.env` from this local stack. |
 | `npm run credentials:local` | Print the two local pilot credentials from the ignored `.env` file. |
 | `npm run secrets:audit` | Verify secret-file count, Git ignore coverage, and absence of configured secrets in tracked files. |
+| `npm run art:assets:check` | Verify supplied-reference checksums and canonical scene dimensions, alpha, derivative checksums, file-size ceilings, and runtime encoding. |
+| `npm run media:git:check -- --base <oid> --head <oid>` | Fail a committed range that introduces an oversized ordinary Git blob, video, or Git LFS configuration/pointer. |
+| `npm run media:git:check:staged` | Apply the same Git media policy to staged objects before committing. |
+| `npm run media:master:ingest -- --file <master.png> --id <id> [--metadata <metadata.json>]` | Validate, hash, upload, re-download, and catalog a private source-master revision. Metadata is already present for the seeded 20-master import and required for a new revision. Requires hosted `MEDIA_SUPABASE_URL` and preferred `MEDIA_SUPABASE_SECRET_KEY`; `MEDIA_SUPABASE_SERVICE_ROLE_KEY` is temporary compatibility only. |
+| `npm run media:masters:archive` | Build a deterministic local ZIP snapshot from verified private source masters. |
+| `npm run media:masters:verify -- --archive <zip>` | Verify an archive safely and prove every embedded source-master hash. |
+| `npm run media:masters:confirm-drive -- --archive <id>` | Record manual confirmation that an archive ZIP and checksum were copied to Google Drive. |
+| `npm run media:masters:status` | Hash-check the runtime derivative inventory and report whether every master is primary-verified and covered by a receipt for the exact catalog. |
+| `npm run media:evidence:validate -- --manifest <file>` | Validate an ignored capture candidate before any review promotion. |
+| `npm run media:evidence:promote -- --manifest <file> --scope <scope> --stills <files> --clips <files>` | Promote explicit verified stills/clip evidence to their immutable Git or Supabase destination. Clip promotion requires the server-only media credentials. |
+| `npm run media:perf` | Report authenticated mobile cold-cache media and Core Web Vitals proxy measurements for the four scene routes. |
+| `npm run media:perf:calibration -- --directory <reports>` | Require 10 unique valid report-mode runs, calculate each route/metric p75, and prove every p75 is within the activation budgets. |
 | `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
 | `npm run fixtures:users:local` | Create or refresh the two local pilot identities. |
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
@@ -108,6 +120,8 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run npc:content:migration -- --migration=202609080013_character_revision.sql` | Generate a new publication after bumping the content version; choose a timestamp later than every existing migration. |
 | `npm run npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |
 | `npm run screenshots` | Capture garden, ingredient, brewery, and desktop/mobile bar views against the running app. |
+| `npm run motion:proof:capture` | Capture the issue-#8 Brewery/Bakery 1×/2× stills and interaction clips against the running app. |
+| `npm run scene:acceptance:capture` | Capture the issue-#13 annotated three-area/four-viewport matrix, interaction clips, overflow checks, and frame-time report against `APP_URL`. |
 
 For a complete CI-like acceptance pass, including browser coverage and a production build, use:
 
@@ -117,6 +131,7 @@ npm run env:local
 npm run db:reset:local
 npm run fixtures:users:local
 npm run secrets:audit
+npm run art:assets:check
 npm run db:types:check
 npm run check
 npm run test:db
@@ -135,7 +150,7 @@ The harvest transaction clears the crop, creates the ingredient batch, advances 
 
 The garden, brewery, and bakery keep an unresolved command in component state after a connection or unexpected server failure. Retrying reuses its action UUID and exact payload. A validation, conflict, or eligibility error refreshes the authoritative snapshot. Server diagnostics record the action ID, outcome code, committed revision when available, and duration; they do not record credentials or session tokens.
 
-The server enforces the 30-second brew duration. The client samples stirring speed every 250 ms, with 42–58 as the perfect band and 30–70 as the wider good band. The submitted counts are range checked and affect a six-point stirring score. Final quality combines the saved ingredient quality with that score and applies the saved brew bonus threshold. Reloading an active brew preserves its timer but discards prior in-memory samples, so missing samples lower its final score. This is acceptable for the pilot; durable event sampling or anti-cheat validation belongs in a later online-competition design.
+New brews use the versioned `guide-v2` rules: a two-second countdown, fifteen scored seconds, a fixed 15 RPM marker, and four score ticks per second. Pointer players hold and drag the paddle within the wort annulus; keyboard players choose Left or Right and use the focusable rhythm control once per second. The controller scores the paddle against ±22.5° Perfect and ±45° Good corridors, gives forward movement a 500 ms grace window, and ignores reversing jitter. It saves positive ticks, direction, input method, paddle position, guide origin, score cursor, and claimed keyboard beats in session-scoped local storage. Reloaded or hidden elapsed ticks receive no positive credit. Reduced motion advances both the visible and scored guide in quarter turns. The server requires all 60 `guide-v2` ticks after the full 17 seconds and calculates `round(6 × (perfect + 0.5 × good) / 60)`. Historical `rpm-v1` sessions keep their 30-second, 120-tick rules. Aggregate telemetry remains client-generated and server-bounded; server-verifiable anti-cheat telemetry belongs outside this MVP.
 
 Quality uses the shared seven-tier scale from Repugnant through Resplendent. Potable and Decent results earn a fine Charm intent card, Great earns superior Insight, and Legendary or Resplendent earns exceptional Resolve. Serving consumes one food or drink, applies the patron's quality-specific price, and persists the actual deltas in `hospitality_events`. Dialogue consumes a chosen intent through `intent_card_plays`; the intent remains independent from the offered item. The brewery keeps production history. Existing Pour Ale rewards remain available as labeled legacy entitlements for standalone drinks and are never issued by new crafts.
 

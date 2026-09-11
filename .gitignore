@@ -146,6 +146,9 @@ build/
 playwright-report/
 test-results/
 artifacts/npc-evals/
+artifacts/media-captures/
+artifacts/media-master-backups/
+artifacts/media-performance/
 
 # Supabase local state
 supabase/.branches/

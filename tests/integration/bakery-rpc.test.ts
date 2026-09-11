@@ -15,6 +15,7 @@ interface BakerySnapshot {
   };
   cells: Array<{ id: string; layoutKey: string }>;
   ingredients: Array<{ id: string; plantKey: string; quantity: number }>;
+  brewery: { beverages: Array<{ id: string; dayNumber: number }> };
   bakery: {
     activeSession: {
       id: string;
@@ -149,6 +150,18 @@ describe('bakery RPC', () => {
     current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
     expect(current.bakery.activeSession).toEqual(expect.objectContaining({ status: 'scoring', foldCount: 6 }));
 
+    for (const invalidLength of [0, 9]) {
+      const before = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+      const invalidScore = await player.client.rpc('score_bake', {
+        p_save_id: current.save.id, p_session_id: sessionId, p_action_id: crypto.randomUUID(),
+        p_expected_revision: revision, p_length: invalidLength
+      });
+      expect(invalidScore.error?.code).toBe('PT400');
+      const after = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+      expect(after.save.revision).toBe(before.save.revision);
+      expect(after.bakery.activeSession?.scoreCount).toBe(0);
+    }
+
     for (let index = 0; index < 3; index += 1) {
       const scored = await player.client.rpc('score_bake', {
         p_save_id: current.save.id, p_session_id: sessionId, p_action_id: crypto.randomUUID(),
@@ -181,7 +194,7 @@ describe('bakery RPC', () => {
     expect(completed.data).toEqual(expect.objectContaining({ timingBand: 'red', qualityIndex: 4 }));
 
     current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
-    expect(current.save).toEqual(expect.objectContaining({ dayMinigameCompleted: true, dailyCraftKind: 'bake' }));
+    expect(current.save).toEqual(expect.objectContaining({ dayMinigameCompleted: true, dailyCraftKind: null }));
     expect(current.bakery.activeSession).toBeNull();
     expect(current.bakery.foods).toHaveLength(1);
     expect(current.bakery.foods[0]).toEqual(expect.objectContaining({ bakeSessionId: sessionId, qualityIndex: 4 }));
@@ -224,7 +237,7 @@ describe('bakery RPC', () => {
     expect(qualities[1]).toBeLessThan(qualities[2]);
   }, 20_000);
 
-  it('serializes the shared daily craft and allows a no-craft day to close', async () => {
+  it('serializes the active craft and allows a no-craft day to close', async () => {
     const baker = await createTestPlayer('bake-budget');
     const brewer = await createTestPlayer('brew-budget');
     const racer = await createTestPlayer('craft-race');
@@ -345,4 +358,65 @@ describe('bakery RPC', () => {
     const nextDay = asSnapshot((await noCraft.client.rpc('get_tavern_snapshot')).data);
     expect(nextDay.save).toEqual(expect.objectContaining({ currentDay: 2, dailyCraftKind: null }));
   });
+
+  it('allows bake, brew, and bake again on one day while ingredients remain', async () => {
+    const player = await createTestPlayer('repeat-crafting');
+    createdUsers.push(player);
+    const provisioned = await provisionIngredient(player);
+    const hopsCell = provisioned.snapshot.cells.find((cell) => cell.layoutKey === 'c0');
+    expect(hopsCell).toBeDefined();
+    expect((await player.client.rpc('harvest_crop', {
+      p_save_id: provisioned.snapshot.save.id, p_cell_id: hopsCell!.id,
+      p_action_id: crypto.randomUUID(), p_expected_revision: provisioned.snapshot.save.revision
+    })).error).toBeNull();
+    let snapshot = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+    const fennel = snapshot.ingredients.find((batch) => batch.plantKey === 'fennel');
+    const hops = snapshot.ingredients.find((batch) => batch.plantKey === 'hops');
+    expect(fennel).toBeDefined();
+    expect(hops).toBeDefined();
+
+    const firstOven = await prepareAndOven(player, snapshot, fennel!.id);
+    expect((await player.admin.from('bake_sessions').update({
+      oven_started_at: new Date(Date.now() - 30_000).toISOString()
+    }).eq('id', firstOven.sessionId)).error).toBeNull();
+    expect((await player.client.rpc('complete_bake', {
+      p_save_id: snapshot.save.id, p_session_id: firstOven.sessionId,
+      p_action_id: crypto.randomUUID(), p_expected_revision: firstOven.revision
+    })).error).toBeNull();
+
+    let current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+    const brew = await player.client.rpc('start_brew', {
+      p_save_id: current.save.id, p_ingredient_batch_id: fennel!.id,
+      p_action_id: crypto.randomUUID(), p_expected_revision: current.save.revision
+    });
+    expect(brew.error).toBeNull();
+    const brewSessionId = (brew.data as { sessionId: string }).sessionId;
+    expect((await player.admin.from('brew_sessions').update({
+      started_at: new Date(Date.now() - 18_000).toISOString()
+    }).eq('id', brewSessionId)).error).toBeNull();
+    expect((await player.client.rpc('complete_brew', {
+      p_save_id: current.save.id, p_session_id: brewSessionId,
+      p_action_id: crypto.randomUUID(),
+      p_expected_revision: (brew.data as { committedRevision: number }).committedRevision,
+      p_perfect_ticks: 60, p_good_ticks: 0, p_total_ticks: 60
+    })).error).toBeNull();
+
+    current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+    const secondOven = await prepareAndOven(player, current, hops!.id);
+    expect((await player.admin.from('bake_sessions').update({
+      oven_started_at: new Date(Date.now() - 30_000).toISOString()
+    }).eq('id', secondOven.sessionId)).error).toBeNull();
+    expect((await player.client.rpc('complete_bake', {
+      p_save_id: current.save.id, p_session_id: secondOven.sessionId,
+      p_action_id: crypto.randomUUID(), p_expected_revision: secondOven.revision
+    })).error).toBeNull();
+
+    current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+    expect(current.save).toEqual(expect.objectContaining({
+      currentDay: 1, dayMinigameCompleted: true, dailyCraftKind: null
+    }));
+    expect(current.bakery.foods).toHaveLength(2);
+    expect(current.brewery.beverages).toHaveLength(1);
+    expect(current.ingredients).toEqual([]);
+  }, 20_000);
 });

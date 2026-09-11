@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "git": {
+    "maxNewBlobBytes": 1048576,
+    "forbiddenVideoExtensions": [
+      ".avi",
+      ".3g2",
+      ".3gp",
+      ".flv",
+      ".m4v",
+      ".m2ts",
+      ".mkv",
+      ".mov",
+      ".mp4",
+      ".mpeg",
+      ".mpg",
+      ".ogv",
+      ".vob",
+      ".wmv",
+      ".webm"
+    ],
+    "grandfatheredObjects": [
+      { "path": "docs/reference/CozyTavernConceptArt.png", "oid": "756f585127b9f662c5a53cc8eabd613ce9ad2bdf", "reason": "Pre-policy reference image" },
+      { "path": "docs/reference/CozyTavernConceptArt2.png", "oid": "c732c4c1323d6519399e5d0c4c29e2fe98ab6911", "reason": "Pre-policy reference image" },
+      { "path": "docs/reference/CozyTavernConceptArt3.png", "oid": "2214e70aeb39e21a9f5ace61d126f25db83a3d25", "reason": "Pre-policy reference image" },
+      { "path": "docs/reference/CozyTavernConceptArt4.png", "oid": "d155e89cd1570f1753cd81d766a10652e4882600", "reason": "Pre-policy reference image" },
+      { "path": "docs/screenshots/bar-1672.png", "oid": "e5b99cdaca0056e929028cef65b3b40b0aa47417", "reason": "Pre-policy curated screenshot" },
+      { "path": "docs/screenshots/bar-result.png", "oid": "7274d90a92430177b9a683c8f3efd345043b353a", "reason": "Pre-policy curated screenshot" },
+      { "path": "docs/screenshots/motion-asset-contact-sheet.png", "oid": "d769defe2f1278bb7e30b896c5be196c6b5a3843", "reason": "Pre-policy motion contact sheet" },
+      { "path": "docs/screenshots/motion-asset-contact-sheet.png", "oid": "8ddf0802b1cd8cc66f6cfa2673619665dd2fb86b", "reason": "Pre-policy superseded motion contact sheet revision" },
+      { "path": "docs/screenshots/motion-asset-contact-sheet.png", "oid": "0faf31bdfa18fdaebfa44e3736f84a7616bfc234", "reason": "Pre-policy superseded motion contact sheet revision" },
+      { "path": "docs/screenshots/motion-proofs/bakery-score-desktop-2x.png", "oid": "33c1f567e0c1bfb6c736c8d481996047ce852e8e", "reason": "Pre-policy motion proof" },
+      { "path": "docs/screenshots/motion-proofs/brewery-desktop-2x.png", "oid": "632094bf340a92a9f9f4520edd9a358a46b05a3f", "reason": "Pre-policy motion proof" },
+      { "path": "docs/screenshots/final-review/bakery-interaction.webm", "oid": "a64a144333775187ba028b0462852d29585d9bb0", "reason": "Pre-policy final-review motion evidence" },
+      { "path": "docs/screenshots/final-review/brewery-interaction.webm", "oid": "724b1aeca580b6d3c8061644baf642d4341f3a57", "reason": "Pre-policy final-review motion evidence" },
+      { "path": "docs/screenshots/final-review/garden-interaction.webm", "oid": "ad527f6a02ae946c54c877bc05de99290716bc0b", "reason": "Pre-policy final-review motion evidence" },
+      { "path": "docs/screenshots/motion-proofs/bakery-demo.webm", "oid": "7f87a85adaf308af35ba40f3575835ca95a0debb", "reason": "Pre-policy motion proof" },
+      { "path": "docs/screenshots/motion-proofs/brewery-demo.webm", "oid": "c946226f8566b0150bc639db5df78df8066cef4b", "reason": "Pre-policy motion proof" }
+    ]
+  },
+  "runtime": {
+    "maxRasterBytes": 500000,
+    "maxTotalMediaBytes": 10485760,
+    "rasterExtensions": [
+      ".avif",
+      ".gif",
+      ".jpeg",
+      ".jpg",
+      ".png",
+      ".webp"
+    ]
+  },
+  "evidence": {
+    "maxStillBytes": 1048576,
+    "maxStillsPerSet": 12,
+    "maxStillSetBytes": 4194304,
+    "maxClipBytes": 26214400,
+    "candidateRetentionDays": 14
+  },
+  "performance": {
+    "routes": [
+      "/garden",
+      "/brewery",
+      "/bakery",
+      "/bar"
+    ],
+    "lcpMs": 2500,
+    "cls": 0.1,
+    "interactionMs": 200,
+    "encodedMediaBytes": 1572864,
+    "largestImageBytes": 500000,
+    "calibrationRuns": 10
+  }
+}

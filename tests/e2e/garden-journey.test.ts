@@ -47,7 +47,10 @@ test('harvest persists across routes, reloads, and browser sessions', async ({ p
     await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
     await expect(page.getByText('🍯 +1 from a neighboring hive')).toBeVisible();
     await page.getByRole('button', { name: 'Harvest crop' }).click();
+    await expect(page.locator('[data-harvest-effect]')).toHaveCount(1);
     await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
+    await expect(page.getByRole('button', { name: /c1, empty garden plot/i })).toBeVisible();
+    await expect(page.locator('[data-harvest-effect]')).toHaveCount(0);
 
     await page.getByRole('link', { name: /View ingredients/ }).click();
     await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
@@ -108,6 +111,8 @@ test('a dropped harvest response retries the same action exactly once', async ({
 
     await page.getByRole('button', { name: 'Harvest crop' }).click();
     await expect(page.getByRole('alert')).toContainText('outcome is unknown');
+    await expect(page.locator('[data-harvest-effect]')).toHaveCount(0);
+    await expect(page.locator('img[src*="garden-crop-fennel-stage-3"]')).toBeVisible();
     await page.getByRole('button', { name: 'Retry harvest' }).click();
     await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
 
@@ -118,6 +123,65 @@ test('a dropped harvest response retries the same action exactly once', async ({
     await page.getByRole('link', { name: /View ingredients/ }).click();
     await expect(page.getByText('Legendary · 2 units')).toBeVisible();
     await expect(page.getByText('1 batch')).toBeVisible();
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('garden artwork failures keep all plot controls and live details usable', async ({ page }) => {
+  const player = await createTestPlayer('garden-assets');
+  try {
+    await page.route('**/assets/scenes/garden-environment.webp', (route) => route.abort('failed'));
+    await page.route('**/assets/scenes/garden/garden-plot-base.webp', (route) => route.abort('failed'));
+    await page.route('**/assets/scenes/garden/garden-beehive.webp', (route) => route.abort('failed'));
+    await page.route('**/assets/scenes/garden/garden-crop-fennel-stage-3.webp', (route) => route.abort('failed'));
+    await login(page, player.email, player.password);
+    await page.getByRole('button', { name: 'Start tavern' }).click();
+
+    await expect(page.getByRole('img', { name: 'garden environment artwork could not be loaded' })).toBeVisible();
+    await expect(page.locator('[data-plot-fallback]')).toHaveCount(12);
+    await expect(page.locator('[data-hive-fallback]')).toBeVisible();
+    await expect(page.locator('[data-crop-fallback="fennel"]')).toBeVisible();
+    await expect(page.locator('.hex-cell')).toHaveCount(12);
+    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Harvest crop' })).toBeEnabled();
+    await expect(page.locator('[data-scene-layer="garden foreground foliage"]')).toHaveCSS('pointer-events', 'none');
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('garden ambient and harvest motion suspend without changing authoritative results', async ({ page }) => {
+  const player = await createTestPlayer('garden-motion');
+  try {
+    await login(page, player.email, player.password);
+    await page.getByRole('button', { name: 'Start tavern' }).click();
+    const scene = page.locator('[data-area-scene="garden"]');
+    const atmosphere = page.locator('[data-scene-layer="garden bees and leaves"]');
+    await expect(atmosphere).toHaveCSS('animation-play-state', 'running');
+
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(scene).toHaveAttribute('data-scene-visible', 'false');
+    await expect(atmosphere).toHaveCSS('animation-play-state', 'paused');
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect(scene).toHaveAttribute('data-scene-visible', 'true');
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await page.getByRole('button', { name: 'Harvest crop' }).click();
+    const effect = page.locator('[data-harvest-effect]');
+    await expect(effect).toHaveCount(1);
+    await expect(effect).toHaveCSS('animation-name', 'none');
+    await expect(effect).toHaveCSS('opacity', '0');
+    await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
+    await expect(page.getByRole('button', { name: /c1, empty garden plot/i })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -140,21 +204,13 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await expect(page.getByRole('heading', { name: "Prepare today's infusion" })).toBeVisible();
     await expect(page.getByText('Legendary · 2 units · Brew +2')).toBeVisible();
-    await page.getByRole('button', { name: 'Begin 30-second brew' }).click();
+    await page.getByRole('button', { name: 'Begin guided brew' }).click();
     await expect(page.getByRole('heading', { name: 'Stir the wort' })).toBeVisible();
-    await expect(page.locator('.brew-progress-heading strong')).not.toHaveText('30s');
-
-    const slider = page.getByLabel('Stirring speed');
-    await slider.press('End');
-    await expect(page.locator('.zone-readout strong')).toHaveText('Too fast');
-    await slider.press('Home');
-    await expect(page.locator('.zone-readout strong')).toHaveText('Too slow');
-    await slider.evaluate((control) => {
-      const input = control as HTMLInputElement;
-      input.value = '50';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await expect(page.locator('.zone-readout strong')).toHaveText('Perfect');
+    await expect(page.getByText('Target: 15 RPM · one beat per second')).toBeVisible();
+    const beat = page.getByRole('button', { name: 'Stir on the beat' });
+    await beat.focus();
+    await beat.press('ArrowRight');
+    await expect(page.locator('[data-motion-proof="brewery"]')).toHaveAttribute('data-input-kind', 'keyboard');
 
     const snapshotResult = await player.client.rpc('get_tavern_snapshot');
     expect(snapshotResult.error).toBeNull();
@@ -165,7 +221,7 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
 
     const backdated = await player.admin
       .from('brew_sessions')
-      .update({ started_at: new Date(Date.now() - 31_000).toISOString() })
+      .update({ started_at: new Date(Date.now() - 18_000).toISOString() })
       .eq('id', snapshot.brewery.activeSession!.id);
     expect(backdated.error).toBeNull();
 
@@ -178,6 +234,8 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await expect(page.getByText('Intent card earned · fine')).toBeVisible();
     await expect(page.getByText('Charm', { exact: true })).toBeVisible();
     await expect(page.getByText('Frame the keeper’s words with warmth and personal appeal.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Begin guided brew' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Rest and begin next day' })).toBeVisible();
 
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Honest Mead' })).toBeVisible();
