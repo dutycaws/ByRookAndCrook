@@ -9,6 +9,126 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      apiary_colonies: {
+        Row: {
+          adults: number
+          brood: number
+          chalkbrood_pressure: number
+          established_day: number
+          feed_stores: number
+          floral_honey: number
+          food_stores: number
+          health: number
+          hive_id: string
+          id: string
+          nosema_pressure: number
+          save_id: string
+          threat_days: number
+          treatment_days_remaining: number
+          treatment_key: string | null
+          treatment_tradeoff: string | null
+          updated_at: string
+          varroa_pressure: number
+        }
+        Insert: {
+          adults?: number
+          brood?: number
+          chalkbrood_pressure?: number
+          established_day: number
+          feed_stores?: number
+          floral_honey?: number
+          food_stores?: number
+          health?: number
+          hive_id: string
+          id?: string
+          nosema_pressure?: number
+          save_id: string
+          threat_days?: number
+          treatment_days_remaining?: number
+          treatment_key?: string | null
+          treatment_tradeoff?: string | null
+          updated_at?: string
+          varroa_pressure?: number
+        }
+        Update: {
+          adults?: number
+          brood?: number
+          chalkbrood_pressure?: number
+          established_day?: number
+          feed_stores?: number
+          floral_honey?: number
+          food_stores?: number
+          health?: number
+          hive_id?: string
+          id?: string
+          nosema_pressure?: number
+          save_id?: string
+          threat_days?: number
+          treatment_days_remaining?: number
+          treatment_key?: string | null
+          treatment_tradeoff?: string | null
+          updated_at?: string
+          varroa_pressure?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "apiary_colonies_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "apiary_colonies_save_id_hive_id_fkey"
+            columns: ["save_id", "hive_id"]
+            isOneToOne: true
+            referencedRelation: "apiary_hives"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
+      apiary_hives: {
+        Row: {
+          cell_id: string
+          equipment_condition: number
+          id: string
+          installed_day: number
+          save_id: string
+          updated_at: string
+        }
+        Insert: {
+          cell_id: string
+          equipment_condition?: number
+          id?: string
+          installed_day: number
+          save_id: string
+          updated_at?: string
+        }
+        Update: {
+          cell_id?: string
+          equipment_condition?: number
+          id?: string
+          installed_day?: number
+          save_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "apiary_hives_save_id_cell_id_fkey"
+            columns: ["save_id", "cell_id"]
+            isOneToOne: true
+            referencedRelation: "garden_cells"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "apiary_hives_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bake_actions: {
         Row: {
           action_id: string
@@ -594,6 +714,60 @@ export type Database = {
           },
         ]
       }
+      garden_actions: {
+        Row: {
+          action_id: string
+          actor_id: string
+          command_kind: string
+          committed_revision: number
+          created_at: string
+          input_expected_revision: number
+          input_payload: Json
+          result: Json
+          rules_version: string
+          save_id: string
+        }
+        Insert: {
+          action_id: string
+          actor_id: string
+          command_kind: string
+          committed_revision: number
+          created_at?: string
+          input_expected_revision: number
+          input_payload: Json
+          result: Json
+          rules_version: string
+          save_id: string
+        }
+        Update: {
+          action_id?: string
+          actor_id?: string
+          command_kind?: string
+          committed_revision?: number
+          created_at?: string
+          input_expected_revision?: number
+          input_payload?: Json
+          result?: Json
+          rules_version?: string
+          save_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_actions_save_id_actor_id_fkey"
+            columns: ["save_id", "actor_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id", "user_id"]
+          },
+          {
+            foreignKeyName: "garden_actions_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       garden_cells: {
         Row: {
           col: number
@@ -606,6 +780,13 @@ export type Database = {
           row: number
           rules_version: string
           save_id: string
+          site_light: number
+          soil_k: number
+          soil_moisture: number
+          soil_n: number
+          soil_p: number
+          soil_quality: number
+          unlocked: boolean
           updated_at: string
           water: number | null
         }
@@ -620,6 +801,13 @@ export type Database = {
           row: number
           rules_version: string
           save_id: string
+          site_light?: number
+          soil_k?: number
+          soil_moisture?: number
+          soil_n?: number
+          soil_p?: number
+          soil_quality?: number
+          unlocked?: boolean
           updated_at?: string
           water?: number | null
         }
@@ -634,6 +822,13 @@ export type Database = {
           row?: number
           rules_version?: string
           save_id?: string
+          site_light?: number
+          soil_k?: number
+          soil_moisture?: number
+          soil_n?: number
+          soil_p?: number
+          soil_quality?: number
+          unlocked?: boolean
           updated_at?: string
           water?: number | null
         }
@@ -653,6 +848,488 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      garden_companion_rules: {
+        Row: {
+          effect: number
+          reason: string
+          rules_version: string
+          species_a: string
+          species_b: string
+        }
+        Insert: {
+          effect: number
+          reason: string
+          rules_version: string
+          species_a: string
+          species_b: string
+        }
+        Update: {
+          effect?: number
+          reason?: string
+          rules_version?: string
+          species_a?: string
+          species_b?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_companion_rules_rules_version_species_a_fkey"
+            columns: ["rules_version", "species_a"]
+            isOneToOne: false
+            referencedRelation: "garden_species_profiles"
+            referencedColumns: ["rules_version", "species_key"]
+          },
+          {
+            foreignKeyName: "garden_companion_rules_rules_version_species_b_fkey"
+            columns: ["rules_version", "species_b"]
+            isOneToOne: false
+            referencedRelation: "garden_species_profiles"
+            referencedColumns: ["rules_version", "species_key"]
+          },
+        ]
+      }
+      garden_compost_jobs: {
+        Row: {
+          cell_id: string
+          created_at: string
+          id: string
+          k_per_release: number
+          n_per_release: number
+          p_per_release: number
+          quality_per_release: number
+          ready_day: number
+          releases_remaining: number
+          save_id: string
+          source_kind: string
+          source_label: string
+        }
+        Insert: {
+          cell_id: string
+          created_at?: string
+          id?: string
+          k_per_release?: number
+          n_per_release?: number
+          p_per_release?: number
+          quality_per_release?: number
+          ready_day: number
+          releases_remaining?: number
+          save_id: string
+          source_kind: string
+          source_label: string
+        }
+        Update: {
+          cell_id?: string
+          created_at?: string
+          id?: string
+          k_per_release?: number
+          n_per_release?: number
+          p_per_release?: number
+          quality_per_release?: number
+          ready_day?: number
+          releases_remaining?: number
+          save_id?: string
+          source_kind?: string
+          source_label?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_compost_jobs_save_id_cell_id_fkey"
+            columns: ["save_id", "cell_id"]
+            isOneToOne: false
+            referencedRelation: "garden_cells"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "garden_compost_jobs_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_daily_grants: {
+        Row: {
+          contents: Json
+          created_at: string
+          day_number: number
+          grant_key: string
+          save_id: string
+        }
+        Insert: {
+          contents: Json
+          created_at?: string
+          day_number: number
+          grant_key: string
+          save_id: string
+        }
+        Update: {
+          contents?: Json
+          created_at?: string
+          day_number?: number
+          grant_key?: string
+          save_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_daily_grants_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_day_resolutions: {
+        Row: {
+          action_id: string
+          created_at: string
+          day_number: number
+          input_fingerprint: string
+          plan: Json
+          plan_fingerprint: string
+          report: Json
+          rules_version: string
+          save_id: string
+        }
+        Insert: {
+          action_id: string
+          created_at?: string
+          day_number: number
+          input_fingerprint: string
+          plan: Json
+          plan_fingerprint: string
+          report: Json
+          rules_version: string
+          save_id: string
+        }
+        Update: {
+          action_id?: string
+          created_at?: string
+          day_number?: number
+          input_fingerprint?: string
+          plan?: Json
+          plan_fingerprint?: string
+          report?: Json
+          rules_version?: string
+          save_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_day_resolutions_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_inventory: {
+        Row: {
+          item_key: string
+          quantity: number
+          rules_version: string
+          save_id: string
+          updated_at: string
+        }
+        Insert: {
+          item_key: string
+          quantity?: number
+          rules_version?: string
+          save_id: string
+          updated_at?: string
+        }
+        Update: {
+          item_key?: string
+          quantity?: number
+          rules_version?: string
+          save_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_inventory_rules_version_item_key_fkey"
+            columns: ["rules_version", "item_key"]
+            isOneToOne: false
+            referencedRelation: "garden_item_catalog"
+            referencedColumns: ["rules_version", "item_key"]
+          },
+          {
+            foreignKeyName: "garden_inventory_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_item_catalog: {
+        Row: {
+          display_name: string
+          effect: Json
+          item_key: string
+          item_kind: string
+          price: number
+          rules_version: string
+        }
+        Insert: {
+          display_name: string
+          effect?: Json
+          item_key: string
+          item_kind: string
+          price: number
+          rules_version: string
+        }
+        Update: {
+          display_name?: string
+          effect?: Json
+          item_key?: string
+          item_kind?: string
+          price?: number
+          rules_version?: string
+        }
+        Relationships: []
+      }
+      garden_plants: {
+        Row: {
+          age_days: number
+          care_good_days: number
+          care_total_days: number
+          cell_id: string
+          companion_points: number
+          flowering_days_remaining: number
+          growth_progress: number
+          health: number
+          id: string
+          lifecycle: string
+          planted_day: number
+          pollination_points: number
+          production_cycle: number
+          ready_since_day: number | null
+          rules_version: string
+          save_id: string
+          species_key: string
+          stress_points: number
+          threat_days: number
+          updated_at: string
+        }
+        Insert: {
+          age_days?: number
+          care_good_days?: number
+          care_total_days?: number
+          cell_id: string
+          companion_points?: number
+          flowering_days_remaining?: number
+          growth_progress?: number
+          health?: number
+          id?: string
+          lifecycle: string
+          planted_day: number
+          pollination_points?: number
+          production_cycle?: number
+          ready_since_day?: number | null
+          rules_version: string
+          save_id: string
+          species_key: string
+          stress_points?: number
+          threat_days?: number
+          updated_at?: string
+        }
+        Update: {
+          age_days?: number
+          care_good_days?: number
+          care_total_days?: number
+          cell_id?: string
+          companion_points?: number
+          flowering_days_remaining?: number
+          growth_progress?: number
+          health?: number
+          id?: string
+          lifecycle?: string
+          planted_day?: number
+          pollination_points?: number
+          production_cycle?: number
+          ready_since_day?: number | null
+          rules_version?: string
+          save_id?: string
+          species_key?: string
+          stress_points?: number
+          threat_days?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_plants_rules_version_species_key_fkey"
+            columns: ["rules_version", "species_key"]
+            isOneToOne: false
+            referencedRelation: "garden_species_profiles"
+            referencedColumns: ["rules_version", "species_key"]
+          },
+          {
+            foreignKeyName: "garden_plants_save_id_cell_id_fkey"
+            columns: ["save_id", "cell_id"]
+            isOneToOne: true
+            referencedRelation: "garden_cells"
+            referencedColumns: ["save_id", "id"]
+          },
+          {
+            foreignKeyName: "garden_plants_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_species_profiles: {
+        Row: {
+          base_bake_bonus: number
+          base_brew_bonus: number
+          base_yield: number
+          display_name: string
+          flowering_days: number
+          flowering_start: number
+          forage_value: number
+          height_class: number
+          icon: string
+          k_min: number
+          k_use: number
+          light_max: number
+          light_min: number
+          maturity_days: number
+          moisture_max: number
+          moisture_min: number
+          n_min: number
+          n_use: number
+          p_min: number
+          p_use: number
+          pollination_eligible: boolean
+          primary_product: string
+          regrows: boolean
+          regrowth_days: number | null
+          rules_version: string
+          species_key: string
+        }
+        Insert: {
+          base_bake_bonus: number
+          base_brew_bonus: number
+          base_yield: number
+          display_name: string
+          flowering_days: number
+          flowering_start: number
+          forage_value: number
+          height_class: number
+          icon: string
+          k_min: number
+          k_use: number
+          light_max: number
+          light_min: number
+          maturity_days: number
+          moisture_max: number
+          moisture_min: number
+          n_min: number
+          n_use: number
+          p_min: number
+          p_use: number
+          pollination_eligible: boolean
+          primary_product: string
+          regrows: boolean
+          regrowth_days?: number | null
+          rules_version: string
+          species_key: string
+        }
+        Update: {
+          base_bake_bonus?: number
+          base_brew_bonus?: number
+          base_yield?: number
+          display_name?: string
+          flowering_days?: number
+          flowering_start?: number
+          forage_value?: number
+          height_class?: number
+          icon?: string
+          k_min?: number
+          k_use?: number
+          light_max?: number
+          light_min?: number
+          maturity_days?: number
+          moisture_max?: number
+          moisture_min?: number
+          n_min?: number
+          n_use?: number
+          p_min?: number
+          p_use?: number
+          pollination_eligible?: boolean
+          primary_product?: string
+          regrows?: boolean
+          regrowth_days?: number | null
+          rules_version?: string
+          species_key?: string
+        }
+        Relationships: []
+      }
+      garden_weather: {
+        Row: {
+          day_number: number
+          rules_version: string
+          save_id: string
+          weather_key: string
+        }
+        Insert: {
+          day_number: number
+          rules_version: string
+          save_id: string
+          weather_key: string
+        }
+        Update: {
+          day_number?: number
+          rules_version?: string
+          save_id?: string
+          weather_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_weather_rules_version_weather_key_fkey"
+            columns: ["rules_version", "weather_key"]
+            isOneToOne: false
+            referencedRelation: "garden_weather_profiles"
+            referencedColumns: ["rules_version", "weather_key"]
+          },
+          {
+            foreignKeyName: "garden_weather_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      garden_weather_profiles: {
+        Row: {
+          display_name: string
+          drying: number
+          light_delta: number
+          rainfall: number
+          rules_version: string
+          weather_key: string
+        }
+        Insert: {
+          display_name: string
+          drying: number
+          light_delta: number
+          rainfall: number
+          rules_version: string
+          weather_key: string
+        }
+        Update: {
+          display_name?: string
+          drying?: number
+          light_delta?: number
+          rainfall?: number
+          rules_version?: string
+          weather_key?: string
+        }
+        Relationships: []
       }
       hospitality_events: {
         Row: {
@@ -1273,6 +1950,8 @@ export type Database = {
           current_day: number
           daily_craft_kind: string | null
           day_minigame_completed: boolean
+          garden_plot_count: number
+          garden_rules_version: string
           gold: number
           id: string
           revision: number
@@ -1285,6 +1964,8 @@ export type Database = {
           current_day?: number
           daily_craft_kind?: string | null
           day_minigame_completed?: boolean
+          garden_plot_count?: number
+          garden_rules_version?: string
           gold?: number
           id?: string
           revision?: number
@@ -1297,6 +1978,8 @@ export type Database = {
           current_day?: number
           daily_craft_kind?: string | null
           day_minigame_completed?: boolean
+          garden_plot_count?: number
+          garden_rules_version?: string
           gold?: number
           id?: string
           revision?: number
@@ -1412,6 +2095,7 @@ export type Database = {
         }
         Returns: Json
       }
+      project_garden_day: { Args: never; Returns: Json }
       score_bake: {
         Args: {
           p_action_id: string
