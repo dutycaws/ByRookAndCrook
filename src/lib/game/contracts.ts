@@ -65,6 +65,7 @@ export interface GardenCell {
       brood: number;
       health: number;
       foodStores: number;
+      feedStores?: number;
       floralHoney: number;
       protectedReserve: number;
       extractableSurplus: number;
@@ -73,6 +74,9 @@ export interface GardenCell {
       nosemaPressure: number;
       treatmentKey: string | null;
       treatmentDaysRemaining: number;
+      treatmentTradeoff?: string | null;
+      threatDays?: number;
+      symptoms?: Array<{ code: string; severity: 'info' | 'warning' | 'critical'; label: string; cause: string }>;
     } | null;
   } | null;
   preview: HarvestPreview | null;
@@ -88,6 +92,8 @@ export interface IngredientBatch {
   brewBonus: number;
   bakeBonus: number;
   sourceCellId: string;
+  sourceKind?: 'crop' | 'honey';
+  provenance?: Record<string, Json>;
   consumedQuantity?: number;
   compostedQuantity?: number;
   createdAt: string;
@@ -295,6 +301,47 @@ export interface GardenCommandPreview {
   rulesVersion: string;
   normalizedPayload: Record<string, Json>;
   canCommit?: boolean;
+  [key: string]: Json | undefined;
+}
+
+export type ApiaryCommandKind =
+  | 'install_hive'
+  | 'install_colony'
+  | 'feed'
+  | 'treat'
+  | 'split'
+  | 'extract_honey';
+
+export type ApiaryCommandPayload =
+  | { cellId: string }
+  | { hiveId: string }
+  | { colonyId: string; quantity: number }
+  | { colonyId: string; treatmentItemKey: string }
+  | { sourceColonyId: string; targetHiveId: string };
+
+export interface ApiaryCommand {
+  saveId: string;
+  actionId: string;
+  expectedRevision: number;
+  commandKind: ApiaryCommandKind;
+  payload: ApiaryCommandPayload;
+}
+
+export interface ApiaryCommandReceipt {
+  actionId: string;
+  commandKind: ApiaryCommandKind;
+  committedRevision: number;
+  rulesVersion: string;
+  normalizedPayload: Record<string, Json>;
+  result: Record<string, Json>;
+}
+
+export interface ApiaryCommandPreview {
+  commandKind: ApiaryCommandKind;
+  basedOnRevision: number;
+  rulesVersion: string;
+  normalizedPayload: Record<string, Json>;
+  canCommit: boolean;
   [key: string]: Json | undefined;
 }
 
@@ -514,6 +561,15 @@ const GARDEN_COMMAND_KINDS = new Set<GardenCommandKind>([
   'expand'
 ]);
 
+const APIARY_COMMAND_KINDS = new Set<ApiaryCommandKind>([
+  'install_hive',
+  'install_colony',
+  'feed',
+  'treat',
+  'split',
+  'extract_honey'
+]);
+
 export function parseGardenCommandReceipt(value: Json): GardenCommandReceipt {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid garden command receipt');
@@ -544,6 +600,41 @@ export function parseGardenCommandPreview(value: Json): GardenCommandPreview {
     !candidate.normalizedPayload
   ) {
     throw new Error('Invalid garden command preview');
+  }
+  return candidate;
+}
+
+export function parseApiaryCommandReceipt(value: Json): ApiaryCommandReceipt {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid apiary command receipt');
+  }
+  const candidate = value as unknown as ApiaryCommandReceipt;
+  if (
+    !candidate.actionId ||
+    !APIARY_COMMAND_KINDS.has(candidate.commandKind) ||
+    !Number.isInteger(candidate.committedRevision) ||
+    !candidate.rulesVersion ||
+    !candidate.normalizedPayload ||
+    !candidate.result
+  ) {
+    throw new Error('Invalid apiary command receipt');
+  }
+  return candidate;
+}
+
+export function parseApiaryCommandPreview(value: Json): ApiaryCommandPreview {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid apiary command preview');
+  }
+  const candidate = value as unknown as ApiaryCommandPreview;
+  if (
+    !APIARY_COMMAND_KINDS.has(candidate.commandKind) ||
+    !Number.isInteger(candidate.basedOnRevision) ||
+    !candidate.rulesVersion ||
+    !candidate.normalizedPayload ||
+    typeof candidate.canCommit !== 'boolean'
+  ) {
+    throw new Error('Invalid apiary command preview');
   }
   return candidate;
 }

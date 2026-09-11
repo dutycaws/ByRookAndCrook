@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
 import {
   parseAdvanceDayReceipt,
+  parseApiaryCommandPreview,
+  parseApiaryCommandReceipt,
   parseBakeGestureReceipt,
   parseBeginBakeOvenReceipt,
   parseCompleteBakeReceipt,
@@ -14,6 +16,11 @@ import {
   parseStartBrewReceipt,
   type AdvanceDayCommand,
   type AdvanceDayReceipt,
+  type ApiaryCommand,
+  type ApiaryCommandKind,
+  type ApiaryCommandPayload,
+  type ApiaryCommandPreview,
+  type ApiaryCommandReceipt,
   type BakeGestureCommand,
   type BakeGestureReceipt,
   type BeginBakeOvenCommand,
@@ -141,6 +148,52 @@ export async function commitGardenCommand(
   }
   const receipt = parseGardenCommandReceipt(data);
   console.info('garden_command', {
+    actionId: receipt.actionId,
+    commandKind: receipt.commandKind,
+    outcome: 'committed',
+    revision: receipt.committedRevision,
+    durationMs: Math.round(performance.now() - startedAt)
+  });
+  return receipt;
+}
+
+export async function previewApiaryCommand(
+  client: SupabaseClient<Database>,
+  commandKind: ApiaryCommandKind,
+  payload: ApiaryCommandPayload
+): Promise<ApiaryCommandPreview> {
+  const { data, error } = await client.rpc('preview_apiary_command', {
+    p_command_kind: commandKind,
+    p_payload: payload as unknown as Database['public']['Functions']['preview_apiary_command']['Args']['p_payload']
+  });
+  if (error) throw mapDatabaseError(error);
+  return parseApiaryCommandPreview(data);
+}
+
+export async function commitApiaryCommand(
+  client: SupabaseClient<Database>,
+  command: ApiaryCommand
+): Promise<ApiaryCommandReceipt> {
+  const startedAt = performance.now();
+  const { data, error } = await client.rpc('apiary_command', {
+    p_save_id: command.saveId,
+    p_action_id: command.actionId,
+    p_expected_revision: command.expectedRevision,
+    p_command_kind: command.commandKind,
+    p_payload: command.payload as unknown as Database['public']['Functions']['apiary_command']['Args']['p_payload']
+  });
+  if (error) {
+    const mapped = mapDatabaseError(error);
+    console.info('apiary_command', {
+      actionId: command.actionId,
+      commandKind: command.commandKind,
+      outcome: mapped.code,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    throw mapped;
+  }
+  const receipt = parseApiaryCommandReceipt(data);
+  console.info('apiary_command', {
     actionId: receipt.actionId,
     commandKind: receipt.commandKind,
     outcome: 'committed',

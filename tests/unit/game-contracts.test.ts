@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  parseApiaryCommandPreview,
+  parseApiaryCommandReceipt,
   parseGardenCommandPreview,
   parseGardenCommandReceipt,
   parseStartBrewReceipt
@@ -82,5 +84,43 @@ describe('Garden command contracts', () => {
       rulesVersion: 'garden-apiary-v1',
       normalizedPayload: {}
     })).toThrow('Invalid garden command preview');
+  });
+});
+
+describe('Apiary command contracts', () => {
+  it('accepts authoritative receipts and previews', () => {
+    expect(parseApiaryCommandReceipt({
+      actionId: 'apiary-action',
+      commandKind: 'extract_honey',
+      committedRevision: 8,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: { colonyId: 'colony', quantity: 2 },
+      result: { ingredientBatchId: 'batch' }
+    })).toMatchObject({ commandKind: 'extract_honey', committedRevision: 8 });
+    expect(parseApiaryCommandPreview({
+      commandKind: 'feed',
+      basedOnRevision: 7,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: { colonyId: 'colony', quantity: 1 },
+      availableFeed: 3,
+      canCommit: true
+    })).toMatchObject({ commandKind: 'feed', canCommit: true });
+  });
+
+  it('rejects unsupported commands and incomplete previews', () => {
+    expect(() => parseApiaryCommandReceipt({
+      actionId: 'apiary-action',
+      commandKind: 'sell_honey',
+      committedRevision: 8,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: {},
+      result: {}
+    })).toThrow('Invalid apiary command receipt');
+    expect(() => parseApiaryCommandPreview({
+      commandKind: 'feed',
+      basedOnRevision: 7,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: {}
+    })).toThrow('Invalid apiary command preview');
   });
 });

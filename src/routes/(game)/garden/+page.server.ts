@@ -1,13 +1,20 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import {
+  commitApiaryCommand,
   commitGardenCommand,
   createTavern,
   GameServiceError,
   getSnapshot,
   harvestCrop,
+  previewApiaryCommand,
   previewGardenCommand
 } from '$lib/server/game';
-import type { GardenCommandKind, GardenCommandPayload } from '$lib/game/contracts';
+import type {
+  ApiaryCommandKind,
+  ApiaryCommandPayload,
+  GardenCommandKind,
+  GardenCommandPayload
+} from '$lib/game/contracts';
 import type { Actions, PageServerLoad } from './$types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -21,6 +28,14 @@ const GARDEN_COMMAND_KINDS = new Set<GardenCommandKind>([
   'compost_ingredient',
   'purchase',
   'expand'
+]);
+const APIARY_COMMAND_KINDS = new Set<ApiaryCommandKind>([
+  'install_hive',
+  'install_colony',
+  'feed',
+  'treat',
+  'split',
+  'extract_honey'
 ]);
 
 async function requireUser(locals: App.Locals) {
@@ -41,6 +56,21 @@ function parseGardenCommandInput(data: FormData) {
     return null;
   }
   if (!GARDEN_COMMAND_KINDS.has(commandKind)) return null;
+  return { commandKind, payload };
+}
+
+function parseApiaryCommandInput(data: FormData) {
+  const commandKind = String(data.get('commandKind') ?? '') as ApiaryCommandKind;
+  const payloadText = String(data.get('payload') ?? '');
+  let payload: ApiaryCommandPayload;
+  try {
+    const parsed: unknown = JSON.parse(payloadText);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object required');
+    payload = parsed as ApiaryCommandPayload;
+  } catch {
+    return null;
+  }
+  if (!APIARY_COMMAND_KINDS.has(commandKind)) return null;
   return { commandKind, payload };
 }
 
@@ -119,6 +149,49 @@ export const actions: Actions = {
       return gardenFailure(
         cause,
         'The garden outcome is unknown. Retry the same action to recover it.',
+        pendingAction
+      );
+    }
+  },
+
+  apiaryPreview: async ({ request, locals }) => {
+    await requireUser(locals);
+    const parsed = parseApiaryCommandInput(await request.formData());
+    if (!parsed) return fail(400, { message: 'The apiary preview request was invalid.' });
+
+    try {
+      const preview = await previewApiaryCommand(locals.supabase, parsed.commandKind, parsed.payload);
+      return { success: true, preview };
+    } catch (cause) {
+      return gardenFailure(cause, 'The apiary preview is unavailable. Please try again.');
+    }
+  },
+
+  apiaryCommand: async ({ request, locals }) => {
+    await requireUser(locals);
+    const data = await request.formData();
+    const parsed = parseApiaryCommandInput(data);
+    const saveId = String(data.get('saveId') ?? '');
+    const actionId = String(data.get('actionId') ?? '');
+    const expectedRevision = Number(String(data.get('expectedRevision') ?? ''));
+    if (
+      !parsed ||
+      !UUID_PATTERN.test(saveId) ||
+      !UUID_PATTERN.test(actionId) ||
+      !Number.isSafeInteger(expectedRevision) ||
+      expectedRevision < 0
+    ) {
+      return fail(400, { message: 'The apiary command was invalid.' });
+    }
+
+    const pendingAction = { saveId, actionId, expectedRevision, ...parsed };
+    try {
+      const receipt = await commitApiaryCommand(locals.supabase, pendingAction);
+      return { success: true, message: 'The apiary ledger has been updated.', receipt };
+    } catch (cause) {
+      return gardenFailure(
+        cause,
+        'The apiary outcome is unknown. Retry the same action to recover it.',
         pendingAction
       );
     }

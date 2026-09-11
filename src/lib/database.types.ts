@@ -1465,12 +1465,15 @@ export type Database = {
           created_at: string
           id: string
           plant_key: string
+          provenance: Json
           quality_index: number
           quantity: number
           rules_version: string
           save_id: string
-          source_action_id: string
+          source_action_id: string | null
+          source_apiary_action_id: string | null
           source_cell_id: string
+          source_kind: string
         }
         Insert: {
           bake_bonus: number
@@ -1480,12 +1483,15 @@ export type Database = {
           created_at?: string
           id?: string
           plant_key: string
+          provenance?: Json
           quality_index: number
           quantity: number
           rules_version: string
           save_id: string
-          source_action_id: string
+          source_action_id?: string | null
+          source_apiary_action_id?: string | null
           source_cell_id: string
+          source_kind?: string
         }
         Update: {
           bake_bonus?: number
@@ -1495,14 +1501,31 @@ export type Database = {
           created_at?: string
           id?: string
           plant_key?: string
+          provenance?: Json
           quality_index?: number
           quantity?: number
           rules_version?: string
           save_id?: string
-          source_action_id?: string
+          source_action_id?: string | null
+          source_apiary_action_id?: string | null
           source_cell_id?: string
+          source_kind?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "ingredient_batches_apiary_source_fkey"
+            columns: ["save_id", "source_apiary_action_id"]
+            isOneToOne: true
+            referencedRelation: "garden_actions"
+            referencedColumns: ["save_id", "action_id"]
+          },
+          {
+            foreignKeyName: "ingredient_batches_crop_source_fkey"
+            columns: ["save_id", "source_action_id"]
+            isOneToOne: true
+            referencedRelation: "game_actions"
+            referencedColumns: ["save_id", "action_id"]
+          },
           {
             foreignKeyName: "ingredient_batches_rules_version_plant_key_fkey"
             columns: ["rules_version", "plant_key"]
@@ -1516,13 +1539,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "tavern_saves"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ingredient_batches_save_id_source_action_id_fkey"
-            columns: ["save_id", "source_action_id"]
-            isOneToOne: true
-            referencedRelation: "game_actions"
-            referencedColumns: ["save_id", "action_id"]
           },
           {
             foreignKeyName: "ingredient_batches_save_id_source_cell_id_fkey"
@@ -2014,6 +2030,16 @@ export type Database = {
         }
         Returns: Json
       }
+      apiary_command: {
+        Args: {
+          p_action_id: string
+          p_command_kind: string
+          p_expected_revision: number
+          p_payload: Json
+          p_save_id: string
+        }
+        Returns: Json
+      }
       begin_bake_oven: {
         Args: {
           p_action_id: string
@@ -2115,6 +2141,10 @@ export type Database = {
           p_expected_revision: number
           p_save_id: string
         }
+        Returns: Json
+      }
+      preview_apiary_command: {
+        Args: { p_command_kind: string; p_payload: Json }
         Returns: Json
       }
       preview_garden_command: {
