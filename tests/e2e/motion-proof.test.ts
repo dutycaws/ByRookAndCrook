@@ -122,6 +122,11 @@ test('the Brewery guide keeps pointer, keyboard, persistence, and reduced-motion
     await expect(scene).toHaveAttribute('data-stir-phase', 'countdown');
     await expect(scene.locator('img')).toHaveCount(7);
     await expect(scene.locator('.stir-guide')).toBeVisible();
+    await expect(scene.locator('.drag-orbit')).toBeVisible();
+    await expect(scene.locator('.drag-orbit-dashes')).toBeVisible();
+    await expect(scene.locator('.drag-grab-ring')).toBeVisible();
+    await expect(scene.locator('.drag-coach')).toContainText('Hold on the gold oval');
+    await expect(scene.locator('.drag-coach')).toContainText('avoid the center');
     await expect(scene.locator('.brazier-fire')).toHaveClass(/heated/);
     await expect(scene.locator('.steam')).toHaveClass(/heated/);
     await expect(scene).toHaveAttribute('data-stir-phase', 'scored', { timeout: 4_000 });
@@ -131,6 +136,8 @@ test('the Brewery guide keeps pointer, keyboard, persistence, and reduced-motion
     await expect(scene).toHaveAttribute('data-input-kind', 'pointer');
     await expect(scene).toHaveAttribute('data-direction', 'clockwise');
     await expect(scene).toHaveAttribute('data-pointer-type', 'mouse');
+    await expect(scene.locator('.drag-coach')).toContainText('Keep holding and dragging');
+    await expect(scene.locator('.drag-coach')).toContainText('Circle with the moving marker');
     expect(await scene.locator('.paddle').getAttribute('style')).not.toBe(initialPaddle);
     await expect.poll(async () =>
       Number(await scene.getAttribute('data-perfect-ticks'))

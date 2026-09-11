@@ -305,6 +305,13 @@
   <img class="layer wort" src="/assets/scenes/brewery/brewery-wort-surface.webp" alt="" draggable="false" style={`--liquid-x:${liquidX / 782 * 100}%;--liquid-y:${liquidY / 235 * 100}%;--agitation:${effectStrength}`} />
   {#if controller && visual.phase === 'active'}
     <svg class="stir-guide" viewBox="0 0 1672 941" aria-hidden="true">
+      <!-- Temporary usability-test overlay. Keep its orbit tied to the controller ellipse. -->
+      {#if controller.inputKind !== 'keyboard'}
+        <ellipse class="drag-orbit-shadow" cx={liquidEllipse.centerX} cy={liquidEllipse.centerY} rx={liquidEllipse.radiusX} ry={liquidEllipse.radiusY}></ellipse>
+        <ellipse class="drag-orbit" cx={liquidEllipse.centerX} cy={liquidEllipse.centerY} rx={liquidEllipse.radiusX} ry={liquidEllipse.radiusY}></ellipse>
+        <ellipse class="drag-orbit-dashes" cx={liquidEllipse.centerX} cy={liquidEllipse.centerY} rx={liquidEllipse.radiusX} ry={liquidEllipse.radiusY}></ellipse>
+        <circle class="drag-grab-ring" class:engaged={controller.inputKind === 'pointer'} cx={guideX} cy={guideY} r="34"></circle>
+      {/if}
       <path class="good-corridor" d={goodArc}></path>
       <path class="perfect-corridor" d={perfectArc}></path>
       <circle class="guide-marker" cx={guideX} cy={guideY} r="13"></circle>
@@ -322,7 +329,13 @@
     </div>
   {/if}
   {#if interactive}
-    <div class="gesture-hint" aria-hidden="true"><span>↻</span> Follow the guide</div>
+    {#if controller?.inputKind !== 'keyboard'}
+      <div class="drag-coach" aria-hidden="true">
+        <strong>{controller?.inputKind === 'pointer' ? 'Keep holding and dragging' : 'Hold on the gold oval'}</strong>
+        <span>{controller?.direction ? 'Circle with the moving marker' : 'Drag around the oval — avoid the center'}</span>
+      </div>
+    {/if}
+    <div class="gesture-hint" aria-hidden="true"><span>↻</span> Hold + drag the gold oval</div>
     <button
       class="beat-control"
       type="button"
@@ -359,7 +372,21 @@
     will-change: transform, filter;
   }
   .stir-guide { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; pointer-events: none; }
-  .good-corridor, .perfect-corridor { fill: none; stroke-linecap: round; }
+  .drag-orbit-shadow, .drag-orbit, .drag-orbit-dashes,
+  .good-corridor, .perfect-corridor { fill: none; }
+  .drag-orbit-shadow { stroke: #160c03b8; stroke-width: 48; }
+  .drag-orbit { stroke: #d7a8396e; stroke-width: 38; filter: drop-shadow(0 0 9px #efbe4b75); }
+  .drag-orbit-dashes {
+    stroke: #ffe497d9; stroke-width: 4; stroke-dasharray: 22 15; stroke-linecap: round;
+    filter: drop-shadow(0 0 4px #120903);
+  }
+  .drag-grab-ring {
+    fill: #f8d56c16; stroke: #ffe48f; stroke-width: 5;
+    filter: drop-shadow(0 0 10px #f3bd45); transform-box: fill-box; transform-origin: center;
+    animation: drag-guide-pulse 1.1s ease-in-out infinite alternate;
+  }
+  .drag-grab-ring.engaged { stroke: #a9df76; }
+  .good-corridor, .perfect-corridor { stroke-linecap: round; }
   .good-corridor { stroke: #e0aa45b8; stroke-width: 12; filter: drop-shadow(0 0 5px #d58c265c); }
   .perfect-corridor { stroke: #8fc260e8; stroke-width: 8; filter: drop-shadow(0 0 6px #8fc2608f); }
   .guide-marker { fill: #f4cf65; stroke: #251504; stroke-width: 4; filter: drop-shadow(0 0 8px #f0bd45); }
@@ -381,13 +408,23 @@
   }
   .steam.heated { opacity: calc(.18 + var(--agitation) * .16); animation: steam-rise 3.8s ease-in-out infinite alternate; }
   .scene-shade { position: absolute; inset: 0; z-index: 7; box-shadow: inset 0 0 44px 20px #08040170; pointer-events: none; }
-  .phase-banner, .gesture-hint, .beat-control { z-index: 8; }
+  .phase-banner, .drag-coach, .gesture-hint, .beat-control { z-index: 8; }
   .phase-banner {
     position: absolute; left: 50%; bottom: 4%; padding: .45rem .8rem;
     border: 1px solid #a47a38aa; color: #f0d295; background: #100b06df;
     font: 600 .78rem 'Cinzel', serif; letter-spacing: .08em; text-transform: uppercase; transform: translateX(-50%);
   }
   .phase-banner.error { border-color: #a85f49; color: #ffd2c4; }
+  .drag-coach {
+    position: absolute; top: 2.5%; left: 50%; display: grid; gap: .12rem; min-width: min(420px, 62%);
+    padding: .5rem .85rem; border: 1px solid #d2a747c7; color: #f4d887; background: #100b06e8;
+    box-shadow: 0 5px 18px #0009, inset 0 0 13px #d9a43312; text-align: center; transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .drag-coach strong {
+    font: 700 clamp(.58rem, 1.2vw, .82rem) 'Cinzel', serif; letter-spacing: .07em; text-transform: uppercase;
+  }
+  .drag-coach span { color: #c9ae71; font-size: clamp(.56rem, 1.05vw, .74rem); }
   .gesture-hint {
     position: absolute; right: 2.5%; bottom: 3%; display: flex; align-items: center; gap: .45rem;
     padding: .4rem .65rem; border: 1px solid #a47a38aa; color: #f0d295; background: #100b06d9;
@@ -410,11 +447,15 @@
     from { transform: translate3d(-3px, 4px, 0) scaleY(.98); }
     to { transform: translate3d(4px, -7px, 0) scaleY(1.025); }
   }
+  @keyframes drag-guide-pulse {
+    from { opacity: .68; transform: scale(.88); }
+    to { opacity: 1; transform: scale(1.08); }
+  }
   :global(.brewery-scene[data-scene-visible='false']) .brazier-fire,
   :global(.brewery-scene[data-scene-visible='false']) .steam { animation-play-state: paused; }
   @media (prefers-reduced-motion: reduce) {
     .wort, .paddle, .immersion-shadow { will-change: auto; }
-    .brazier-fire.heated, .steam.heated { animation: none; }
+    .brazier-fire.heated, .steam.heated, .drag-grab-ring { animation: none; }
     .gesture-hint span { display: none; }
   }
 </style>
