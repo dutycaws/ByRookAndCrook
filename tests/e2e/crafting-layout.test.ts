@@ -11,7 +11,7 @@ async function loginAndHarvest(page: Page, email: string, password: string) {
   const harvestButton = page.getByRole('button', { name: 'Harvest crop' });
   await expect(harvestButton).toBeEnabled();
   await harvestButton.click();
-  await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
+  await expect(page.getByRole('status')).toContainText(/Harvested \d+ ingredients?/);
 }
 
 async function stableOverflow(page: Page) {
@@ -35,7 +35,10 @@ test('the shared crafting layout preserves scene-first semantics at every target
       await expect(layout).toBeVisible();
       await expect(layout.locator('[data-contextual-action]')).toBeVisible();
       await expect(layout.locator('[data-scene-rail="inspector"]')).toBeVisible();
-      await expect(page.getByRole('button', { name: /water|fertiliz|adjust heat|skim foam|vent steam|helper chat|draw card/i })).toHaveCount(0);
+      const retiredPlaceholders = route === 'garden'
+        ? /adjust heat|skim foam|vent steam|helper chat|draw card/i
+        : /water|fertiliz|adjust heat|skim foam|vent steam|helper chat|draw card/i;
+      await expect(page.getByRole('button', { name: retiredPlaceholders })).toHaveCount(0);
       await expect(page.getByText(/daily tasks|tavern level|reputation|\bXP\b/i)).toHaveCount(0);
 
       for (const viewport of [

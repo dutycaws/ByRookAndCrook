@@ -96,7 +96,7 @@ export function deriveGardenVisualState(
     area: 'garden',
     designSize: SCENE_DESIGN_SIZE,
     selectedCellId,
-    plots: (snapshot?.cells ?? []).map((cell) => ({
+    plots: (snapshot?.cells ?? []).filter((cell) => cell.unlocked !== false).map((cell) => ({
       id: cell.id,
       layoutKey: cell.layoutKey,
       col: cell.col,

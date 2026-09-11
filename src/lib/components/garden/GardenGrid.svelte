@@ -46,13 +46,34 @@
     failedAssets = new Set([...failedAssets, path]);
   }
 
+  function moveFocus(event: KeyboardEvent, cell: GardenVisualPlot) {
+    const delta = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1]
+    }[event.key];
+    if (!delta) return;
+
+    const target = plots.find((plot) => plot.col === cell.col + delta[0] && plot.row === cell.row + delta[1]);
+    if (!target) return;
+    const grid = (event.currentTarget as HTMLElement).closest('[data-garden-grid]');
+    event.preventDefault();
+    onselect(target.id);
+    requestAnimationFrame(() => {
+      grid?.querySelector<HTMLElement>(`[data-cell-id="${target.id}"]`)?.focus();
+    });
+  }
+
   let bounds = $derived(hexGridBounds(plots));
 </script>
 
-<div class="garden-grid-scroll">
+<div class="garden-grid-scroll" data-garden-board>
   <div
     class="garden-grid"
-    aria-label="Tavern garden plots"
+    data-garden-grid
+    role="group"
+    aria-label={`Tavern garden, ${plots.length} unlocked plots`}
     style={`--hex-width: ${GARDEN_HEX_WIDTH * scale}px; --hex-height: ${GARDEN_HEX_HEIGHT * scale}px; width: ${bounds.width * scale}px; height: ${bounds.height * scale}px`}
   >
     <div class="sunwash" aria-hidden="true"></div>
@@ -79,7 +100,7 @@
           {:else if cell.kind === 'plant' && path && !failedAssets.has(path)}
             <img class="crop-art" src={path} alt="" draggable="false" onerror={() => markFailed(path)} />
           {:else if cell.kind === 'plant'}
-            <span class="crop-fallback" data-crop-fallback={cell.plantKey}>✿</span>
+            <span class="crop-fallback" data-crop-fallback={cell.plantKey}>{cell.plantKey === 'clover' ? '☘' : '✿'}</span>
           {/if}
           {#if harvestEffect?.cellId === cell.id}
             {@const effectPath = cropAsset(harvestEffect.plantKey, harvestEffect.stage)}
@@ -96,11 +117,15 @@
           class:selected={cell.id === selectedId}
           class:mature={cell.harvestable}
           data-layout-key={cell.layoutKey}
+          data-garden-cell
+          data-cell-id={cell.id}
+          data-unlocked="true"
           data-col={cell.col}
           data-row={cell.row}
           aria-label={cellLabel(cell)}
           aria-pressed={cell.id === selectedId}
           onclick={() => onselect(cell.id)}
+          onkeydown={(event) => moveFocus(event, cell)}
         >
           <span class="visually-hidden">{cellLabel(cell)}</span>
           {#if cell.harvestable}
@@ -113,8 +138,8 @@
 </div>
 
 <style>
-  .garden-grid-scroll { width: 100%; height: 100%; overflow: visible; padding: 0; }
-  .garden-grid { position: relative; margin: 0 auto; filter: drop-shadow(0 18px 24px #0008); }
+  .garden-grid-scroll { width: 100%; min-width: min-content; height: 100%; overflow: visible; padding: 12px; }
+  .garden-grid { position: relative; margin: 0; filter: drop-shadow(0 18px 24px #0008); }
   .sunwash { position: absolute; inset: -75px; background: radial-gradient(circle, #f1c7681c, transparent 58%); pointer-events: none; }
   .plot-node { position: absolute; top: var(--cell-y); left: var(--cell-x); width: var(--hex-width); height: var(--hex-height); z-index: calc(3 + var(--plot-z)); }
   .plot-node.selected { z-index: 90; }

@@ -52,6 +52,20 @@ describe('scene presentation contracts', () => {
     expect(JSON.stringify(visual)).not.toContain('qualityIndex');
   });
 
+  it('projects only unlocked land while preserving stable cell coordinates', () => {
+    const game = snapshot();
+    game.cells.push({
+      ...game.cells[0], id: 'cell-locked', layoutKey: 'c12', col: 3, row: 0,
+      unlocked: false, kind: 'empty', plantKey: null, plantName: null, growthStage: null,
+      water: null, health: null, harvestable: false, preview: null
+    });
+    game.cells[0].unlocked = true;
+
+    expect(deriveGardenVisualState(game, null, false, null).plots).toMatchObject([
+      { id: 'cell-1', layoutKey: 'c1', col: 2, row: 3 }
+    ]);
+  });
+
   it('derives Brewery setup, active, ready, blocked, and result phases', () => {
     const game = snapshot();
     const input = { remainingMs: 12_000, pending: false, error: null };

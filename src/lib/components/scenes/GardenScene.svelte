@@ -15,10 +15,10 @@
   } = $props();
 </script>
 
-<AreaScene area="garden" label="Illustrated tavern courtyard with twelve selectable garden plots" class="garden-scene-frame">
+<AreaScene area="garden" label={`Illustrated tavern courtyard with ${visual.plots.length} selectable garden plots`} class="garden-scene-frame">
   <SceneLayer src="/assets/scenes/garden-environment.webp" name="garden environment" z={0} essential />
   <div class="garden-light" aria-hidden="true"></div>
-  <div class="garden-plane-grid">
+  <div class="garden-plane-viewport" data-garden-viewport>
     <GardenGrid plots={visual.plots} selectedId={visual.selectedCellId} scale={1.85} {harvestEffect} {onselect} />
   </div>
   <SceneLayer
@@ -51,7 +51,7 @@
 <style>
   :global(.garden-scene-frame) { margin-top: 1rem; border: 1px solid #725426; box-shadow: inset 0 0 0 1px #120b04; }
   .garden-light { position: absolute; inset: 0; z-index: 1; background: linear-gradient(120deg,#fff1a714,transparent 35%),radial-gradient(ellipse at 51% 49%,transparent 20%,#06100640 86%); pointer-events: none; }
-  .garden-plane-grid { position: absolute; left: 538px; top: 138px; z-index: 2; width: 596px; height: 639px; }
+  .garden-plane-viewport { position: absolute; left: 335px; top: 150px; z-index: 2; width: 1002px; height: 610px; overflow: auto; scrollbar-color: #96733b #130d07; scrollbar-width: thin; }
   :global(.garden-atmosphere) { animation: garden-drift 6s ease-in-out infinite alternate; opacity: .78; }
   :global(.garden-foreground) { filter: drop-shadow(0 -12px 18px #020401a8); }
   :global([data-area-scene='garden'][data-scene-visible='false'] .garden-atmosphere) { animation-play-state: paused; }

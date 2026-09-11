@@ -2,6 +2,9 @@
   import { enhance } from '$app/forms';
   import { onDestroy, onMount } from 'svelte';
   import CropDetails from '$lib/components/garden/CropDetails.svelte';
+  import GardenOverview from '$lib/components/garden/GardenOverview.svelte';
+  import GardenCarePanel from '$lib/components/garden/GardenCarePanel.svelte';
+  import GardenProvisionPanel from '$lib/components/garden/GardenProvisionPanel.svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import IllustratedActionButton from '$lib/components/scene/IllustratedActionButton.svelte';
@@ -91,7 +94,7 @@
   <meta name="description" content="Tend and harvest the tavern garden." />
 </svelte:head>
 
-<main class="page-shell">
+<main class="page-shell" data-hydrated={hydrated}>
   {#if !data.snapshot}
     <section class="onboarding panel" aria-labelledby="start-title">
       <span class="large-icon" aria-hidden="true">🌿</span>
@@ -117,12 +120,7 @@
 
     <CraftingSceneLayout area="garden" statusTitle="Garden ledger" inspectorTitle="Selected plot">
       {#snippet status()}
-        <dl class="craft-status-list">
-          <div><dt>Day</dt><dd>{data.snapshot!.save.currentDay}</dd></div>
-          <div><dt>Plots</dt><dd>{visual.plots.length}</dd></div>
-          <div><dt>Ready</dt><dd>{visual.plots.filter((plot) => plot.harvestable).length}</dd></div>
-          <div><dt>Pantry batches</dt><dd>{data.snapshot!.ingredients.length}</dd></div>
-        </dl>
+        <GardenOverview snapshot={data.snapshot!} onselect={(id) => (selectedId = id)} />
       {/snippet}
       {#snippet scene()}
         <section class="garden-panel panel" aria-labelledby="garden-grid-title" data-visual-status={visual.status}>
@@ -139,6 +137,8 @@
       {#snippet inspector()}
         <div class="garden-sidebar">
           <CropDetails cell={selected} />
+          <GardenCarePanel snapshot={data.snapshot!} {selected} />
+          <GardenProvisionPanel snapshot={data.snapshot!} {selected} />
 
           {#if selected?.kind === 'plant'}
             <form method="POST" action="?/harvest" use:enhance={enhanceHarvest}>
