@@ -1460,6 +1460,7 @@ export type Database = {
         Row: {
           bake_bonus: number
           brew_bonus: number
+          composted_quantity: number
           consumed_quantity: number
           created_at: string
           id: string
@@ -1474,6 +1475,7 @@ export type Database = {
         Insert: {
           bake_bonus: number
           brew_bonus: number
+          composted_quantity?: number
           consumed_quantity?: number
           created_at?: string
           id?: string
@@ -1488,6 +1490,7 @@ export type Database = {
         Update: {
           bake_bonus?: number
           brew_bonus?: number
+          composted_quantity?: number
           consumed_quantity?: number
           created_at?: string
           id?: string
@@ -2092,6 +2095,16 @@ export type Database = {
         }
         Returns: Json
       }
+      garden_command: {
+        Args: {
+          p_action_id: string
+          p_command_kind: string
+          p_expected_revision: number
+          p_payload: Json
+          p_save_id: string
+        }
+        Returns: Json
+      }
       get_bar_snapshot: { Args: never; Returns: Json }
       get_npc_journal: { Args: { p_patron: string }; Returns: Json }
       get_tavern_snapshot: { Args: never; Returns: Json }
@@ -2102,6 +2115,10 @@ export type Database = {
           p_expected_revision: number
           p_save_id: string
         }
+        Returns: Json
+      }
+      preview_garden_command: {
+        Args: { p_command_kind: string; p_payload: Json }
         Returns: Json
       }
       project_garden_day: { Args: never; Returns: Json }

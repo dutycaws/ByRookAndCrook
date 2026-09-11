@@ -25,6 +25,7 @@ export interface GardenCell {
   layoutKey: string;
   col: number;
   row: number;
+  unlocked?: boolean;
   kind: 'empty' | 'plant' | 'beehive';
   plantKey: string | null;
   plantName: string | null;
@@ -33,6 +34,47 @@ export interface GardenCell {
   water: number | null;
   health: number | null;
   harvestable: boolean;
+  soil?: {
+    n: number;
+    p: number;
+    k: number;
+    moisture: number;
+    quality: number;
+    siteLight: number;
+  };
+  plant?: {
+    id: string;
+    speciesKey: string;
+    lifecycle: 'seedling' | 'growing' | 'flowering' | 'mature' | 'regrowing' | 'dead';
+    ageDays: number;
+    growthProgress: number;
+    health: number;
+    productionCycle: number;
+    floweringDaysRemaining: number;
+    readySinceDay: number | null;
+    qualityIndex: QualityIndex;
+    symptoms: Array<{ code: string; severity: 'info' | 'warning' | 'critical'; label: string; cause: string }>;
+  } | null;
+  hive?: {
+    id: string;
+    equipmentCondition: number;
+    hasColony: boolean;
+    colony: {
+      id: string;
+      adults: number;
+      brood: number;
+      health: number;
+      foodStores: number;
+      floralHoney: number;
+      protectedReserve: number;
+      extractableSurplus: number;
+      varroaPressure: number;
+      chalkbroodPressure: number;
+      nosemaPressure: number;
+      treatmentKey: string | null;
+      treatmentDaysRemaining: number;
+    } | null;
+  } | null;
   preview: HarvestPreview | null;
 }
 
@@ -46,7 +88,43 @@ export interface IngredientBatch {
   brewBonus: number;
   bakeBonus: number;
   sourceCellId: string;
+  consumedQuantity?: number;
+  compostedQuantity?: number;
   createdAt: string;
+}
+
+export interface GardenInventoryItem {
+  itemKey: string;
+  name: string;
+  kind: 'seed' | 'amendment' | 'feed' | 'treatment' | 'equipment' | 'colony';
+  quantity: number;
+  price: number;
+  effect: Record<string, Json>;
+}
+
+export interface GardenState {
+  rulesVersion: string;
+  plotCount: 12 | 16 | 24;
+  forecast: Array<{
+    dayNumber: number;
+    key: 'clear' | 'cloudy' | 'rainy';
+    name: string;
+    rainfall: number;
+    drying: number;
+    lightDelta: number;
+  }>;
+  inventory: GardenInventoryItem[];
+  shop: Omit<GardenInventoryItem, 'quantity'>[];
+  compostJobs: Array<{
+    id: string;
+    cellId: string;
+    sourceKind: 'plant' | 'green_manure' | 'ingredient';
+    sourceLabel: string;
+    readyDay: number;
+    releasesRemaining: number;
+  }>;
+  latestReport: Json | null;
+  expansions: Array<{ plotCount: 16 | 24; price: number; available: boolean }>;
 }
 
 export interface BrewSession {
@@ -150,6 +228,9 @@ export interface GameSnapshot {
     currentDay: number;
     dayMinigameCompleted: boolean;
     dailyCraftKind: 'brew' | 'bake' | null;
+    gold?: number;
+    gardenRulesVersion?: string;
+    gardenPlotCount?: 12 | 16 | 24;
   };
   cells: GardenCell[];
   ingredients: IngredientBatch[];
@@ -166,6 +247,55 @@ export interface GameSnapshot {
     intentCards: IntentCard[];
   };
   foods: Food[];
+  garden?: GardenState;
+}
+
+export type GardenCommandKind =
+  | 'plant'
+  | 'move'
+  | 'remove'
+  | 'water'
+  | 'amend'
+  | 'incorporate_clover'
+  | 'compost_ingredient'
+  | 'purchase'
+  | 'expand';
+
+export type GardenCommandPayload =
+  | { cellId: string; seedItemKey: string }
+  | { sourceCellId: string; targetCellId: string }
+  | { cellId: string; compost?: boolean }
+  | { cellIds: string[]; dose: number }
+  | { cellIds: string[]; itemKey: string; dose: number }
+  | { cellId: string }
+  | { cellId: string; ingredientBatchId: string; quantity: number }
+  | { itemKey: string; quantity: number }
+  | { plotCount: 16 | 24 };
+
+export interface GardenCommand {
+  saveId: string;
+  actionId: string;
+  expectedRevision: number;
+  commandKind: GardenCommandKind;
+  payload: GardenCommandPayload;
+}
+
+export interface GardenCommandReceipt {
+  actionId: string;
+  commandKind: GardenCommandKind;
+  committedRevision: number;
+  rulesVersion: string;
+  normalizedPayload: Record<string, Json>;
+  result: Record<string, Json>;
+}
+
+export interface GardenCommandPreview {
+  commandKind: GardenCommandKind;
+  basedOnRevision: number;
+  rulesVersion: string;
+  normalizedPayload: Record<string, Json>;
+  canCommit?: boolean;
+  [key: string]: Json | undefined;
 }
 
 export interface HarvestCommand {
@@ -369,6 +499,52 @@ export function parseReceipt(value: Json): HarvestReceipt {
     throw new Error('Invalid harvest receipt');
   }
 
+  return candidate;
+}
+
+const GARDEN_COMMAND_KINDS = new Set<GardenCommandKind>([
+  'plant',
+  'move',
+  'remove',
+  'water',
+  'amend',
+  'incorporate_clover',
+  'compost_ingredient',
+  'purchase',
+  'expand'
+]);
+
+export function parseGardenCommandReceipt(value: Json): GardenCommandReceipt {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid garden command receipt');
+  }
+  const candidate = value as unknown as GardenCommandReceipt;
+  if (
+    !candidate.actionId ||
+    !GARDEN_COMMAND_KINDS.has(candidate.commandKind) ||
+    !Number.isInteger(candidate.committedRevision) ||
+    !candidate.rulesVersion ||
+    !candidate.normalizedPayload ||
+    !candidate.result
+  ) {
+    throw new Error('Invalid garden command receipt');
+  }
+  return candidate;
+}
+
+export function parseGardenCommandPreview(value: Json): GardenCommandPreview {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid garden command preview');
+  }
+  const candidate = value as unknown as GardenCommandPreview;
+  if (
+    !GARDEN_COMMAND_KINDS.has(candidate.commandKind) ||
+    !Number.isInteger(candidate.basedOnRevision) ||
+    !candidate.rulesVersion ||
+    !candidate.normalizedPayload
+  ) {
+    throw new Error('Invalid garden command preview');
+  }
   return candidate;
 }
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseStartBrewReceipt } from '../../src/lib/game/contracts';
+import {
+  parseGardenCommandPreview,
+  parseGardenCommandReceipt,
+  parseStartBrewReceipt
+} from '../../src/lib/game/contracts';
 
 const receipt = {
   actionId: 'action',
@@ -27,5 +31,56 @@ describe('Brewery contracts', () => {
     expect(() => parseStartBrewReceipt({
       ...receipt, durationSeconds: 15, countdownSeconds: 0, stirRulesVersion: 'guide-v2'
     })).toThrow('Invalid start brew receipt');
+  });
+});
+
+describe('Garden command contracts', () => {
+  it('accepts authoritative receipts and read-only previews', () => {
+    expect(parseGardenCommandReceipt({
+      actionId: 'garden-action',
+      commandKind: 'water',
+      committedRevision: 7,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: { cellIds: ['cell-b', 'cell-a'], dose: 12 },
+      result: { wateredCount: 2 }
+    })).toMatchObject({
+      actionId: 'garden-action',
+      commandKind: 'water',
+      committedRevision: 7
+    });
+
+    expect(parseGardenCommandPreview({
+      commandKind: 'amend',
+      basedOnRevision: 6,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: { cellIds: ['cell-a'], itemKey: 'compost', dose: 1 },
+      canCommit: true,
+      predictions: [{ cellId: 'cell-a', nitrogenAfter: 54 }]
+    })).toMatchObject({ commandKind: 'amend', basedOnRevision: 6, canCommit: true });
+  });
+
+  it('rejects malformed receipts and previews', () => {
+    expect(() => parseGardenCommandReceipt({
+      actionId: 'garden-action',
+      commandKind: 'invent',
+      committedRevision: 1,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: {},
+      result: {}
+    })).toThrow('Invalid garden command receipt');
+    expect(() => parseGardenCommandReceipt({
+      actionId: 'garden-action',
+      commandKind: 'plant',
+      committedRevision: 1.5,
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: {},
+      result: {}
+    })).toThrow('Invalid garden command receipt');
+    expect(() => parseGardenCommandPreview({
+      commandKind: 'water',
+      basedOnRevision: '6',
+      rulesVersion: 'garden-apiary-v1',
+      normalizedPayload: {}
+    })).toThrow('Invalid garden command preview');
   });
 });
