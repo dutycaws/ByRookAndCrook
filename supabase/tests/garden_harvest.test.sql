@@ -14,14 +14,18 @@ set local request.jwt.claim.sub = '10000000-0000-4000-8000-000000000001';
 
 select lives_ok($$ select public.create_tavern() $$, 'an authenticated player can create a tavern');
 select is((select count(*) from public.tavern_saves), 1::bigint, 'the player sees one save');
-select is((select count(*) from public.garden_cells), 12::bigint, 'the save has twelve starter cells');
+select is((select count(*) from public.garden_cells where unlocked), 12::bigint, 'the save has twelve unlocked starter cells');
 select lives_ok($$ select public.create_tavern() $$, 'creating again is idempotent');
-select is((select count(*) from public.garden_cells), 12::bigint, 'creating again does not reseed cells');
+select is((select count(*) from public.garden_cells where unlocked), 12::bigint, 'creating again does not unlock or duplicate starter cells');
 
 select is((public.get_tavern_snapshot() #>> '{cells,0,preview,quantity}')::integer, 1, 'c0 does not receive the distant hive bonus');
-select is((public.get_tavern_snapshot() #>> '{cells,1,preview,quantity}')::integer, 2, 'c1 receives the adjacent hive bonus');
-select is((public.get_tavern_snapshot() #>> '{cells,0,preview,qualityIndex}')::integer, 5, 'mature healthy hops are Legendary');
-select is((public.get_tavern_snapshot() #>> '{cells,4,harvestable}')::boolean, false, 'stage two pepper is not harvestable');
+select is((select (cell->'preview'->>'quantity')::integer
+  from jsonb_array_elements(public.get_tavern_snapshot()->'cells') cell
+  where cell->>'layoutKey'='c1'), 1, 'fennel keeps its one-unit yield before any accumulated pollination');
+select is((public.get_tavern_snapshot() #>> '{cells,0,preview,qualityIndex}')::integer, 6, 'mature healthy hops are Resplendent');
+select is((select (cell->>'harvestable')::boolean
+  from jsonb_array_elements(public.get_tavern_snapshot()->'cells') cell
+  where cell->>'layoutKey'='c4'), false, 'stage two pepper is not harvestable');
 
 select lives_ok(
   $$
@@ -33,10 +37,10 @@ select lives_ok(
   $$,
   'a mature crop can be harvested'
 );
-select is((select kind from public.garden_cells where layout_key = 'c0'), 'empty', 'harvest clears the cell');
+select is((select kind from public.garden_cells where layout_key = 'c0'), 'plant', 'harvest retains the regrowing crop');
 select is((select count(*) from public.ingredient_batches), 1::bigint, 'harvest creates one batch');
 select is((select quantity from public.ingredient_batches limit 1), 1, 'hops batch has one unit');
-select is((select quality_index from public.ingredient_batches limit 1), 5::smallint, 'hops batch keeps quality');
+select is((select quality_index from public.ingredient_batches limit 1), 6::smallint, 'hops batch keeps quality');
 select is((select brew_bonus from public.ingredient_batches limit 1), 4::smallint, 'hops batch keeps brew modifier');
 select is((select bake_bonus from public.ingredient_batches limit 1), 0::smallint, 'hops batch keeps bake modifier');
 select is((select revision from public.tavern_saves), 1::bigint, 'harvest advances revision once');
@@ -110,14 +114,8 @@ select throws_ok(
   'a missing save is rejected without leaking data'
 );
 select lives_ok($$ select public.create_tavern() $$, 'initializing after a harvest remains idempotent');
-select is((select kind from public.garden_cells where layout_key = 'c0'), 'empty', 'initializing again does not refill a harvested cell');
+select is((select kind from public.garden_cells where layout_key = 'c0'), 'plant', 'initializing again preserves the regrowing crop');
 select is((select count(*) from public.ingredient_batches), 1::bigint, 'initializing again preserves existing ingredients');
-
-reset role;
-update public.garden_cells
-set kind = 'beehive', plant_key = null, growth_stage = null, water = null, health = null
-where layout_key = 'c3';
-set local role authenticated;
 
 select lives_ok(
   $$
@@ -127,9 +125,9 @@ select lives_ok(
       '20000000-0000-4000-8000-000000000003', 1
     )
   $$,
-  'fennel can be harvested with two adjacent hives'
+  'fennel can be harvested from the migrated starter garden'
 );
-select is((select quantity from public.ingredient_batches where plant_key = 'fennel'), 2, 'multiple hives do not stack the yield bonus');
+select is((select quantity from public.ingredient_batches where plant_key = 'fennel'), 1, 'fennel retains its one-unit starter-cycle yield');
 select is((select revision from public.tavern_saves), 2::bigint, 'second harvest advances revision');
 
 reset role;
@@ -171,7 +169,7 @@ set local request.jwt.claim.sub = '10000000-0000-4000-8000-000000000002';
 
 select lives_ok($$ select public.create_tavern() $$, 'a second player can create a tavern');
 select is((select count(*) from public.tavern_saves), 1::bigint, 'RLS exposes only the second player save');
-select is((select count(*) from public.garden_cells), 12::bigint, 'RLS exposes only the second player garden');
+select is((select count(*) from public.garden_cells where unlocked), 12::bigint, 'RLS exposes the second player''s twelve unlocked starter plots');
 select is((public.get_tavern_snapshot() #>> '{save,revision}')::integer, 0, 'second player gets independent state');
 select throws_ok(
   $$
@@ -195,7 +193,8 @@ select ok(not has_function_privilege('anon', 'public.create_tavern()', 'EXECUTE'
 select ok(not has_function_privilege('anon', 'public.harvest_crop(uuid,uuid,uuid,bigint)', 'EXECUTE'), 'anonymous clients cannot call harvest');
 
 reset role;
-select is((select count(*) from public.plant_catalog), 7::bigint, 'all seven prototype plants are versioned content');
+select is((select count(*) from public.plant_catalog where rules_version='harvest-v1'), 7::bigint,
+  'all seven harvest-v1 prototype plants remain versioned content');
 select results_eq(
   $$
     select plant_key, base_brew_bonus, base_bake_bonus

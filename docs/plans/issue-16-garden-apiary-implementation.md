@@ -4,7 +4,7 @@
 **Branch:** `codex/issue-16-sophisticated-garden-apiary`  
 **Baseline:** `9207601`  
 **Plan version:** 1  
-**State:** executing
+**State:** complete
 
 ## Frozen decisions
 
@@ -24,7 +24,7 @@
 | P2 | Accepted | Replayable garden commands, harvest/regrowth, economy, compost, expansion | P1 | New command migration, server contracts/adapters, focused integration tests | Ownership, revision, replay, atomic batch care, and recovery pass |
 | P3 | Accepted | Apiary commands, forage, diseases, treatments, splitting, honey batches | P1, P2 inventory/provenance | New apiary migration and focused tests | Conservation, safe surplus, distinct pressures, and crafting compatibility pass |
 | P4 | Accepted | Snapshot extension and responsive accessible Garden UI | P1–P3 contracts | Garden route/components/presentation and focused browser tests | Complete keyboard/pointer journeys at 12/16/24 plots pass |
-| P5 | Pending | Runbook, migration notes, balance evidence, complete regressions | P1–P4 | Documentation and test evidence | Every issue acceptance category maps to passing evidence |
+| P5 | Accepted | Runbook, migration notes, balance evidence, complete regressions | P1–P4 | Documentation and test evidence | Every issue acceptance category maps to passing evidence |
 
 Shared migrations, generated database types, `src/lib/game/contracts.ts`, `src/lib/server/game.ts`, and the Garden route are serialized under the primary agent. Discovery and review agents remain read-only in the shared checkout.
 
@@ -66,3 +66,4 @@ The workflow overseer reviews this ledger at each contract or migration boundary
 - P2: accepted after 84 focused pgTAP assertions for commands, compost reservations, and finite zero-gold recovery; four contract tests; two live local-Supabase adapter tests; database type parity; and a clean application check. Independent review confirmed exact replay, revision and ownership guards, atomic care, separate compost allocation, active-craft protection, expansion, and route-level recovery semantics.
 - P3: accepted after 96 focused pgTAP assertions (54 apiary commands, 23 day scenarios, and 19 honey crafting), a 167-assert relevant P1/P3 database regression, and nine focused TypeScript contract/live-adapter tests. The packet proves exact replay and concurrent serialization; separate equipment and colonies; finite shared forage; local cause-specific health pressure; treatment downtime; conserved splits; permanent colony loss with retained equipment; feed/honey separation; safe extraction; and same-day honey brew/bake compatibility. The local Nosema correction is additive in migration 028, leaving the previously accepted day-engine migration byte-identical.
 - P4: accepted after the overseer reviewed four focused interaction groups. Browser evidence proves stable tessellation and keyboard navigation at 12, 16, and 24 plots; independent scroll reachability with at least 44px targets at desktop and phone widths; exact stress, colony-loss, and day-report causes; preview-before-commit care with exact-ID retry; move, remove, regrowth, clover, and compost-reservation flows; and the complete equipment, colony, feed, eight-unit extraction, split, treatment, and expansion journeys. Legacy harvest, responsive/reduced-motion, and asset-fallback journeys remain compatible.
+- P5: accepted after the consolidated specification, migration/runbook guidance, issue-#13 historical note, and compatibility fixtures were reviewed against the implemented rules. Final gates pass: `npm run check` with zero errors or warnings; database type parity; secret and 51-asset audits; 135 unit tests in 13 files; 549 assertions in 16 pgTAP files; 42 authenticated integration tests in 8 files; 52 Playwright journeys across desktop Chromium and emulated Pixel 7; and the adapter-node production build. The complete browser pass took 1.9 minutes. Compatibility updates keep the exact one-unit starter Fennel yield while provisioning distinct crops only where repeated brew/bake coverage requires additional ingredients.

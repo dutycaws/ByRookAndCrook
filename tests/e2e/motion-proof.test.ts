@@ -9,7 +9,7 @@ async function loginAndHarvest(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Start tavern' }).click();
   await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
   await page.getByRole('button', { name: 'Harvest crop' }).click();
-  await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
+  await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
 }
 
 async function sceneProjection(scene: Locator) {
@@ -270,7 +270,9 @@ test('the Brewery keyboard rhythm path can earn the same 60-tick maximum', async
       started_at: new Date(Date.now() - 18_000).toISOString()
     }).eq('id', session!.id)).error).toBeNull();
     await page.getByRole('button', { name: 'Bottle this brew' }).click();
-    await expect(page.getByRole('heading', { name: 'Ambrosial Draught' })).toBeVisible();
+    const emptyShelf = page.getByRole('region', { name: 'The ingredient shelf is empty' });
+    await expect(emptyShelf).toBeVisible();
+    await expect(emptyShelf.getByRole('status')).toContainText('Ambrosial Draught bottled at 7 of 7 quality');
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }

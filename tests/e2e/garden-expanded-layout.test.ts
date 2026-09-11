@@ -10,6 +10,16 @@ async function loginAndCreate(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Open the ledger' }).click();
   await page.getByRole('button', { name: 'Start tavern' }).click();
   await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
+  await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
+}
+
+async function visibleGardenStatus(page: Page) {
+  const mobileStatus = page.locator('.mobile-status');
+  if (await mobileStatus.isVisible()) {
+    await mobileStatus.locator(':scope > summary').click();
+    return mobileStatus;
+  }
+  return page.locator('.desktop-status');
 }
 
 async function assertReachablePlots(page: Page, count: number) {
@@ -113,10 +123,11 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
     await expect(page.locator('[data-garden-inspector]')).toContainText('Fennel');
     await expect(page.locator('[data-soil-diagnostic]')).toContainText('Nitrogen');
     await expect(page.locator('[data-soil-diagnostic]')).toContainText('Site light');
-    await expect(page.getByRole('region', { name: 'Three-day forecast' }).first()).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Threatened plots' }).first()).toBeVisible();
+    let status = await visibleGardenStatus(page);
+    await expect(status.getByRole('region', { name: 'Three-day forecast' })).toBeVisible();
+    await expect(status.getByRole('region', { name: 'Threatened plots' })).toBeVisible();
 
-    const waterlogged = page.locator('.desktop-status').getByRole('button', { name: /c4 · Pepper Waterlogged soil/ });
+    const waterlogged = status.getByRole('button', { name: /c4 · Pepper Waterlogged soil/ });
     await waterlogged.focus();
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-garden-inspector]')).toContainText('Pepper');
@@ -140,7 +151,9 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
       '-c', `update public.apiary_colonies set health=20,varroa_pressure=70,threat_days=1 where id='${colonyId}'::uuid`
     ]);
     await page.reload();
-    const threatenedColony = page.locator('.desktop-status').getByRole('button', { name: /c2 · Bee colony Colony-loss warning/ });
+    await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
+    status = await visibleGardenStatus(page);
+    const threatenedColony = status.getByRole('button', { name: /c2 · Bee colony Colony-loss warning/ });
     await threatenedColony.focus();
     await expect(threatenedColony).toBeFocused();
     await threatenedColony.press('Enter');
@@ -155,8 +168,10 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
       expectedRevision: stressedState.save.revision
     });
     await page.reload();
-    await expect(page.getByText('Latest garden report').first()).toBeVisible();
-    await expect(page.locator('.daily-report').first()).toContainText('The colony may be lost after another day without corrective care.');
+    await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
+    status = await visibleGardenStatus(page);
+    await expect(status.getByText('Latest garden report')).toBeVisible();
+    await expect(status.locator('.daily-report')).toContainText('The colony may be lost after another day without corrective care.');
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -175,6 +190,7 @@ test('garden controls preview and recover replayable planting and batch care', a
       '-c', `insert into public.garden_inventory(save_id,item_key,quantity) values ('${state.save.id}'::uuid,'amendment_n',3) on conflict(save_id,item_key) do update set quantity=excluded.quantity`
     ]);
     await page.reload();
+    await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
 
     const cloverCell = page.locator('[data-garden-cell][data-layout-key="c3"]');
     await cloverCell.focus();
