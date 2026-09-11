@@ -50,6 +50,15 @@ returns jsonb language sql stable set search_path = '' as $$
     select 2, 'potassium-low', jsonb_build_object('code','potassium-low','severity','warning','label','Weak growth',
       'cause','Local potassium is below this species'' preferred range.') where p_k < p_profile.k_min
     union all
+    select 2, 'nitrogen-high', jsonb_build_object('code','nitrogen-high','severity','warning','label','Nitrogen excess',
+      'cause','Local nitrogen exceeds this species'' preferred range; another dose will intensify stress.') where p_n > p_profile.n_max
+    union all
+    select 2, 'phosphorus-high', jsonb_build_object('code','phosphorus-high','severity','warning','label','Phosphorus excess',
+      'cause','Local phosphorus exceeds this species'' preferred range; another dose will intensify stress.') where p_p > p_profile.p_max
+    union all
+    select 2, 'potassium-high', jsonb_build_object('code','potassium-high','severity','warning','label','Potassium excess',
+      'cause','Local potassium exceeds this species'' preferred range; another dose will intensify stress.') where p_k > p_profile.k_max
+    union all
     select 2, 'underwatered', jsonb_build_object('code','underwatered','severity','warning','label','Dry and wilting',
       'cause','Moisture is below this species'' preferred range.') where p_moisture < p_profile.moisture_min
     union all
@@ -229,11 +238,15 @@ begin
       );
       v_good := v_plant.lifecycle<>'dead'
         and v_moisture between v_profile.moisture_min and v_profile.moisture_max
-        and v_cell.soil_n>=v_profile.n_min and v_cell.soil_p>=v_profile.p_min and v_cell.soil_k>=v_profile.k_min
+        and v_cell.soil_n between v_profile.n_min and v_profile.n_max
+        and v_cell.soil_p between v_profile.p_min and v_profile.p_max
+        and v_cell.soil_k between v_profile.k_min and v_profile.k_max
         and v_light between v_profile.light_min and v_profile.light_max;
       v_health_delta := case when v_good then 4 else -(
         (case when v_moisture < v_profile.moisture_min or v_moisture > v_profile.moisture_max then 5 else 0 end)
-        +(case when v_cell.soil_n<v_profile.n_min or v_cell.soil_p<v_profile.p_min or v_cell.soil_k<v_profile.k_min then 4 else 0 end)
+        +(case when v_cell.soil_n not between v_profile.n_min and v_profile.n_max
+          or v_cell.soil_p not between v_profile.p_min and v_profile.p_max
+          or v_cell.soil_k not between v_profile.k_min and v_profile.k_max then 4 else 0 end)
         +(case when v_light<v_profile.light_min or v_light>v_profile.light_max then 3 else 0 end)
       ) end + round(v_companion/4.0)::integer;
       v_health := private.clamp_int(v_plant.health + v_health_delta,0,100);

@@ -20,7 +20,7 @@
 
 | Packet | Status | Objective | Depends on | Mutable scope | Gate |
 | --- | --- | --- | --- | --- | --- |
-| P1 | Accepted | Versioned content, persistence, migration/backfill, deterministic projection and day resolution | Baseline | New foundation migration and focused database tests | 89 focused pgTAP assertions, database type parity, and application check pass |
+| P1 | Accepted with corrective follow-up | Versioned content, persistence, migration/backfill, deterministic projection and day resolution | Baseline | New foundation migration and focused database tests | 91 focused pgTAP assertions, database type parity, and application check pass |
 | P2 | Pending | Replayable garden commands, harvest/regrowth, economy, compost, expansion | P1 | New command migration, server contracts/adapters, focused integration tests | Ownership, revision, replay, atomic batch care, and recovery pass |
 | P3 | Pending | Apiary commands, forage, diseases, treatments, splitting, honey batches | P1, P2 inventory/provenance | New apiary migration and focused tests | Conservation, safe surplus, distinct pressures, and crafting compatibility pass |
 | P4 | Pending | Snapshot extension and responsive accessible Garden UI | P1–P3 contracts | Garden route/components/presentation and focused browser tests | Complete keyboard/pointer journeys at 12/16/24 plots pass |
@@ -58,3 +58,8 @@ Shared migrations, generated database types, `src/lib/game/contracts.ts`, `src/l
 Use the shortest useful ladder: focused pure/contract tests, focused database tests, focused RPC integration, Garden browser journeys, then one complete regression pass after P4. A broad test run may not block implementation for more than ten minutes; classify and isolate long failures before continuing.
 
 The workflow overseer reviews this ledger at each contract or migration boundary, after each packet gate, and whenever a worker waits on an unstated dependency or tests repeat without new evidence.
+
+## Acceptance receipts
+
+- P1 (`1dac938`): accepted after reset-schema coverage for migration, deterministic resolution, replay, occupancy, day guards, ownership, and representative crop/spatial scenarios.
+- P1 corrective follow-up: nutrient maxima, excess-nutrient symptoms, and overdose stress were added before P2 after command design exposed the missing upper-bound rule. The focused P1 suite now passes 91 assertions.

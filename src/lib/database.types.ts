@@ -1192,6 +1192,7 @@ export type Database = {
           forage_value: number
           height_class: number
           icon: string
+          k_max: number
           k_min: number
           k_use: number
           light_max: number
@@ -1199,8 +1200,10 @@ export type Database = {
           maturity_days: number
           moisture_max: number
           moisture_min: number
+          n_max: number
           n_min: number
           n_use: number
+          p_max: number
           p_min: number
           p_use: number
           pollination_eligible: boolean
@@ -1220,6 +1223,7 @@ export type Database = {
           forage_value: number
           height_class: number
           icon: string
+          k_max: number
           k_min: number
           k_use: number
           light_max: number
@@ -1227,8 +1231,10 @@ export type Database = {
           maturity_days: number
           moisture_max: number
           moisture_min: number
+          n_max: number
           n_min: number
           n_use: number
+          p_max: number
           p_min: number
           p_use: number
           pollination_eligible: boolean
@@ -1248,6 +1254,7 @@ export type Database = {
           forage_value?: number
           height_class?: number
           icon?: string
+          k_max?: number
           k_min?: number
           k_use?: number
           light_max?: number
@@ -1255,8 +1262,10 @@ export type Database = {
           maturity_days?: number
           moisture_max?: number
           moisture_min?: number
+          n_max?: number
           n_min?: number
           n_use?: number
+          p_max?: number
           p_min?: number
           p_use?: number
           pollination_eligible?: boolean

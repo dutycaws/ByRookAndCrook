@@ -35,6 +35,9 @@ create table public.garden_species_profiles (
   n_min smallint not null check (n_min between 0 and 100),
   p_min smallint not null check (p_min between 0 and 100),
   k_min smallint not null check (k_min between 0 and 100),
+  n_max smallint not null check (n_max between 0 and 100),
+  p_max smallint not null check (p_max between 0 and 100),
+  k_max smallint not null check (k_max between 0 and 100),
   n_use smallint not null check (n_use between 0 and 20),
   p_use smallint not null check (p_use between 0 and 20),
   k_use smallint not null check (k_use between 0 and 20),
@@ -50,19 +53,20 @@ create table public.garden_species_profiles (
   base_bake_bonus smallint not null check (base_bake_bonus between 0 and 6),
   primary key (rules_version, species_key),
   check (moisture_min <= moisture_max),
+  check (n_min <= n_max and p_min <= p_max and k_min <= k_max),
   check (light_min <= light_max),
   check ((regrows and regrowth_days is not null) or (not regrows and regrowth_days is null))
 );
 
 insert into public.garden_species_profiles values
-  ('garden-apiary-v1','hops','Hops','🌿','cones',6,3,true,45,72,38,34,42,5,4,5,55,95,4,62,3,1,4,false,2,0),
-  ('garden-apiary-v1','chamomile','Chamomile','🌼','flowers',3,2,true,42,70,30,28,28,3,3,3,45,95,1,58,4,1,5,true,2,1),
-  ('garden-apiary-v1','lavender','Lavender','💜','flowers',5,3,true,28,55,28,32,30,3,3,3,62,100,2,64,4,1,5,true,2,1),
-  ('garden-apiary-v1','fennel','Fennel','🌾','seeds',5,null,false,40,68,34,38,34,4,4,4,58,100,3,62,3,1,5,true,1,2),
-  ('garden-apiary-v1','sage','Sage','🌿','leaves',3,2,true,30,58,24,28,28,3,3,3,52,100,1,70,2,1,2,false,0,2),
-  ('garden-apiary-v1','pepper','Pepper','🌶️','fruit',5,3,true,48,72,45,42,48,5,5,5,62,100,2,66,3,1,3,true,0,2),
-  ('garden-apiary-v1','tomatoes','Tomatoes','🍅','fruit',4,3,true,50,76,48,42,52,5,5,6,58,100,3,64,3,1,3,true,0,1),
-  ('garden-apiary-v1','clover','Clover','☘️','cover crop',3,2,true,38,72,18,22,20,1,2,2,42,100,0,55,8,1,8,true,0,0);
+  ('garden-apiary-v1','hops','Hops','🌿','cones',6,3,true,45,72,38,34,42,85,85,85,5,4,5,55,95,4,62,3,1,4,false,2,0),
+  ('garden-apiary-v1','chamomile','Chamomile','🌼','flowers',3,2,true,42,70,30,28,28,80,80,80,3,3,3,45,95,1,58,4,1,5,true,2,1),
+  ('garden-apiary-v1','lavender','Lavender','💜','flowers',5,3,true,28,55,28,32,30,78,78,78,3,3,3,62,100,2,64,4,1,5,true,2,1),
+  ('garden-apiary-v1','fennel','Fennel','🌾','seeds',5,null,false,40,68,34,38,34,84,84,84,4,4,4,58,100,3,62,3,1,5,true,1,2),
+  ('garden-apiary-v1','sage','Sage','🌿','leaves',3,2,true,30,58,24,28,28,76,76,76,3,3,3,52,100,1,70,2,1,2,false,0,2),
+  ('garden-apiary-v1','pepper','Pepper','🌶️','fruit',5,3,true,48,72,45,42,48,90,90,90,5,5,5,62,100,2,66,3,1,3,true,0,2),
+  ('garden-apiary-v1','tomatoes','Tomatoes','🍅','fruit',4,3,true,50,76,48,42,52,92,92,92,5,5,6,58,100,3,64,3,1,3,true,0,1),
+  ('garden-apiary-v1','clover','Clover','☘️','cover crop',3,2,true,38,72,18,22,20,80,80,80,1,2,2,42,100,0,55,8,1,8,true,0,0);
 
 insert into public.plant_catalog
   (rules_version, plant_key, display_name, icon, base_brew_bonus, base_bake_bonus)

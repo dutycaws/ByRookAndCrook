@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(11);
+select plan(13);
 
 insert into auth.users (id,email,role,aud,created_at,updated_at)
 values ('16300000-0000-4000-8000-000000000001','garden-scenarios@example.test',
@@ -21,6 +21,8 @@ update public.garden_plants set lifecycle='regrowing',growth_progress=35,health=
 
 update public.garden_cells set soil_n=0,soil_p=0,soil_k=0,soil_moisture=0,
   soil_quality=20,site_light=20 where layout_key='c1';
+update public.garden_cells set soil_n=100,soil_p=100,soil_k=100,soil_moisture=65,
+  soil_quality=60,site_light=70 where layout_key='c4';
 update public.garden_plants set companion_points=0
 where cell_id=(select id from public.garden_cells where layout_key='c6');
 
@@ -41,6 +43,18 @@ select ok(exists(select 1 from baseline_plan,
   lateral jsonb_array_elements(plan#>'{report,events}') event
   where event->>'layoutKey'='c1' and event->>'kind'='plant-warning'),
   'care errors produce a visible warning event');
+select ok(((select plot#>>'{plant,health}' from baseline_plan,
+  lateral jsonb_array_elements(plan->'plots') plot where plot->>'layoutKey'='c4'))::integer <
+  (select health from public.garden_plants where cell_id=(select id from public.garden_cells where layout_key='c4')),
+  'nutrient excess reduces health instead of acting as an unlimited cure');
+select ok(exists(
+  select 1 from public.garden_cells c
+  join public.garden_plants p on p.save_id=c.save_id and p.cell_id=c.id
+  join public.garden_species_profiles sp on sp.rules_version=p.rules_version and sp.species_key=p.species_key
+  cross join lateral jsonb_array_elements(private.garden_symptoms(
+    c.soil_n,c.soil_p,c.soil_k,c.soil_moisture,c.site_light,p.health,sp)) symptom
+  where c.layout_key='c4' and symptom->>'code'='nitrogen-high'
+),'inspection names the authored excess-nutrient cause');
 select is(((select plot#>>'{plant,companion}' from baseline_plan,
   lateral jsonb_array_elements(plan->'plots') plot where plot->>'layoutKey'='c6'))::integer,
   4,'adjacent chamomile and tomatoes apply the authored companion effect');
