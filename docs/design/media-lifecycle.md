@@ -7,7 +7,8 @@ This document defines the storage boundary for visual source material, browser-r
 | Class | Canonical location | Git policy | Access and retention |
 | --- | --- | --- | --- |
 | Runtime derivatives | `static/assets/**` | Ordinary Git; optimized WebP, SVG, JSON, and similar browser inputs only | Public through the app. Each raster is at most 500,000 bytes and all runtime media is at most 10 MiB. |
-| Source masters | Private Supabase Storage bucket `source-masters` | Catalog, hashes, and derivative links only; never source bytes | Content-addressed and append-only. Retain indefinitely. |
+| Local prototype runtime media | `.local/media/runtime-derivatives/` | Ignored; commit only the typed asset contract, hashes, and provenance | `npm run fixtures:users:local` verifies each file and uploads it to the local-only `prototype-runtime-media` Supabase Storage bucket. Missing local bytes fall back to functional text and reviewed static art. |
+| Source masters | Git-ignored local store `.local/media/source-masters/` | Catalog, hashes, and derivative links only; never source bytes | Content-addressed, append-only, and verified by local read-back hash. Hosted storage is an optional future mode. |
 | Capture candidates | `artifacts/media-captures/**` | Ignored; never commit directly | Local working data. GitHub Actions candidate artifacts expire after 14 days. |
 | Curated still evidence | `docs/screenshots/curated/**` | Ordinary Git, immutable commit-scoped directories | At most 12 stills and 4 MiB per evidence set; every file is at most 1 MiB. |
 | Curated motion evidence | Public Supabase Storage bucket `review-evidence` | Commit only its index/links and metadata | Immutable content-addressed objects. Retain indefinitely while referenced. |
@@ -35,16 +36,25 @@ The Git policy rejects every newly introduced blob larger than 1 MiB, including 
 
 ## Source masters and archive backup
 
-The trusted operator workflow is intentionally local and server-only. It requires an ignored root `.env` containing:
+Rapid prototyping uses no hosted Supabase Storage. Source PNG masters live only in the ignored local directory `.local/media/source-masters/`; create it by ingesting a master rather than adding source image files to `docs/`, `static/`, or Git. The catalog stores the immutable key `v1/sha256/<first-two-hex>/<sha256>.png`, not a workstation filename. Ingestion creates that path without overwriting an existing object, reads it back, and requires the read-back SHA-256 to match the catalog before recording verification.
+
+The default requires no media credentials:
 
 ```dotenv
-MEDIA_SUPABASE_URL=https://<hosted-project-ref>.supabase.co
-MEDIA_SUPABASE_SECRET_KEY=<hosted-secret-key>
+MEDIA_MASTER_STORAGE=local
 ```
 
-Use the hosted project URL, not the local `127.0.0.1` URL, when protecting production masters. `MEDIA_SUPABASE_SECRET_KEY` is the preferred server-only credential and bypasses Storage RLS: never prefix it with `PUBLIC_`, import it into browser code, commit it, add it to a capture manifest, or place it in CI logs. `MEDIA_SUPABASE_SERVICE_ROLE_KEY` is accepted only as a temporary compatibility fallback while existing operator environments are migrated; remove it from the ignored `.env` once the secret key works. The browser continues to use only `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_PUBLISHABLE_KEY`; those credentials cannot upload, replace, or delete masters/evidence.
+`.local/` is Git-ignored. Keep all populated credentials in the ignored root `.env`; `.env.example` is documentation only. Before staging any change, run `npm run media:git:check:staged`. The policy rejects newly introduced source-master formats and every newly introduced blob larger than 1 MiB, including a blob that was later deleted in the same pushed range.
 
-Before the first hosted import, run the operator wizard at [`scripts/setup-media-storage.sh`](../../scripts/setup-media-storage.sh). It is the single setup path for the private `source-masters` and public `review-evidence` buckets, required operator credentials, and first archive/restore checks; do not create browser upload policies as an alternative.
+Generated Shop art follows the same local boundary. Its optimized WebP fixture inputs live under `.local/media/runtime-derivatives/v1/sha256/`; no generated PNG or WebP is committed. With this repository's local Supabase stack running, seed or refresh the public local runtime bucket with:
+
+```sh
+npm run fixtures:users:local
+```
+
+The fixture command refuses non-local Supabase URLs, verifies every input SHA-256 before upload, uses content-addressed object keys, and verifies the uploaded bytes by reading them back. `npm run brac-app:dev` invokes the same fixture step during normal startup. This is a local development delivery path, not a hosted storage dependency.
+
+Future hosted storage is optional and must be selected explicitly with `MEDIA_MASTER_STORAGE=supabase`. Only then are `MEDIA_SUPABASE_URL` and the server-only `MEDIA_SUPABASE_SECRET_KEY` required. Never use a browser key, commit populated values, or treat a local development store as a hosted deployment requirement.
 
 The archive and restore commands require the Info-ZIP `zip` and `unzip` executables in addition to the project's normal Node.js and Supabase CLI prerequisites.
 
@@ -58,9 +68,9 @@ npm run media:masters:confirm-drive -- --archive <archive-id>
 npm run media:masters:status
 ```
 
-Ingestion validates the complete PNG chunk stream, metadata, dimensions, CRCs, and decoded scanlines; it rejects objects over 50 MiB, images over 32 megapixels, and decoded pixel streams over 64 MiB. It then hashes the source, uploads it under an immutable SHA-256 key, downloads it again, and records a revision in the source-master catalog only when those bytes match. Logical IDs may have multiple immutable revisions; `supersedes` links their history, while each current runtime derivative points to one exact `sourceRevisionId`. A derivative is release-eligible only after its master is verified in `source-masters` and a matching local ZIP receipt covers the exact catalog.
+Ingestion validates the complete PNG chunk stream, metadata, dimensions, CRCs, and decoded scanlines; it rejects objects over 50 MiB, images over 32 megapixels, and decoded pixel streams over 64 MiB. It hashes the source, writes it under its immutable SHA-256 key in the selected store, reads it back, and records a revision only when those bytes match. Logical IDs may have multiple immutable revisions; `supersedes` links their history, while each current runtime derivative points to one exact `sourceRevisionId`. A derivative is release-eligible only after its master is read-back verified and a matching local ZIP receipt covers the exact catalog.
 
-`media:masters:archive` rebuilds a deterministic ZIP from verified Supabase objects rather than workstation files. It publishes the completed snapshot as `source-masters-<full-zip-sha256>.zip` with a matching `.sha256` sibling under ignored `artifacts/media-master-backups/`; it never overwrites or deletes a prior archive. Copy both files manually to the `ByRookAndCrook/media-master-backups/` Google Drive folder. Drive confirmation is recorded for operational visibility but is not a release gate.
+`media:masters:archive` rebuilds a deterministic ZIP from the selected, read-back-verified store rather than an arbitrary input directory. It publishes the completed snapshot as `source-masters-<full-zip-sha256>.zip` with a matching `.sha256` sibling under ignored `artifacts/media-master-backups/`; it never overwrites or deletes a prior archive. Copy both files manually to the `ByRookAndCrook/media-master-backups/` Google Drive folder. Drive confirmation is recorded for operational visibility but is not a release gate.
 
 At least quarterly, download the newest Drive ZIP and its `.sha256` companion to a safe local directory and run `media:masters:verify`. The command safely restores vetted entries into a fresh temporary directory, rejects unsafe or unexpected archive paths, proves every embedded master against the embedded catalog, and appends the successful time and archive hash to the matching tracked receipt. A verified local ZIP is not an off-machine backup until its ZIP and checksum have been copied to Drive.
 

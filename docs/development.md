@@ -2,9 +2,9 @@
 
 This repository contains connected SvelteKit and Supabase vertical slices for By Rook & Crook. Their durable path is:
 
-> sign in → start a tavern → optionally harvest/brew/serve → converse and agree on intentions → close the tavern → discover overnight consequences
+> sign in → start a tavern → tend the garden and apiary → optionally harvest/craft/serve → converse and agree on intentions → close the tavern → discover overnight consequences
 
-The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres row-level security, and ownership-filtered public database functions. The browser never writes game tables directly. `create_tavern()` provisions one save and twelve cells. `get_tavern_snapshot()` and `get_bar_snapshot()` read ownership-filtered state; harvest, craft, and serving commands commit their outcomes atomically.
+The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres row-level security, and ownership-filtered public database functions. The browser never writes game tables directly. `create_tavern()` provisions one save, twelve unlocked cells, twelve locked expansion cells, the starter ecosystem, and its one-time grant. `get_tavern_snapshot()` and `get_bar_snapshot()` read ownership-filtered state; Garden, Apiary, harvest, craft, and serving commands commit their outcomes atomically.
 
 ## Verified local toolchain
 
@@ -52,7 +52,7 @@ DO_NOT_TRACK=1 supabase stop --project-id by-rook-and-crook
 
 ## Local pilot accounts
 
-`npm run fixtures:users:local` creates or refreshes two confirmed development users. Their emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
+`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads the ignored Shop prototype art from `.local/media/runtime-derivatives/` into the local-only `prototype-runtime-media` Supabase Storage bucket. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The generated image bytes stay outside Git; a fresh checkout without those optional local files continues to render functional text and reviewed static fallbacks. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
 
 ```sh
 npm run credentials:local
@@ -66,19 +66,51 @@ Public sign-up is disabled. Hosted pilot accounts must be provisioned outside th
 
 1. Sign in with either pilot account.
 2. Submit **Start tavern**. Reload before starting if you want to verify that a GET does not create a save.
-3. Select `c1`, the mature fennel plot beside the hive. The details panel previews two Legendary units, with brew +2 and bake +4 per unit.
+3. Select `c1`, the mature Fennel plot beside the hive. The details panel previews one Legendary unit, with brew +2 and bake +4 per unit.
 4. Submit **Harvest crop**. The cell becomes empty and the save revision advances once.
-5. Open **Ingredients** and verify the two-unit fennel batch.
-6. Choose a craft. In **Brewery**, follow the guided paddle for a two-second countdown and fifteen scored seconds, then bottle the infusion. In **Bakery**, fold six times, score three times, place the loaf in the oven, and remove it near the 30-second sweet spot. Reloading restores the active stage and cannot reset the oven. More sequential brews and bakes may be completed while ingredients remain.
-7. Verify the drink or food name and quality. A qualifying craft also creates an intent card such as **Charm**, **Insight**, **Resolve**, or **Rumor**. The intent remains separate from the crafted hospitality item.
-8. Open **Bar** from the craft result. Choose Lira or Torvin and serve the food or drink to receive gold and change trust/overnight hospitality. Existing saves may show a labeled legacy Pour Ale entitlement that can still accompany standalone drink service.
-9. Reload or sign into the same account in another browser. The gold, relationship, intentions, transcript and serving journal persist. The bottle and any played card are no longer available.
-10. In **Bar**, ask about a quest or suggest a plan. Choose an optional intent card to characterize your words and, independently, optional food or drink. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew or bake must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
-11. Sign into the other pilot account to see an independent onboarding state.
+5. Open **Ingredients** and verify the one-unit Fennel batch.
+6. Return to **Garden**. Inspect the forecast, threatened overview, local N/P/K, moisture, light, and causal symptoms. Select open soil and preview planting. Preview a single or multi-plot water/amendment dose before committing it; the same dose applies to every selected plot.
+7. Inspect the starter hive at `c2`. Food, purchased feed, floral honey, reserves, three health pressures, and treatment restrictions are separate values. Honey becomes extractable only after floral production exceeds the four-unit reserve. Hive equipment remains if its colony is lost.
+8. End a tavern day with no active craft or dialogue. Growth, weather, compost, forage allocation, pollination, colony health, and the unique basic-seed grant resolve together. Review the causal report and persisted three-day forecast.
+9. Choose a craft. In **Brewery**, follow the guided paddle for a two-second countdown and fifteen scored seconds, then bottle the infusion. In **Bakery**, fold six times, score three times, place the loaf in the oven, and remove it near the 30-second sweet spot. Reloading restores the active stage and cannot reset the oven. More sequential brews and bakes may be completed while ingredients remain.
+10. Verify the drink or food name and quality. A qualifying craft also creates an intent card such as **Charm**, **Insight**, **Resolve**, or **Rumor**. The intent remains separate from the crafted hospitality item.
+11. Open **Bar** from the craft result. Choose Lira or Torvin and serve the food or drink to receive gold and change trust/overnight hospitality. Existing saves may show a labeled legacy Pour Ale entitlement that can still accompany standalone drink service.
+12. Reload or sign into the same account in another browser. The Garden, Apiary, gold, relationship, intentions, transcript and serving journal persist. Served hospitality and played cards are no longer available.
+13. In **Bar**, ask about a quest or suggest a plan. Choose an optional intent card to characterize your words and, independently, optional food or drink. Inspect the agreed intention and ordered daily steps, then **Close and begin next day**. Crafting is optional, but an active brew or bake must finish. NPCs act overnight even without conversation, and morning outcomes appear in their journals.
+14. Sign into the other pilot account to see an independent onboarding state.
 
 Reference captures include [garden](screenshots/garden.png), [ingredients](screenshots/ingredients.png), [active stirring](screenshots/brewery-active.png), [brew result](screenshots/brewery-result.png), [bar at 1,672 pixels](screenshots/bar-1672.png), [bar at 1,440 pixels](screenshots/bar-1440.png), [tablet bar](screenshots/bar-768.png), [mobile bar](screenshots/bar-390.png), [serving result](screenshots/bar-result.png), and the [annotated before/after comparison](screenshots/bar-comparison.png). The issue-#7 visual handoff adds the [Brewery layered composite](screenshots/motion-assets-brewery.jpg), [Bakery layered composite](screenshots/motion-assets-bakery.jpg), and [canonical cutout contact sheet](screenshots/motion-asset-contact-sheet.png). The [final assembled-scene acceptance record](quality/scene-acceptance.md) adds all four required viewports for Garden, Brewery, and Bakery, direct-interaction clips, and measured rendering limits. See the [concept-art UI specification](design/concept-ui-spec.md), [asset manifest](design/asset-manifest.md), and [media lifecycle](design/media-lifecycle.md) for composition, provenance, storage, and maintenance rules. With the dev server running, regenerate candidate route captures using `npm run screenshots`; candidates are ignored until explicitly validated and promoted.
 
-The starter crops are finite. Starting an existing tavern never refills harvested cells. Use the explicit local reset when you need the original demonstration state.
+Starting an existing tavern never refills harvested cells. Renewable Hops and Clover seed grants arrive once per completed tavern day; retained crops regrow according to their versioned profiles. Use the explicit local reset only when you need the original starter arrangement.
+
+## Garden and Apiary development
+
+The authoritative rules and balance values are documented in the [Garden and Apiary technical specification](garden-apiary.md). The implementation is an additive migration chain:
+
+| Migration | Responsibility |
+| --- | --- |
+| `202609110024_garden_apiary_foundation.sql` | Versioned catalogs, soil/plant/hive/colony persistence, expansion cells, existing-save mapping, and the one-time starter grant |
+| `202609110025_garden_day_engine.sql` | Deterministic projection/commit, renewable harvest and regrowth, reports, forecast, and day integration |
+| `202609110026_garden_commands.sql` | Garden previews/commits, compost allocation, purchases, and expansion |
+| `202609110027_apiary_commands.sql` | Apiary previews/commits, safe honey provenance, feed separation, treatment, and splitting |
+| `202609110028_local_nosema_resolution.sql` | Cause-specific local Nosema transmission correction |
+
+To upgrade the preserved local database, run:
+
+```sh
+DO_NOT_TRACK=1 supabase migration up --local
+npm run db:types:check
+```
+
+To rebuild a disposable local database and verify the migration/backfill path, run:
+
+```sh
+npm run db:reset:local
+npm run db:types:check
+npm run test:db
+```
+
+The reset destroys local saves. Type output is checked into `src/lib/database.types.ts`; generate it only after the local schema is current. Garden and Apiary RPC coverage is in `tests/integration/garden-commands-rpc.test.ts` and `tests/integration/apiary-commands-rpc.test.ts`. The complete accessible interaction coverage is in `tests/e2e/garden-expanded-layout.test.ts` with compatibility journeys in `garden-journey.test.ts` and `crafting-layout.test.ts`.
 
 ## Commands
 
@@ -97,8 +129,8 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run art:assets:check` | Verify supplied-reference checksums and canonical scene dimensions, alpha, derivative checksums, file-size ceilings, and runtime encoding. |
 | `npm run media:git:check -- --base <oid> --head <oid>` | Fail a committed range that introduces an oversized ordinary Git blob, video, or Git LFS configuration/pointer. |
 | `npm run media:git:check:staged` | Apply the same Git media policy to staged objects before committing. |
-| `npm run media:master:ingest -- --file <master.png> --id <id> [--metadata <metadata.json>]` | Validate, hash, upload, re-download, and catalog a private source-master revision. Metadata is already present for the seeded 20-master import and required for a new revision. Requires hosted `MEDIA_SUPABASE_URL` and preferred `MEDIA_SUPABASE_SECRET_KEY`; `MEDIA_SUPABASE_SERVICE_ROLE_KEY` is temporary compatibility only. |
-| `npm run media:masters:archive` | Build a deterministic local ZIP snapshot from verified private source masters. |
+| `npm run media:master:ingest -- --file <master.png> --id <id> [--metadata <metadata.json>]` | Validate, hash, write, read back, and catalog a private source-master revision in ignored `.local/media/source-masters/` by default. It needs no hosted service or credentials during prototyping. Set `MEDIA_MASTER_STORAGE=supabase` only for a future hosted store. |
+| `npm run media:masters:archive` | Build a deterministic local ZIP snapshot from read-back-verified private source masters in the selected store. |
 | `npm run media:masters:verify -- --archive <zip>` | Verify an archive safely and prove every embedded source-master hash. |
 | `npm run media:masters:confirm-drive -- --archive <id>` | Record manual confirmation that an archive ZIP and checksum were copied to Google Drive. |
 | `npm run media:masters:status` | Hash-check the runtime derivative inventory and report whether every master is primary-verified and covered by a receipt for the exact catalog. |
@@ -107,7 +139,7 @@ The starter crops are finite. Starting an existing tavern never refills harveste
 | `npm run media:perf` | Report authenticated mobile cold-cache media and Core Web Vitals proxy measurements for the four scene routes. |
 | `npm run media:perf:calibration -- --directory <reports>` | Require 10 unique valid report-mode runs, calculate each route/metric p75, and prove every p75 is within the activation budgets. |
 | `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
-| `npm run fixtures:users:local` | Create or refresh the two local pilot identities. |
+| `npm run fixtures:users:local` | Create or refresh the two local pilot identities, then verify and upload ignored Shop runtime art to local Supabase Storage. |
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
 | `npm run db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
 | `npm run check` | Run Svelte and TypeScript diagnostics. |
@@ -144,9 +176,11 @@ Integration and browser tests create unique users and remove them after each run
 
 ## Command, transaction, and recovery behavior
 
-Every harvest or craft command carries the save ID, expected revision, and a client-generated action UUID. Commands also carry only the cell, ingredient, brew session, or bounded stirring telemetry they require. The database derives the player from `auth.uid()`, locks the owned save before checking the action receipt, and calculates canonical outcomes from saved state. An identical retry returns the original receipt; reuse with different input conflicts; two commands for one revision cannot both commit.
+Every Garden, Apiary, harvest, or craft command carries the save ID, expected revision, and a client-generated action UUID. Commands carry only the allow-listed targets, item, dose, ingredient, craft session, or bounded telemetry they require. The database derives the player from `auth.uid()`, locks the owned save before checking the action receipt, and calculates canonical outcomes from saved state. An identical retry returns the original receipt; reuse with different input conflicts; two commands for one revision cannot both commit.
 
-The harvest transaction clears the crop, creates the ingredient batch, advances the revision, and writes its receipt together. Starting a brew or bake reserves the save's single craft for the current tavern day. A bake persists six folds, three scores, and the server-owned oven start before completion. Completing either craft consumes one ingredient unit, freezes the quality evidence, creates the food or beverage and optional intent card, marks the daily craft complete, advances the revision, and writes its receipt in one transaction. Advancing the day rejects an active brew, active bake, or live dialogue lease, resolves one NPC step each and reopens the shared craft exactly once. Craft completion is optional because a day with no started craft may close.
+Garden and Apiary previews are read-only and carry the current `basedOnRevision`. A commit repeats every ownership, revision, cost, quantity, target, and eligibility check against locked state. Multi-target care and movement/swap operations are atomic. The harvest transaction either clears a single-cycle crop or starts a retained crop's regrowth, creates one immutable ingredient batch, advances the revision, and writes its receipt together. See the [Garden and Apiary specification](garden-apiary.md) for command payloads, day-resolution order, migration behavior, recovery, and balance values.
+
+Starting a brew or bake reserves the save's single active craft. A bake persists six folds, three scores, and the server-owned oven start before completion. Completing either craft consumes one ingredient unit, freezes the quality evidence, creates the food or beverage and optional intent card, marks that at least one craft completed today, advances the revision, and writes its receipt in one transaction. Further sequential crafts remain available while unreserved ingredients remain. Advancing the day rejects an active brew, active bake, or live dialogue lease, resolves the Garden and Apiary plan plus one NPC step, and writes one replayable result. Craft completion is optional because a day with no started craft may close.
 
 The garden, brewery, and bakery keep an unresolved command in component state after a connection or unexpected server failure. Retrying reuses its action UUID and exact payload. A validation, conflict, or eligibility error refreshes the authoritative snapshot. Server diagnostics record the action ID, outcome code, committed revision when available, and duration; they do not record credentials or session tokens.
 

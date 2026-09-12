@@ -3,7 +3,7 @@
   import type { HTMLAttributes } from 'svelte/elements';
   import { SCENE_DESIGN_SIZE, type SceneTransform } from '$lib/presentation/scene';
 
-  type Area = 'garden' | 'brewery' | 'bakery';
+  type Area = 'garden' | 'brewery' | 'bakery' | 'shop';
   type Props = Omit<HTMLAttributes<HTMLDivElement>, 'children'> & {
     area: Area;
     label: string;
@@ -28,9 +28,11 @@
 
   let visible = $state(true);
   let reducedMotion = $state(false);
+  let transformReady = $state(false);
 
   onMount(() => {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
+    let readyFrame = 0;
     const resize = new ResizeObserver(([entry]) => {
       const bounds = entry.contentRect;
       const sceneFirstPhone = bounds.width <= 620;
@@ -42,6 +44,11 @@
         offsetX: sceneFirstPhone ? (bounds.width - SCENE_DESIGN_SIZE.width * scale) / 2 : 0,
         offsetY: 0
       };
+      transformReady = false;
+      cancelAnimationFrame(readyFrame);
+      readyFrame = requestAnimationFrame(() => {
+        readyFrame = requestAnimationFrame(() => (transformReady = true));
+      });
     });
     const updateVisibility = () => {
       visible = document.visibilityState === 'visible';
@@ -54,6 +61,7 @@
     document.addEventListener('visibilitychange', updateVisibility);
     media.addEventListener('change', updateMotion);
     return () => {
+      cancelAnimationFrame(readyFrame);
       resize.disconnect();
       document.removeEventListener('visibilitychange', updateVisibility);
       media.removeEventListener('change', updateMotion);
@@ -71,11 +79,14 @@
   data-scene-scale={transform.scale}
   data-scene-offset-x={transform.offsetX}
   data-scene-offset-y={transform.offsetY}
+  data-scene-ready={transformReady}
+  aria-busy={!transformReady}
   role="group"
   aria-label={label}
 >
   <div
     class="area-scene-plane"
+    inert={!transformReady}
     style={`width:${SCENE_DESIGN_SIZE.width}px;height:${SCENE_DESIGN_SIZE.height}px;transform:translate(${transform.offsetX}px,${transform.offsetY}px) scale(${transform.scale})`}
   >
     {@render children()}
@@ -107,6 +118,7 @@
     overflow: hidden;
     transform-origin: top left;
   }
+  .area-scene[data-scene-ready='false'] .area-scene-plane { pointer-events: none; }
   .scene-fallback {
     position: absolute;
     inset: 0;

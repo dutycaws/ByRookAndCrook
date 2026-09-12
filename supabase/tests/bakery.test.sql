@@ -17,6 +17,12 @@ select lives_ok($$select public.harvest_crop(
   (select id from public.garden_cells where layout_key = 'c1'),
   '78000000-0000-4000-8000-000000000001', 0
 )$$, 'a crop is harvested for the bakery');
+-- Reserve a second test-only unit so this Bakery file can exercise the
+-- following-day active-brew backfill after the bake consumes one unit.
+reset role;
+update public.ingredient_batches set quantity=2
+where source_action_id='78000000-0000-4000-8000-000000000001';
+set local role authenticated;
 select lives_ok($$select public.start_bake(
   (select id from public.tavern_saves), (select id from public.ingredient_batches),
   '78000000-0000-4000-8000-000000000002', 1
@@ -116,7 +122,7 @@ where user_id = '80000000-0000-4000-8000-000000000001';
 update public.tavern_saves s set daily_craft_kind = 'brew'
 where exists (
   select 1 from public.brew_sessions brew
-  where brew.save_id = s.id and brew.day_number = s.current_day
+  where brew.save_id = s.id and brew.status = 'active'
 );
 set local role authenticated;
 select is((select daily_craft_kind from public.tavern_saves), 'brew', 'migration backfill restores a current-day brew reservation');

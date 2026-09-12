@@ -201,7 +201,7 @@ describe('bakery RPC', () => {
     expect(current.bakery.intentCards).toContainEqual(expect.objectContaining({
       sourceFoodId: current.bakery.foods[0].id, cardKey: 'charm', tier: 'superior'
     }));
-    expect(current.ingredients[0].quantity).toBe(1);
+    expect(current.ingredients).toEqual([]);
 
     const counts = await Promise.all([
       player.admin.from('foods').select('*', { count: 'exact', head: true }).eq('save_id', current.save.id),
@@ -364,16 +364,25 @@ describe('bakery RPC', () => {
     createdUsers.push(player);
     const provisioned = await provisionIngredient(player);
     const hopsCell = provisioned.snapshot.cells.find((cell) => cell.layoutKey === 'c0');
+    const tomatoCell = provisioned.snapshot.cells.find((cell) => cell.layoutKey === 'c7');
     expect(hopsCell).toBeDefined();
+    expect(tomatoCell).toBeDefined();
     expect((await player.client.rpc('harvest_crop', {
       p_save_id: provisioned.snapshot.save.id, p_cell_id: hopsCell!.id,
       p_action_id: crypto.randomUUID(), p_expected_revision: provisioned.snapshot.save.revision
     })).error).toBeNull();
     let snapshot = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+    expect((await player.client.rpc('harvest_crop', {
+      p_save_id: snapshot.save.id, p_cell_id: tomatoCell!.id,
+      p_action_id: crypto.randomUUID(), p_expected_revision: snapshot.save.revision
+    })).error).toBeNull();
+    snapshot = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
     const fennel = snapshot.ingredients.find((batch) => batch.plantKey === 'fennel');
     const hops = snapshot.ingredients.find((batch) => batch.plantKey === 'hops');
+    const tomatoes = snapshot.ingredients.find((batch) => batch.plantKey === 'tomatoes');
     expect(fennel).toBeDefined();
     expect(hops).toBeDefined();
+    expect(tomatoes).toBeDefined();
 
     const firstOven = await prepareAndOven(player, snapshot, fennel!.id);
     expect((await player.admin.from('bake_sessions').update({
@@ -386,7 +395,7 @@ describe('bakery RPC', () => {
 
     let current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
     const brew = await player.client.rpc('start_brew', {
-      p_save_id: current.save.id, p_ingredient_batch_id: fennel!.id,
+      p_save_id: current.save.id, p_ingredient_batch_id: hops!.id,
       p_action_id: crypto.randomUUID(), p_expected_revision: current.save.revision
     });
     expect(brew.error).toBeNull();
@@ -402,7 +411,7 @@ describe('bakery RPC', () => {
     })).error).toBeNull();
 
     current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
-    const secondOven = await prepareAndOven(player, current, hops!.id);
+    const secondOven = await prepareAndOven(player, current, tomatoes!.id);
     expect((await player.admin.from('bake_sessions').update({
       oven_started_at: new Date(Date.now() - 30_000).toISOString()
     }).eq('id', secondOven.sessionId)).error).toBeNull();

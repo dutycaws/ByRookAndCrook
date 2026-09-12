@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { createClient } from '@supabase/supabase-js';
 
 export const SOURCE_MASTERS_BUCKET = 'source-masters';
+export const LOCAL_SOURCE_MASTERS_DIRECTORY = '.local/media/source-masters';
 export const MAX_MASTER_BYTES = 50 * 1024 * 1024;
 const MAX_INFLATED_PNG_BYTES = 64 * 1024 * 1024;
 export const CATALOG_PATH = 'docs/design/source-master-catalog.json';
@@ -31,6 +32,20 @@ export function sha256(value: Buffer | string) { return createHash('sha256').upd
 export function storageKey(hash: string) {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('SHA-256 must be a lowercase 64-character hex value');
   return `v1/sha256/${hash.slice(0, 2)}/${hash}.png`;
+}
+export function storageMode() {
+  const mode = process.env.MEDIA_MASTER_STORAGE ?? 'local';
+  if (mode !== 'local' && mode !== 'supabase') throw new Error('MEDIA_MASTER_STORAGE must be "local" or "supabase"');
+  return mode;
+}
+export function localSourceMastersDirectory(projectRoot = process.cwd()) {
+  return resolve(projectRoot, LOCAL_SOURCE_MASTERS_DIRECTORY);
+}
+export function localMasterPath(record: Pick<MasterRecord, 'storageKey'>, projectRoot = process.cwd()) {
+  const root = localSourceMastersDirectory(projectRoot);
+  const target = resolve(root, record.storageKey);
+  if (!target.startsWith(`${root}/`)) throw new Error(`local master path escapes source-master store: ${record.storageKey}`);
+  return target;
 }
 export function pngCrc32(buffer: Buffer) {
   let crc = 0xffffffff;
@@ -187,9 +202,20 @@ export function storageClient() {
   if (!url || !key) throw new Error('MEDIA_SUPABASE_URL and MEDIA_SUPABASE_SECRET_KEY are required (MEDIA_SUPABASE_SERVICE_ROLE_KEY remains a temporary compatibility alias); never use a browser key for master tooling');
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
-export async function uploadAndVerify(record: MasterRecord, source: Buffer) {
+export async function uploadAndVerify(record: MasterRecord, source: Buffer, projectRoot = process.cwd()) {
   const metadata = validateMasterBuffer(source);
   if (metadata.sha256 !== record.sha256 || metadata.bytes !== record.bytes || metadata.width !== record.width || metadata.height !== record.height) throw new Error(`source does not match catalog record ${record.id}`);
+  if (storageMode() === 'local') {
+    const target = localMasterPath(record, projectRoot);
+    await mkdir(dirname(target), { recursive: true });
+    try { await writeFile(target, source, { flag: 'wx' }); }
+    catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const stored = await readFile(target);
+    if (sha256(stored) !== record.sha256) throw new Error(`local read-back hash mismatch for ${record.id}`);
+    return;
+  }
   const client = storageClient(); const bucket = client.storage.from(SOURCE_MASTERS_BUCKET);
   const { error } = await bucket.upload(record.storageKey, source, { contentType: record.mimeType, upsert: false, cacheControl: '31536000' });
   if (error && !/already exists|duplicate/i.test(error.message)) throw new Error(`upload ${record.id}: ${error.message}`);
@@ -295,7 +321,22 @@ export async function verifyArchive(archive: string, options: { requireSidecar?:
     await rm(restoreRoot, { recursive: true, force: true });
   }
 }
-export async function collectCatalogObjectsFromStorage(catalog: MasterCatalog) {
+export async function collectCatalogObjectsFromStorage(catalog: MasterCatalog, projectRoot = process.cwd()) {
+  if (storageMode() === 'local') {
+    const objects = new Map<string, Buffer>();
+    for (const record of catalog.masters) {
+      const path = localMasterPath(record, projectRoot);
+      let bytes: Buffer;
+      try { bytes = await readFile(path); }
+      catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error(`missing local source master for ${record.id}: ${path}. Re-ingest the original PNG; do not add it to Git.`);
+        throw error;
+      }
+      if (sha256(bytes) !== record.sha256) throw new Error(`local read-back hash mismatch for ${record.id}`);
+      objects.set(record.sha256, bytes);
+    }
+    return objects;
+  }
   const client = storageClient(); const bucket = client.storage.from(SOURCE_MASTERS_BUCKET); const objects = new Map<string, Buffer>();
   for (const record of catalog.masters) {
     const { data, error } = await bucket.download(record.storageKey); if (error || !data) throw new Error(`download ${record.id}: ${error?.message ?? 'empty response'}`);
