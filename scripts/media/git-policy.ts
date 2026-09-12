@@ -202,7 +202,7 @@ function oversizedBlobTarget(path: string): string {
     return 'Optimized static/assets runtime derivative (must meet per-asset and total runtime budgets)';
   }
   if (SOURCE_MASTER_EXTENSIONS.has(extname(path).toLowerCase())) {
-    return 'Private Supabase Storage source-masters';
+    return 'Git-ignored .local/media/source-masters content-addressed store';
   }
   return 'Appropriate external media storage; do not add large binaries to Git';
 }

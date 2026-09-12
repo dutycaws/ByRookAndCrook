@@ -307,9 +307,199 @@
       "sha256": "36a9ac292097b988424d2271d59e02349d213b3732a60b2f88fcaf07cbcce96d",
       "recipe": "Reviewed crop or WebP conversion; see docs/design/asset-manifest.md.",
       "sourceRevisionId": "exec-5c82dd47-6e10-4ebf-99ed-b786d4675e56@29ae806d5061"
+    },
+    {
+      "path": "static/assets/scenes/shop-environment.webp",
+      "sha256": "77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180",
+      "recipe": "Reviewed WebP conversion; source master remains outside Git pending source-master archive.",
+      "sourceRevisionId": null
+    },
+    {
+      "path": "static/assets/scenes/shop/elara-merchant.webp",
+      "sha256": "022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc",
+      "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md.",
+      "sourceRevisionId": "design-reference-cozy-tavern-art-6@b3429ddfcb61"
+    },
+    {
+      "path": "static/assets/scenes/shop/elara-portrait.webp",
+      "sha256": "d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880",
+      "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md.",
+      "sourceRevisionId": "design-reference-cozy-tavern-art-6@b3429ddfcb61"
     }
   ],
   "masters": [
+    {
+      "id": "design-reference-cozy-tavern-art-6",
+      "revisionId": "design-reference-cozy-tavern-art-6@b3429ddfcb61",
+      "originalFilename": "CozyTavernConceptArt6.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 2200453,
+      "sha256": "b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae",
+      "mimeType": "image/png",
+      "storageKey": "v1/sha256/b3/b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae.png",
+      "provenance": {
+        "acquiredAt": "2026-09-11",
+        "source": "Supplied by the project owner for the Shop concept reference; retained in the ignored local prototype source-master store.",
+        "rights": "Project-provided reference asset for By Rook and Crook prototyping.",
+        "promptOrNote": "CozyTavernConceptArt6 is the approved Shop reference. Its UI-free crops supply Elara's framed merchant scene and portrait; the complete PNG never ships or enters Git.",
+        "exportSettings": "Supplied PNG retained unchanged."
+      },
+      "derivatives": [
+        {
+          "path": "static/assets/scenes/shop/elara-merchant.webp",
+          "sha256": "022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc",
+          "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md."
+        },
+        {
+          "path": "static/assets/scenes/shop/elara-portrait.webp",
+          "sha256": "d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880",
+          "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md."
+        }
+      ],
+      "verifiedAt": "2026-09-12T15:45:06.633Z"
+    },
+    {
+      "id": "design-reference-cozy-tavern-art-6",
+      "revisionId": "design-reference-cozy-tavern-art-6@21cdb0728f33",
+      "originalFilename": "CozyTavernConceptArt6.png",
+      "width": 1666,
+      "height": 730,
+      "bytes": 1914089,
+      "sha256": "21cdb0728f337c8864b19aaf081529f4d2d8653ea6fe2413f9e6080eb2541085",
+      "mimeType": "image/png",
+      "storageKey": "v1/sha256/21/21cdb0728f337c8864b19aaf081529f4d2d8653ea6fe2413f9e6080eb2541085.png",
+      "provenance": {
+        "acquiredAt": "2026-09-12",
+        "source": "Supplied by the project owner as the revised authoritative Shop concept reference; retained in the ignored local prototype source-master store.",
+        "rights": "Project-provided reference asset for By Rook and Crook prototyping.",
+        "promptOrNote": "The current CozyTavernConceptArt6 reference supersedes the historical 1672x941 source. It establishes the Art6 opening composition and is retained for the approved integrated Shop hero derivative; complete PNG bytes never ship or enter Git.",
+        "exportSettings": "Supplied RGBA PNG retained unchanged."
+      },
+      "derivatives": [],
+      "supersedes": "design-reference-cozy-tavern-art-6@b3429ddfcb61",
+      "verifiedAt": "2026-09-12T17:41:49.484Z"
+    },
+    {
+      "id": "exec-413ef454-79d1-40e2-827f-f6d033030512",
+      "revisionId": "exec-413ef454-79d1-40e2-827f-f6d033030512@819f0f238644",
+      "originalFilename": "exec-413ef454-79d1-40e2-827f-f6d033030512.png",
+      "width": 1448,
+      "height": 1086,
+      "bytes": 2691664,
+      "sha256": "819f0f2386445fb81a0db25913e5dd650b53cf48753bfac37768764582eb8e93",
+      "mimeType": "image/png",
+      "storageKey": "v1/sha256/81/819f0f2386445fb81a0db25913e5dd650b53cf48753bfac37768764582eb8e93.png",
+      "provenance": {
+        "acquiredAt": "2026-09-12",
+        "source": "Built-in image edit from the current Art6 Shop reference, retained in the ignored local prototype source-master store.",
+        "rights": "Project-generated derivative asset for By Rook and Crook prototyping.",
+        "promptOrNote": "UI-free integrated 4:3 Elara Greenbloom counter scene for a local fixture upload, with no interface or functional text.",
+        "exportSettings": "Generated PNG retained unchanged; optimized local fixture WebP exported at 1200x900, quality 86."
+      },
+      "derivatives": [],
+      "verifiedAt": "2026-09-12T17:44:47.937Z"
+    },
+    {
+      "id": "exec-2ce6e317-a050-48aa-9485-8ead813b1a49",
+      "revisionId": "exec-2ce6e317-a050-48aa-9485-8ead813b1a49@8a5607f2691b",
+      "originalFilename": "exec-2ce6e317-a050-48aa-9485-8ead813b1a49.png",
+      "width": 1254, "height": 1254, "bytes": 1846283,
+      "sha256": "8a5607f2691b9a15ac9388948c9273c4602dd40635e1259bf87b9ca82b34e4af", "mimeType": "image/png",
+      "storageKey": "v1/sha256/8a/8a5607f2691b9a15ac9388948c9273c4602dd40635e1259bf87b9ca82b34e4af.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing seed_clover Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing seed_clover SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:16.693Z"
+    },
+    {
+      "id": "exec-7d274ab6-5458-44dd-8b87-be3ab7a013db",
+      "revisionId": "exec-7d274ab6-5458-44dd-8b87-be3ab7a013db@ae14ab8f30f2",
+      "originalFilename": "exec-7d274ab6-5458-44dd-8b87-be3ab7a013db.png",
+      "width": 1254, "height": 1254, "bytes": 2451004,
+      "sha256": "ae14ab8f30f2b1da0dfe3158ff12f3ca8b7735e5c635e12a2110f9fe4d14b0ae", "mimeType": "image/png",
+      "storageKey": "v1/sha256/ae/ae14ab8f30f2b1da0dfe3158ff12f3ca8b7735e5c635e12a2110f9fe4d14b0ae.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing amendment_n Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing amendment_n SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:17.430Z"
+    },
+    {
+      "id": "exec-04e21fff-0aaa-44e2-985c-c88f7bc50cac",
+      "revisionId": "exec-04e21fff-0aaa-44e2-985c-c88f7bc50cac@ce174cebbb0d",
+      "originalFilename": "exec-04e21fff-0aaa-44e2-985c-c88f7bc50cac.png",
+      "width": 1254, "height": 1254, "bytes": 2735782,
+      "sha256": "ce174cebbb0da5a1b9bf056b272a95c4adae595980c948ca53a546f8fe5413da", "mimeType": "image/png",
+      "storageKey": "v1/sha256/ce/ce174cebbb0da5a1b9bf056b272a95c4adae595980c948ca53a546f8fe5413da.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing amendment_p Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing amendment_p SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:18.184Z"
+    },
+    {
+      "id": "exec-7e5b6905-6549-46ae-b5b3-e64b06bf1f98",
+      "revisionId": "exec-7e5b6905-6549-46ae-b5b3-e64b06bf1f98@c4b5a338c216",
+      "originalFilename": "exec-7e5b6905-6549-46ae-b5b3-e64b06bf1f98.png",
+      "width": 1254, "height": 1254, "bytes": 2481199,
+      "sha256": "c4b5a338c216b1d55828ac11bc8b3b33d81298373f004576d0150ed2eea5fa29", "mimeType": "image/png",
+      "storageKey": "v1/sha256/c4/c4b5a338c216b1d55828ac11bc8b3b33d81298373f004576d0150ed2eea5fa29.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing amendment_k Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing amendment_k SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:18.995Z"
+    },
+    {
+      "id": "exec-0eacf9e9-1f63-446b-a282-3eca720d7a38",
+      "revisionId": "exec-0eacf9e9-1f63-446b-a282-3eca720d7a38@5ae3dcdb22df",
+      "originalFilename": "exec-0eacf9e9-1f63-446b-a282-3eca720d7a38.png",
+      "width": 1254, "height": 1254, "bytes": 2435954,
+      "sha256": "5ae3dcdb22df17fe6b9d1fe32b31b762659d24df16fec406718967bdf979c509", "mimeType": "image/png",
+      "storageKey": "v1/sha256/5a/5ae3dcdb22df17fe6b9d1fe32b31b762659d24df16fec406718967bdf979c509.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing soil_builder Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing soil_builder SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:19.842Z"
+    },
+    {
+      "id": "exec-6525206e-ee34-4a33-a995-81c32ceff303",
+      "revisionId": "exec-6525206e-ee34-4a33-a995-81c32ceff303@a9d6ad7a5a75",
+      "originalFilename": "exec-6525206e-ee34-4a33-a995-81c32ceff303.png",
+      "width": 1254, "height": 1254, "bytes": 2323807,
+      "sha256": "a9d6ad7a5a757f125672243edf443ead120df091a4b002403ed32b46495d88d0", "mimeType": "image/png",
+      "storageKey": "v1/sha256/a9/a9d6ad7a5a757f125672243edf443ead120df091a4b002403ed32b46495d88d0.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing bee_feed Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing bee_feed SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:20.602Z"
+    },
+    {
+      "id": "exec-dd71bea2-3af6-4911-8f9b-0508d3efcbc1",
+      "revisionId": "exec-dd71bea2-3af6-4911-8f9b-0508d3efcbc1@c09500503e10",
+      "originalFilename": "exec-dd71bea2-3af6-4911-8f9b-0508d3efcbc1.png",
+      "width": 1254, "height": 1254, "bytes": 1969000,
+      "sha256": "c09500503e109195670e0909817ebc4129d136791b5ba5d777d734fd90f4ce67", "mimeType": "image/png",
+      "storageKey": "v1/sha256/c0/c09500503e109195670e0909817ebc4129d136791b5ba5d777d734fd90f4ce67.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing treatment_varroa Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing treatment_varroa SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:21.284Z"
+    },
+    {
+      "id": "exec-2bb3eaf1-de64-4e6c-a89a-8683ab9b8974",
+      "revisionId": "exec-2bb3eaf1-de64-4e6c-a89a-8683ab9b8974@c0128d791a30",
+      "originalFilename": "exec-2bb3eaf1-de64-4e6c-a89a-8683ab9b8974.png",
+      "width": 1254, "height": 1254, "bytes": 1899842,
+      "sha256": "c0128d791a30cabbc4969d982170ca6acf48a81285b701da2bb05ac375c03d4a", "mimeType": "image/png",
+      "storageKey": "v1/sha256/c0/c0128d791a30cabbc4969d982170ca6acf48a81285b701da2bb05ac375c03d4a.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing treatment_chalkbrood Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing treatment_chalkbrood SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:22.007Z"
+    },
+    {
+      "id": "exec-8004ae18-5687-458f-861d-b787bf715995",
+      "revisionId": "exec-8004ae18-5687-458f-861d-b787bf715995@1c6554307b44",
+      "originalFilename": "exec-8004ae18-5687-458f-861d-b787bf715995.png",
+      "width": 1254, "height": 1254, "bytes": 2157456,
+      "sha256": "1c6554307b441a74f1f8906c335a602300d45fbf3d4b33b64362f43cbef539eb", "mimeType": "image/png",
+      "storageKey": "v1/sha256/1c/1c6554307b441a74f1f8906c335a602300d45fbf3d4b33b64362f43cbef539eb.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing treatment_nosema Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing treatment_nosema SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:22.690Z"
+    },
+    {
+      "id": "exec-98ae7f89-c62e-4e4e-a405-b38057aa844d",
+      "revisionId": "exec-98ae7f89-c62e-4e4e-a405-b38057aa844d@1fd1d22320b1",
+      "originalFilename": "exec-98ae7f89-c62e-4e4e-a405-b38057aa844d.png",
+      "width": 1254, "height": 1254, "bytes": 2234504,
+      "sha256": "1fd1d22320b176e1b3738c196a03bc78f873782d640f824b6790714ce32e1e34", "mimeType": "image/png",
+      "storageKey": "v1/sha256/1f/1fd1d22320b176e1b3738c196a03bc78f873782d640f824b6790714ce32e1e34.png",
+      "provenance": { "acquiredAt": "2026-09-12", "source": "Built-in image generation for the existing replacement_colony Shop SKU; retained in the ignored local prototype source-master store.", "rights": "Project-generated asset for By Rook and Crook prototyping.", "promptOrNote": "UI-free square product illustration for the existing replacement_colony SKU only.", "exportSettings": "Generated RGBA PNG retained unchanged; optimized local fixture WebP exported at 320x320, quality 88." },
+      "derivatives": [], "verifiedAt": "2026-09-12T17:56:23.432Z"
+    },
     {
       "id": "exec-0a0923e7-4115-4f04-ad69-4f153c578e56",
       "revisionId": "exec-0a0923e7-4115-4f04-ad69-4f153c578e56@ccc018f670a5",

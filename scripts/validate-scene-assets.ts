@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { mediaPolicy } from './media/policy.js';
+import { localMasterPath, readCatalog, validateRuntimeDerivativeInventory } from './media/master-lib.js';
 
 const RUNTIME_ASSET_DIRECTORY = 'static/assets';
 const RUNTIME_METADATA_FILES = new Set([
@@ -77,10 +78,34 @@ const references: ExpectedAsset[] = [
     alpha: false,
     sha256: '67f9219290374363de2dd156ff1f83556bb94c2906e2e74546068ddacfb239c0',
     maxBytes: 4_000_000
-  }
+  },
 ];
 
+const HISTORICAL_ART6_REVISION_ID = 'design-reference-cozy-tavern-art-6@b3429ddfcb61';
+const CURRENT_ART6_REVISION_ID = 'design-reference-cozy-tavern-art-6@21cdb0728f33';
+const ELARA_COUNTER_HERO_REVISION_ID = 'exec-413ef454-79d1-40e2-827f-f6d033030512@819f0f238644';
+const LOCAL_ELARA_COUNTER_HERO_DERIVATIVE = '.local/media/runtime-derivatives/v1/sha256/90/90a8aea1cd4fbd9b61364a953ace689c0e96126d0762a8e262131255ed7586fc.webp';
+const LOCAL_SHOP_SKU_FIXTURES = [
+  ['seed_clover', 'exec-2ce6e317-a050-48aa-9485-8ead813b1a49@8a5607f2691b', '62/6272e2b1874ace058da2f7ad224806c676e5bd6d5ad0e88cf0902d4e53c15977.webp'],
+  ['amendment_n', 'exec-7d274ab6-5458-44dd-8b87-be3ab7a013db@ae14ab8f30f2', '4c/4cb5e73cb9e9d31fbd4585c342d2730adf8c38607597be4426c49c46860ed69f.webp'],
+  ['amendment_p', 'exec-04e21fff-0aaa-44e2-985c-c88f7bc50cac@ce174cebbb0d', '22/228d283d1f5d53a9c1a432887df0e548878f1f67f89188382097b924ddc3c1d2.webp'],
+  ['amendment_k', 'exec-7e5b6905-6549-46ae-b5b3-e64b06bf1f98@c4b5a338c216', 'ff/ff992107cccd708f02af7b55577ee1c6ad69ea9bceaa97f4bd94b6149ef5ad76.webp'],
+  ['soil_builder', 'exec-0eacf9e9-1f63-446b-a282-3eca720d7a38@5ae3dcdb22df', '7b/7b44c7945b32a129429b21d614d4d5d366063035e8ccd42a1d5d08cdab31a91f.webp'],
+  ['bee_feed', 'exec-6525206e-ee34-4a33-a995-81c32ceff303@a9d6ad7a5a75', '8a/8a565e523438c2833a9ec2a225b2f0847413022aa452307b272cc8aba8d8984e.webp'],
+  ['treatment_varroa', 'exec-dd71bea2-3af6-4911-8f9b-0508d3efcbc1@c09500503e10', 'fa/faefc593fb1c773caa2826b32fae6933a2f2eded495b2ee94720e59f7831f4f5.webp'],
+  ['treatment_chalkbrood', 'exec-2bb3eaf1-de64-4e6c-a89a-8683ab9b8974@c0128d791a30', '95/957e75fa98531580d3c75ab9a3c1007aaad0fe6e161687d92072f7d13f821f43.webp'],
+  ['treatment_nosema', 'exec-8004ae18-5687-458f-861d-b787bf715995@1c6554307b44', '38/38036d51641ddfcf4c58f92362e3c550f6ea9776c1f7d4c2268fb998e6a501a6.webp'],
+  ['replacement_colony', 'exec-98ae7f89-c62e-4e4e-a405-b38057aa844d@1fd1d22320b1', '49/49b90970e3f0b9724f8bca0e196cec5d030272f602866adbf9ff8efbb8580945.webp']
+] as const;
+const HISTORICAL_ART6_DERIVATIVE_PATHS = new Set([
+  'static/assets/scenes/shop/elara-merchant.webp',
+  'static/assets/scenes/shop/elara-portrait.webp'
+]);
+
 const runtimeAssets: ExpectedAsset[] = [
+  { path: 'static/assets/scenes/shop-environment.webp', width: 1672, height: 941, alpha: false, sha256: '77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180', maxBytes: 350_000, sceneContract: false },
+  { path: 'static/assets/scenes/shop/elara-merchant.webp', width: 680, height: 528, alpha: false, sha256: '022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc', maxBytes: 90_000, sceneContract: false },
+  { path: 'static/assets/scenes/shop/elara-portrait.webp', width: 280, height: 280, alpha: false, sha256: 'd0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880', maxBytes: 60_000, sceneContract: false },
   { path: 'static/assets/scenes/garden-environment.webp', width: 1672, height: 941, alpha: false, sha256: '17444dbbcde2554e94d1ecea75551c783eabd5eeac6c2b07fd4156a7ba513e2d', maxBytes: 500_000 },
   { path: 'static/assets/scenes/garden/garden-atmosphere.webp', width: 620, height: 330, alpha: true, sha256: '2a1c9d88886ae253a2321a49adcdb3148ec3b4609305f8035b0860f8c8d25a0f', maxBytes: 80_000 },
   { path: 'static/assets/scenes/garden/garden-beehive.webp', width: 360, height: 300, alpha: true, sha256: '11b5fd9011d5ea874ae2d1dea21fa47c6286478af0f910b8e98d380dc6e8c83e', maxBytes: 90_000 },
@@ -191,6 +216,89 @@ async function assertAsset(expected: ExpectedAsset) {
   ].filter(Boolean);
   if (errors.length) throw new Error(`${expected.path}: ${errors.join('; ')}`);
   console.log(`ok ${expected.path} ${metadata.width}x${metadata.height} ${buffer.length} bytes`);
+}
+
+async function assertLocalArt6Catalog() {
+  const catalog = await readCatalog();
+  await validateRuntimeDerivativeInventory(catalog);
+
+  const historical = catalog.masters.find((candidate) => candidate.revisionId === HISTORICAL_ART6_REVISION_ID);
+  const current = catalog.masters.find((candidate) => candidate.revisionId === CURRENT_ART6_REVISION_ID);
+  const hero = catalog.masters.find((candidate) => candidate.revisionId === ELARA_COUNTER_HERO_REVISION_ID);
+  if (!historical || !current || !hero) throw new Error('source-master catalog must preserve both Art6 revisions and the integrated Elara hero master');
+  if (historical.sha256 !== 'b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae' ||
+    historical.bytes !== 2_200_453 || historical.width !== 1672 || historical.height !== 941) {
+    throw new Error(`${HISTORICAL_ART6_REVISION_ID}: catalog metadata differs from the reviewed historical Shop reference`);
+  }
+  if (current.sha256 !== '21cdb0728f337c8864b19aaf081529f4d2d8653ea6fe2413f9e6080eb2541085' ||
+    current.bytes !== 1_914_089 || current.width !== 1666 || current.height !== 730 ||
+    current.supersedes !== HISTORICAL_ART6_REVISION_ID) {
+    throw new Error(`${CURRENT_ART6_REVISION_ID}: catalog metadata differs from the current approved Shop reference`);
+  }
+  const linkedPaths = new Set(historical.derivatives.map((derivative) => derivative.path));
+  if (linkedPaths.size !== HISTORICAL_ART6_DERIVATIVE_PATHS.size ||
+    [...HISTORICAL_ART6_DERIVATIVE_PATHS].some((path) => !linkedPaths.has(path))) {
+    throw new Error(`${HISTORICAL_ART6_REVISION_ID}: must link exactly the reviewed historical Elara derivatives`);
+  }
+  if (hero.sha256 !== '819f0f2386445fb81a0db25913e5dd650b53cf48753bfac37768764582eb8e93' ||
+    hero.bytes !== 2_691_664 || hero.width !== 1448 || hero.height !== 1086 || hero.derivatives.length !== 0) {
+    throw new Error(`${ELARA_COUNTER_HERO_REVISION_ID}: catalog metadata differs from the approved local-fixture source`);
+  }
+
+  const skuMasters = LOCAL_SHOP_SKU_FIXTURES.map(([sku, revisionId]) => {
+    const master = catalog.masters.find((candidate) => candidate.revisionId === revisionId);
+    if (!master) throw new Error(`${sku}: source-master catalog is missing ${revisionId}`);
+    if (master.derivatives.length !== 0) {
+      throw new Error(`${sku}: local fixture derivatives must not be registered as tracked runtime assets`);
+    }
+    return master;
+  });
+
+  for (const master of [historical, current, hero, ...skuMasters]) {
+    const masterPath = localMasterPath(master);
+    try {
+      const bytes = await readFile(masterPath);
+      const metadata = pngMetadata(bytes);
+      if (sha256(bytes) !== master.sha256 || bytes.length !== master.bytes ||
+        metadata.width !== master.width || metadata.height !== master.height) {
+        throw new Error(`${masterPath}: local source master differs from its catalog record`);
+      }
+      console.log(`ok local source master ${master.storageKey} ${bytes.length} bytes`);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      console.log(`local source master unavailable (expected in a fresh checkout): ${master.storageKey}`);
+    }
+  }
+
+  try {
+    const bytes = await readFile(LOCAL_ELARA_COUNTER_HERO_DERIVATIVE);
+    const metadata = webpMetadata(bytes);
+    if (sha256(bytes) !== '90a8aea1cd4fbd9b61364a953ace689c0e96126d0762a8e262131255ed7586fc' ||
+      bytes.length > 500_000 || metadata.width !== 1200 || metadata.height !== 900 || metadata.alpha) {
+      throw new Error(`${LOCAL_ELARA_COUNTER_HERO_DERIVATIVE}: local hero derivative differs from the approved fixture input`);
+    }
+    console.log(`ok local runtime fixture ${LOCAL_ELARA_COUNTER_HERO_DERIVATIVE} ${bytes.length} bytes`);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    console.log(`local runtime fixture unavailable (expected in a fresh checkout): ${LOCAL_ELARA_COUNTER_HERO_DERIVATIVE}`);
+  }
+
+  for (const [sku, revisionId, storageSuffix] of LOCAL_SHOP_SKU_FIXTURES) {
+    const fixturePath = `.local/media/runtime-derivatives/v1/sha256/${storageSuffix}`;
+    try {
+      const bytes = await readFile(fixturePath);
+      const metadata = webpMetadata(bytes);
+      const expectedSha = storageSuffix.slice(storageSuffix.lastIndexOf('/') + 1, -'.webp'.length);
+      if (sha256(bytes) !== expectedSha || bytes.length > 100_000 ||
+        metadata.width !== 320 || metadata.height !== 320 || !metadata.alpha) {
+        throw new Error(`${fixturePath}: ${sku} local fixture must be a 320x320 alpha WebP within 100KB`);
+      }
+      console.log(`ok local Shop SKU fixture ${sku} ${revisionId} ${bytes.length} bytes`);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      console.log(`local Shop SKU fixture unavailable (expected in a fresh checkout): ${sku}`);
+    }
+  }
 }
 
 type RuntimeFile = {
@@ -331,6 +439,7 @@ async function assertContract() {
 }
 
 await Promise.all([...references, ...runtimeAssets].map(assertAsset));
+await assertLocalArt6Catalog();
 const runtimeFiles = await inventoryRuntimeFiles(RUNTIME_ASSET_DIRECTORY);
 assertRuntimeInventory(runtimeFiles);
 await stat('static/assets/scenes/motion-proof-contract.json');

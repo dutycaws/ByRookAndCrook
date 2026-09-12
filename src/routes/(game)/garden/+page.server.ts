@@ -5,18 +5,19 @@ import {
   getSnapshot,
   harvestCrop
 } from '$lib/server/game';
+import {
+  handleApiaryCommand,
+  handleApiaryPreview,
+  handleGardenCommand,
+  handleGardenPreview,
+  requireGameUser
+} from '$lib/server/garden-form-actions';
 import type { Actions, PageServerLoad } from './$types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function requireUser(locals: App.Locals) {
-  const user = await locals.getVerifiedUser();
-  if (!user) redirect(303, '/login');
-  return user;
-}
-
 export const load: PageServerLoad = async ({ locals, setHeaders }) => {
-  await requireUser(locals);
+  await requireGameUser(locals);
   setHeaders({ 'cache-control': 'private, no-store' });
 
   try {
@@ -29,7 +30,7 @@ export const load: PageServerLoad = async ({ locals, setHeaders }) => {
 
 export const actions: Actions = {
   create: async ({ locals }) => {
-    await requireUser(locals);
+    await requireGameUser(locals);
 
     try {
       await createTavern(locals.supabase);
@@ -40,8 +41,28 @@ export const actions: Actions = {
     }
   },
 
+  preview: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    return handleGardenPreview(locals, await request.formData());
+  },
+
+  command: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    return handleGardenCommand(locals, await request.formData());
+  },
+
+  apiaryPreview: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    return handleApiaryPreview(locals, await request.formData());
+  },
+
+  apiaryCommand: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    return handleApiaryCommand(locals, await request.formData());
+  },
+
   harvest: async ({ request, locals }) => {
-    await requireUser(locals);
+    await requireGameUser(locals);
     const data = await request.formData();
     const saveId = String(data.get('saveId') ?? '');
     const cellId = String(data.get('cellId') ?? '');
