@@ -31,10 +31,10 @@ select lives_ok(
       '51000000-0000-4000-8000-000000000001', 0
     )
   $$,
-  'a two-unit fennel batch is harvested for brewing'
+  'a one-unit fennel batch is harvested for brewing'
 );
 insert into test_ids values ('fennel-batch', (select id from public.ingredient_batches));
-select is((select quantity - consumed_quantity from public.ingredient_batches), 2, 'both fennel units begin available');
+select is((select quantity - consumed_quantity from public.ingredient_batches), 1, 'one fennel unit begins available');
 
 select lives_ok(
   $$
@@ -117,7 +117,8 @@ select is((select count(*) from public.beverages), 1::bigint, 'completion create
 select is((select name from public.beverages), 'Ambrosial Draught', 'Resplendent mead receives its versioned name');
 select is((select quality_index from public.beverages), 6::smallint, 'the beverage persists its quality');
 select is((select consumed_quantity from public.ingredient_batches), 1, 'completion consumes exactly one unit');
-select is((public.get_tavern_snapshot() #>> '{ingredients,0,quantity}')::integer, 1, 'snapshot reports the remaining ingredient unit');
+select is(jsonb_array_length(public.get_tavern_snapshot() #> '{ingredients}'), 0,
+  'snapshot omits the exhausted fennel batch');
 select is((select count(*) from public.social_cards), 0::bigint, 'a new brew creates no legacy Pour Ale entitlement');
 select is((select count(*) from public.intent_cards where source_kind='brew'), 1::bigint, 'a qualifying brew creates one intent card');
 select is((select tier from public.intent_cards where source_kind='brew'), 'exceptional', 'Resplendent brew earns an exceptional intent card');
@@ -171,15 +172,33 @@ select lives_ok(
 );
 select is((select current_day from public.tavern_saves), 2, 'day advance retry does not skip a day');
 
+-- Seed one explicit legacy-compatibility ingredient so the second session can
+-- exercise rpm-v1 migration behavior without changing modern one-unit harvests.
+reset role;
+insert into public.game_actions(save_id,action_id,actor_id,command_kind,input_cell_id,
+  input_expected_revision,rules_version,result,committed_revision)
+values ((select value from test_ids where key='save-one'),
+  '51000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000001',
+  'harvest_crop',(select value from test_ids where key='fennel-cell'),4,
+  'garden-apiary-v1','{}'::jsonb,4);
+insert into public.ingredient_batches(id,save_id,rules_version,plant_key,quality_index,quantity,
+  brew_bonus,bake_bonus,source_cell_id,source_action_id)
+values ('51000000-0000-4000-8000-000000000003',
+  (select value from test_ids where key='save-one'),'garden-apiary-v1','fennel',6,1,6,4,
+  (select value from test_ids where key='fennel-cell'),'51000000-0000-4000-8000-000000000002');
+insert into test_ids values ('legacy-fennel-batch','51000000-0000-4000-8000-000000000003');
+set local role authenticated;
+set local request.jwt.claim.sub = '50000000-0000-4000-8000-000000000001';
+
 select lives_ok(
   $$
     select public.start_brew(
       (select value from test_ids where key = 'save-one'),
-      (select value from test_ids where key = 'fennel-batch'),
+      (select value from test_ids where key = 'legacy-fennel-batch'),
       '52000000-0000-4000-8000-000000000004', 4
     )
   $$,
-  'the remaining ingredient can start the next day brew'
+  'the legacy compatibility ingredient can start the next day brew'
 );
 select is((select count(*) from public.brew_sessions), 2::bigint, 'completed history is retained across tavern days');
 select is((select revision from public.tavern_saves), 5::bigint, 'the next brew start advances revision');
@@ -261,7 +280,9 @@ select lives_ok(
 select is((select stir_score from public.brew_sessions where day_number = 2), 6::smallint,
   'the legacy 120-tick calculator remains unchanged');
 select ok(not has_table_privilege('authenticated', 'public.beverages', 'INSERT'), 'players cannot insert beverages directly');
-select is((select quantity from public.ingredient_batches), 2, 'ingredient provenance retains the original harvested quantity');
+select is((select quantity from public.ingredient_batches
+  where id=(select value from test_ids where key='fennel-batch')), 1,
+  'the original harvested batch retains its one-unit provenance');
 
 select * from finish();
 rollback;

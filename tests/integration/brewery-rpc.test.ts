@@ -111,9 +111,7 @@ describe('brewery RPC', () => {
     expect(finished.save).toEqual(
       expect.objectContaining({ revision: 3, currentDay: 1, dayMinigameCompleted: true })
     );
-    expect(finished.ingredients).toEqual([
-      expect.objectContaining({ id: ingredient.id, plantKey: 'fennel', quantity: 1 })
-    ]);
+    expect(finished.ingredients).toEqual([]);
     expect(finished.brewery.activeSession).toBeNull();
     expect(finished.brewery.beverages).toEqual([
       expect.objectContaining({ name: 'Ambrosial Draught', qualityIndex: 6, dayNumber: 1 })
@@ -191,11 +189,20 @@ describe('brewery RPC', () => {
     const player = await createTestPlayer('brew-repeat');
     createdUsers.push(player);
     const { snapshot, ingredient } = await provisionFennel(player);
-    let current = snapshot;
+    const hopsCell = snapshot.cells.find((cell) => cell.layoutKey === 'c0');
+    expect(hopsCell).toBeDefined();
+    expect((await player.client.rpc('harvest_crop', {
+      p_save_id: snapshot.save.id, p_cell_id: hopsCell!.id,
+      p_action_id: crypto.randomUUID(), p_expected_revision: snapshot.save.revision
+    })).error).toBeNull();
+    let current = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
+    const hops = current.ingredients.find((batch) => batch.plantKey === 'hops');
+    expect(hops).toBeDefined();
+    const ingredients = [ingredient.id, hops!.id];
 
     for (let index = 0; index < 2; index += 1) {
       const started = await player.client.rpc('start_brew', {
-        p_save_id: current.save.id, p_ingredient_batch_id: ingredient.id,
+        p_save_id: current.save.id, p_ingredient_batch_id: ingredients[index],
         p_action_id: crypto.randomUUID(), p_expected_revision: current.save.revision
       });
       expect(started.error).toBeNull();

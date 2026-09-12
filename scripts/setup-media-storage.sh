@@ -184,61 +184,18 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=4
+TOTAL_STAGES=3
 
-banner "Media storage cutover"
+banner "Local source-master setup"
 
-stage "Hosted project and operator key"
-say "We'll save the hosted Supabase URL and a server-only secret key in the ignored root .env."
-open_url "https://supabase.com/dashboard/projects"
-step "Open the hosted project, then copy its Project URL from Connect or Settings → API Keys."
-ask MEDIA_SUPABASE_URL "Paste the hosted Project URL:"
-if [[ ! "$MEDIA_SUPABASE_URL" =~ ^https://[a-z0-9-]+\.supabase\.co/?$ ]]; then
-  warn "expected a hosted https://<project-ref>.supabase.co URL; refusing a local or malformed URL"
-  exit 1
-fi
-SUPABASE_PROJECT_REF="${MEDIA_SUPABASE_URL#https://}"
-SUPABASE_PROJECT_REF="${SUPABASE_PROJECT_REF%%.supabase.co*}"
-step "On API Keys, create or reveal a secret key (preferred, starts sb_secret_). Do not use a publishable/anon key."
-ask_secret MEDIA_SUPABASE_SECRET_KEY "Paste the server-only secret key:"
-if [[ ! "$MEDIA_SUPABASE_SECRET_KEY" =~ ^sb_secret_ ]]; then
-  warn "this does not look like a current Supabase secret key; no value was written"
-  exit 1
-fi
-write_env MEDIA_SUPABASE_URL "$MEDIA_SUPABASE_URL"
-write_env MEDIA_SUPABASE_SECRET_KEY "$MEDIA_SUPABASE_SECRET_KEY"
-if _existing MEDIA_SUPABASE_SERVICE_ROLE_KEY >/dev/null 2>&1; then
-  LEGACY_ENV_TMP="$(mktemp)"
-  grep -vE '^MEDIA_SUPABASE_SERVICE_ROLE_KEY=' "$ENV_FILE" > "$LEGACY_ENV_TMP" || true
-  mv "$LEGACY_ENV_TMP" "$ENV_FILE"
-  note "Removed the legacy MEDIA_SUPABASE_SERVICE_ROLE_KEY entry from $ENV_FILE."
-fi
+stage "Initialize the local prototype store"
+say "By Rook and Crook is prototyping. Source masters live only in the Git-ignored .local/media/source-masters directory. No hosted Supabase project or media credential is needed."
+write_env MEDIA_MASTER_STORAGE "local"
+mkdir -p .local/media/source-masters
+chmod 700 .local .local/media .local/media/source-masters
 chmod 600 "$ENV_FILE"
-export MEDIA_SUPABASE_URL MEDIA_SUPABASE_SECRET_KEY
-note "The key stays local. These media workflows do not need or receive a GitHub Actions secret."
-pause "Credentials saved. Press Enter to provision the buckets."
-
-stage "Link and provision storage"
-say "The migration creates separate source-masters and review-evidence buckets with no browser write policy."
-if ! command -v supabase >/dev/null 2>&1; then
-  SKIPPED+=("Install the Supabase CLI, then re-run this wizard to provision the buckets")
-  warn "Supabase CLI is not installed; skipping hosted provisioning"
-else
-  step "Complete the Supabase CLI browser login if prompted."
-  supabase login
-  step "Linking this checkout to project $SUPABASE_PROJECT_REF. A database password may be requested."
-  supabase link --project-ref "$SUPABASE_PROJECT_REF"
-  say "Dry-running pending hosted database migrations:"
-  supabase db push --dry-run
-  if confirm "Apply the displayed migrations to this hosted project?"; then
-    supabase db push
-    note "Storage migration applied. Browser clients have no master access and no evidence write policy."
-  else
-    SKIPPED+=("Apply the hosted migration with: supabase db push")
-    warn "bucket provisioning was not applied"
-  fi
-fi
-pause "Press Enter when the storage migration has been applied."
+note "The catalog stores hashes and metadata; it never stores source image bytes."
+pause "Local store initialized. Press Enter to import masters."
 
 stage "Verify and ingest the 20 masters"
 DEFAULT_MASTER_SOURCE="${CODEX_HOME:-${HOME}/.codex}/generated_images/01a07a19-440d-7091-9a4c-a71dbcf9257f"
@@ -256,8 +213,8 @@ if (( ${#MASTER_FILES[@]} != 20 )); then
   warn "expected exactly 20 PNG masters, found ${#MASTER_FILES[@]}; refusing a partial import"
   exit 1
 fi
-say "Each object is signature/size/dimension checked, uploaded without overwrite, downloaded, and hash-verified."
-if confirm "Upload and verify all 20 cataloged masters now?"; then
+say "Each object is signature/size/dimension checked, written without overwrite, read back, and hash-verified."
+if confirm "Import and verify all 20 cataloged masters now?"; then
   for master_file in "${MASTER_FILES[@]}"; do
     master_name="$(basename "$master_file")"
     master_id="${master_name%.png}"
@@ -271,7 +228,7 @@ fi
 pause "Press Enter after all catalog records report verified."
 
 stage "Archive, restore-check, and off-machine copy"
-say "The archive command downloads every object from Supabase and creates a deterministic ZIP plus checksum."
+say "The archive command reads the local hash-verified objects and creates a deterministic ZIP plus checksum."
 if ! command -v zip >/dev/null 2>&1 || ! command -v unzip >/dev/null 2>&1; then
   warn "Info-ZIP's zip and unzip commands are required for deterministic archive creation and verification"
   exit 1

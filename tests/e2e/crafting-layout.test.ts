@@ -8,10 +8,11 @@ async function loginAndHarvest(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Open the ledger' }).click();
   await page.getByRole('button', { name: 'Start tavern' }).click();
   await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+  await page.getByRole('button', { name: 'Actions', exact: true }).click();
   const harvestButton = page.getByRole('button', { name: 'Harvest crop' });
   await expect(harvestButton).toBeEnabled();
   await harvestButton.click();
-  await expect(page.getByRole('status')).toContainText('Harvested 2 ingredients');
+  await expect(page.getByRole('status')).toContainText(/Harvested \d+ ingredients?/);
 }
 
 async function stableOverflow(page: Page) {
@@ -33,9 +34,17 @@ test('the shared crafting layout preserves scene-first semantics at every target
       await page.goto(`/${route}`);
       const layout = page.locator(`[data-crafting-layout="${route}"]`);
       await expect(layout).toBeVisible();
-      await expect(layout.locator('[data-contextual-action]')).toBeVisible();
+      if (route === 'garden') {
+        await expect(layout.locator('[data-contextual-action]')).toHaveCount(0);
+        await expect(layout.locator('.crafting-action')).toHaveCount(0);
+      } else {
+        await expect(layout.locator('[data-contextual-action]')).toBeVisible();
+      }
       await expect(layout.locator('[data-scene-rail="inspector"]')).toBeVisible();
-      await expect(page.getByRole('button', { name: /water|fertiliz|adjust heat|skim foam|vent steam|helper chat|draw card/i })).toHaveCount(0);
+      const retiredPlaceholders = route === 'garden'
+        ? /adjust heat|skim foam|vent steam|helper chat|draw card/i
+        : /water|fertiliz|adjust heat|skim foam|vent steam|helper chat|draw card/i;
+      await expect(page.getByRole('button', { name: retiredPlaceholders })).toHaveCount(0);
       await expect(page.getByText(/daily tasks|tavern level|reputation|\bXP\b/i)).toHaveCount(0);
 
       for (const viewport of [
@@ -48,9 +57,12 @@ test('the shared crafting layout preserves scene-first semantics at every target
         await expect(layout).toBeVisible();
         expect(await stableOverflow(page)).toBeLessThanOrEqual(0);
         const scene = await layout.locator('.crafting-scene').boundingBox();
-        const action = await layout.locator('.crafting-action').boundingBox();
-        expect(scene && action).toBeTruthy();
-        if (viewport.width <= 1000) expect(action!.y).toBeGreaterThanOrEqual(scene!.y + scene!.height - 1);
+        expect(scene).toBeTruthy();
+        if (route !== 'garden') {
+          const action = await layout.locator('.crafting-action').boundingBox();
+          expect(action).toBeTruthy();
+          if (viewport.width <= 1000) expect(action!.y).toBeGreaterThanOrEqual(scene!.y + scene!.height - 1);
+        }
         if (viewport.width <= 620) {
           await expect(layout.locator('.desktop-status')).toBeHidden();
           await expect(layout.locator('.mobile-status')).toBeVisible();
@@ -107,6 +119,7 @@ test('the shared crafting layout preserves scene-first semantics at every target
       const touchHarvestable = page.getByRole('button', { name: /ready to harvest/i }).first();
       await touchHarvestable.tap();
       await expect(touchHarvestable).toHaveAttribute('aria-pressed', 'true');
+      await page.getByRole('button', { name: 'Actions', exact: true }).tap();
       await page.getByRole('button', { name: 'Harvest crop' }).tap();
       await expect(page.getByRole('status')).toContainText(/Harvested \d ingredients?/);
     }

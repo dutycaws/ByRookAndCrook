@@ -9,7 +9,7 @@ const createdUsers: Array<{ admin: SupabaseClient<Database>; userId: string }> =
 function asSnapshot(data: Json | null) {
   return data as unknown as {
     save: { id: string; revision: number };
-    cells: Array<{ id: string; layoutKey: string }>;
+    cells: Array<{ id: string; layoutKey: string; unlocked?: boolean }>;
     ingredients: Array<{ plantKey: string; quantity: number }>;
   };
 }
@@ -43,17 +43,18 @@ describe('garden harvest RPC', () => {
     assertRpcSuccess('select tavern_saves', [saves]);
     expect(saves.data).toEqual([{ id: receipts[0].saveId, revision: 0 }]);
     const cells = await player.client.from('garden_cells')
-      .select('id, layout_key, col, row, kind, plant_key, growth_stage, water, health')
+      .select('id, layout_key, col, row, kind, plant_key, growth_stage, water, health, unlocked')
       .eq('save_id', receipts[0].saveId).order('row').order('col');
     assertRpcSuccess('select garden_cells', [cells]);
-    expect(new Set(cells.data?.map(({ id }) => id)).size).toBe(12);
+    expect(new Set(cells.data?.map(({ id }) => id)).size).toBe(24);
+    expect(cells.data?.filter(({ unlocked }) => unlocked)).toHaveLength(12);
     const layout = [
       ['plant', 'hops', 3, 70, 90], ['plant', 'fennel', 3, 55, 85], ['beehive', null, null, null, null],
       ['empty', null, null, null, null], ['plant', 'pepper', 2, 78, 88], ['empty', null, null, null, null],
       ['plant', 'chamomile', 1, 42, 72], ['plant', 'tomatoes', 3, 80, 91], ['plant', 'lavender', 2, 60, 80],
       ['empty', null, null, null, null], ['plant', 'sage', 1, 35, 65], ['empty', null, null, null, null]
     ];
-    expect(cells.data?.map(({ id, ...cell }) => cell)).toEqual(layout.map(([kind, plant_key, growth_stage, water, health], index) => ({
+    expect(cells.data?.filter(({ unlocked }) => unlocked).map(({ id, unlocked, ...cell }) => cell)).toEqual(layout.map(([kind, plant_key, growth_stage, water, health], index) => ({
       layout_key: `c${index}`, col: index % 3, row: Math.floor(index / 3), kind, plant_key, growth_stage, water, health
     })));
     const harvested = await player.client.rpc('harvest_crop', {
@@ -95,7 +96,8 @@ describe('garden harvest RPC', () => {
     const initialResult = await player.client.rpc('get_tavern_snapshot');
     expect(initialResult.error).toBeNull();
     const initial = asSnapshot(initialResult.data);
-    expect(initial.cells).toHaveLength(12);
+    expect(initial.cells).toHaveLength(24);
+    expect(initial.cells.filter((cell) => cell.unlocked)).toHaveLength(12);
 
     const c0 = initial.cells.find((cell) => cell.layoutKey === 'c0')!;
     const actionId = crypto.randomUUID();
@@ -145,7 +147,7 @@ describe('garden harvest RPC', () => {
 
     const ownerAfter = asSnapshot((await owner.client.rpc('get_tavern_snapshot')).data);
     expect(ownerAfter.save.revision).toBe(1);
-    expect(ownerAfter.ingredients).toEqual([expect.objectContaining({ plantKey: 'fennel', quantity: 2 })]);
+    expect(ownerAfter.ingredients).toEqual([expect.objectContaining({ plantKey: 'fennel', quantity: 1 })]);
 
     const foreignAttempt = await stranger.client.rpc('harvest_crop', {
       ...args(crypto.randomUUID()),

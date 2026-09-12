@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { assertLocalSupabaseUrl, seedLocalShopRuntimeAssets } from './local-shop-runtime-assets.js';
 
 const environmentFile = fileURLToPath(new URL('../.env', import.meta.url));
 if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `npm run env:local` first.');
@@ -41,10 +42,7 @@ function localStatus(): Record<string, string> {
 
 async function main() {
   const status = localStatus();
-  const apiUrl = new URL(status.API_URL ?? '');
-  if (!['127.0.0.1', 'localhost'].includes(apiUrl.hostname) || apiUrl.port !== '57321') {
-    throw new Error(`Refusing to seed non-local Supabase target: ${apiUrl.toString()}`);
-  }
+  const apiUrl = assertLocalSupabaseUrl(status.API_URL ?? '');
 
   const serviceRoleKey = status.SERVICE_ROLE_KEY;
   if (!serviceRoleKey) throw new Error('Local Supabase service role key is unavailable.');
@@ -71,6 +69,9 @@ async function main() {
     if (response.error) throw response.error;
     console.info(`${existing ? 'Updated' : 'Created'} local pilot ${account.email}`);
   }
+
+  const assets = await seedLocalShopRuntimeAssets(admin.storage);
+  console.info(`Verified ${assets.length} local Shop runtime asset(s) in local Supabase Storage.`);
 }
 
 main().catch((cause) => {

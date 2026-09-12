@@ -73,7 +73,7 @@ The review uses the existing server contracts rather than visual substitutes.
 
 Garden, Brewery, Bakery, and Bar mutation controls remain disabled until hydration attaches their save, subject, action, and revision fields. The no-input tavern creation form remains available from server-rendered HTML.
 
-No helper chat, card-cost or deck control, fabricated task/reputation/XP display, watering/fertilizer action, heat control, foam-skimming control, or steam control appears in the three crafting routes. Garden health and water are read-only values already persisted in `garden_cells` and used by the authored harvest rule; this delivery adds no care action. Decorative bees, leaves, embers, steam, and liquid response cannot update the save, submit brewing samples, or alter server time.
+At the recorded issue-#13 commit, no helper chat, card-cost or deck control, fabricated task/reputation/XP display, watering/fertilizer action, heat control, foam-skimming control, or steam control appeared in the three crafting routes. Garden health and water were read-only values persisted in `garden_cells`. Issue #16 supersedes that historical Garden limitation by adding replayable water, soil-amendment, planting, lifecycle, expansion, and apiary commands; see the current [Garden and apiary specification](../garden-apiary.md). Decorative scene effects still cannot update the save, submit brewing samples, or alter server time.
 
 ## Measured rendering performance
 
