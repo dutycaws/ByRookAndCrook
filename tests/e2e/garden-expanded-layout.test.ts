@@ -242,6 +242,86 @@ test('the garden preserves keyboard geometry while expanding from 12 to 24 plots
   }
 });
 
+test('the camera applies one world matrix to scenery, plots, and their floating-menu anchors', async ({ page }) => {
+  const player = await createTestPlayer('garden-world-camera-matrix');
+  try {
+    await page.setViewportSize({ width: 1672, height: 930 });
+    await loginAndCreate(page, player.email, player.password);
+    const viewport = page.locator('[data-garden-camera-viewport]');
+    const world = page.locator('[data-garden-world]');
+    const anchor = page.locator('[data-garden-anchor]').first();
+    const scenery = page.locator('[data-scene-layer="garden environment"]');
+    const foreground = page.locator('[data-scene-layer="garden foreground foliage"]');
+
+    expect(await Promise.all([anchor, scenery, foreground].map((locator) => locator.evaluate((node) =>
+      node.closest('[data-garden-world]') === document.querySelector('[data-garden-world]')
+    )))).toEqual([true, true, true]);
+    expect(await page.locator('[data-garden-camera-controls]').evaluate((node) => !node.closest('[data-garden-world]'))).toBe(true);
+
+    await page.getByRole('button', { name: 'Zoom in garden' }).click();
+    await expect(viewport).toHaveAttribute('data-garden-camera-zoom', '125');
+    // The control intentionally uses a short transform transition. Measure
+    // pan after that same matrix has settled rather than midway through zoom.
+    await page.waitForTimeout(220);
+    const beforePan = await Promise.all([world, anchor, scenery].map((locator) => locator.boundingBox()));
+    const cameraFrame = await viewport.boundingBox();
+    if (!cameraFrame) throw new Error('Expected a garden camera frame.');
+    await page.mouse.move(cameraFrame.x + cameraFrame.width / 2, cameraFrame.y + cameraFrame.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(cameraFrame.x + cameraFrame.width / 2 + 94, cameraFrame.y + cameraFrame.height / 2 + 40, { steps: 3 });
+    await page.mouse.up();
+    const afterPan = await Promise.all([world, anchor, scenery].map((locator) => locator.boundingBox()));
+
+    const [worldBefore, anchorBefore, sceneryBefore] = beforePan;
+    const [worldAfter, anchorAfter, sceneryAfter] = afterPan;
+    expect(worldBefore && anchorBefore && sceneryBefore && worldAfter && anchorAfter && sceneryAfter).toBeTruthy();
+    expect(anchorAfter!.x - anchorBefore!.x).toBeCloseTo(worldAfter!.x - worldBefore!.x, 1);
+    expect(sceneryAfter!.x - sceneryBefore!.x).toBeCloseTo(worldAfter!.x - worldBefore!.x, 1);
+    const frame = await viewport.boundingBox();
+    expect(anchorAfter!.x).toBeGreaterThanOrEqual(frame!.x - 1);
+    expect(anchorAfter!.x + anchorAfter!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('a floating menu follows a transformed plot anchor and dismisses once it leaves the camera frame', async ({ page }) => {
+  const player = await createTestPlayer('garden-camera-menu-anchor');
+  try {
+    await page.setViewportSize({ width: 1672, height: 930 });
+    await loginAndCreate(page, player.email, player.password);
+    const viewport = page.locator('[data-garden-camera-viewport]');
+    const plot = page.locator('[data-garden-cell][data-layout-key="c1"]');
+    const anchor = page.locator('[data-garden-anchor]').filter({ has: plot });
+    await plot.click();
+    const menu = page.locator('[data-garden-action-menu]');
+    await expect(menu).toBeVisible();
+    expect(await menu.evaluate((node) => !node.closest('[data-garden-world]'))).toBe(true);
+
+    const anchorBox = await anchor.boundingBox();
+    if (!anchorBox) throw new Error('Expected a plot anchor.');
+    await page.mouse.move(anchorBox.x + anchorBox.width / 2, anchorBox.y + anchorBox.height / 2);
+    await page.mouse.wheel(0, -300);
+    await expect(viewport).not.toHaveAttribute('data-garden-camera-zoom', '100');
+    await page.waitForTimeout(80);
+    const [menuBox, movedAnchor, frame] = await Promise.all([menu.boundingBox(), anchor.boundingBox(), viewport.boundingBox()]);
+    expect(menuBox && movedAnchor && frame).toBeTruthy();
+    expect(menuBox!.x).toBeGreaterThanOrEqual(frame!.x - 1);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
+    expect(Math.min(Math.abs(menuBox!.x - movedAnchor!.x - movedAnchor!.width), Math.abs(menuBox!.x + menuBox!.width - movedAnchor!.x))).toBeLessThanOrEqual(14);
+
+    // Start from the hex so the menu sees a deliberate board gesture; camera
+    // capture starts only after the drag threshold and moves it out of frame.
+    await page.mouse.move(movedAnchor!.x + movedAnchor!.width / 2, movedAnchor!.y + movedAnchor!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(movedAnchor!.x - frame!.width, movedAnchor!.y, { steps: 4 });
+    await page.mouse.up();
+    await expect(menu).toHaveCount(0);
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
 test('keyboard inspection exposes soil, plant, colony, forecast, and daily-report causes', async ({ page }) => {
   const player = await createTestPlayer('garden-inspection');
   try {

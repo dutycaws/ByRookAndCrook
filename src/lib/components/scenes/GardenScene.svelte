@@ -12,7 +12,7 @@
     type GardenCameraState,
     type GardenCameraViewport
   } from '$lib/game/garden-camera';
-  import { GARDEN_HEX_HEIGHT, GARDEN_HEX_WIDTH, hexGridBounds, oddRHexPosition } from '$lib/game/hex';
+  import { GARDEN_HEX_HEIGHT, GARDEN_HEX_WIDTH, oddRHexPosition } from '$lib/game/hex';
   import type { GardenVisualState } from '$lib/presentation/scene';
 
   let {
@@ -32,6 +32,8 @@
   } = $props();
 
   const boardScale = 1.85;
+  const boardOrigin = { x: 335, y: 150 };
+  const worldSize = { width: 1672, height: 941 };
   const clickDragThreshold = 8;
   let viewportElement = $state<HTMLDivElement>();
   let viewport = $state<GardenCameraViewport>({ width: 1002, height: 610 });
@@ -41,11 +43,10 @@
   let suppressPlotClick = $state(false);
   let geometryKey = '';
 
-  let boardBounds = $derived(hexGridBounds(visual.plots));
-  let content = $derived<GardenCameraContent>({
-    width: Math.max(1, boardBounds.width * boardScale),
-    height: Math.max(1, boardBounds.height * boardScale)
-  });
+  // The camera owns the complete illustrated world. The board is one child of
+  // this surface so every plot, its artwork, and the surrounding scenery use
+  // exactly the same matrix.
+  const content: GardenCameraContent = worldSize;
   let zoomPercent = $derived(Math.round(camera.zoom * 100));
 
   type PointerPosition = { x: number; y: number };
@@ -86,8 +87,8 @@
     if (!cell) return null;
     const position = oddRHexPosition(cell);
     return {
-      x: (position.x + GARDEN_HEX_WIDTH / 2) * boardScale,
-      y: (position.y + GARDEN_HEX_HEIGHT / 2) * boardScale
+      x: boardOrigin.x + (position.x + GARDEN_HEX_WIDTH / 2) * boardScale,
+      y: boardOrigin.y + (position.y + GARDEN_HEX_HEIGHT / 2) * boardScale
     };
   }
 
@@ -205,8 +206,6 @@
 </script>
 
 <AreaScene area="garden" label={`Illustrated tavern courtyard with ${visual.plots.length} selectable garden plots`} class="garden-scene-frame">
-  <SceneLayer src="/assets/scenes/garden-environment.webp" name="garden environment" z={0} essential />
-  <div class="garden-light" aria-hidden="true"></div>
   <div
     bind:this={viewportElement}
     class="garden-plane-viewport"
@@ -224,21 +223,28 @@
   >
     <div
       class:camera-transition={cameraTransition}
-      class="garden-camera-content"
+      class="garden-camera-content garden-world"
       data-garden-camera-content
+      data-garden-world
       style={`width:${content.width}px;height:${content.height}px;transform:translate(${camera.panX}px,${camera.panY}px) scale(${camera.fitScale * camera.zoom})`}
     >
-      <GardenGrid
-        plots={visual.plots}
-        selectedId={visual.selectedCellId}
-        scale={boardScale}
-        {harvestEffect}
-        {onselect}
-        {onnavigate}
-        onplotfocus={bringPlotIntoView}
-        {batchMode}
-        {batchTargetIds}
-      />
+      <SceneLayer src="/assets/scenes/garden-environment.webp" name="garden environment" z={0} essential />
+      <div class="garden-light" aria-hidden="true"></div>
+      <div class="garden-board" style={`left:${boardOrigin.x}px;top:${boardOrigin.y}px`}>
+        <GardenGrid
+          plots={visual.plots}
+          selectedId={visual.selectedCellId}
+          scale={boardScale}
+          {harvestEffect}
+          {onselect}
+          {onnavigate}
+          onplotfocus={bringPlotIntoView}
+          {batchMode}
+          {batchTargetIds}
+        />
+      </div>
+      <SceneLayer src="/assets/scenes/garden/garden-atmosphere.webp" name="garden bees and leaves" x={922} y={180} width={620} height={330} z={4} class="garden-atmosphere" />
+      <SceneLayer src="/assets/scenes/garden/garden-foreground.webp" name="garden foreground foliage" x={0} y={611} width={960} height={330} z={5} class="garden-foreground" />
     </div>
     <div class="garden-camera-controls" data-garden-camera-controls role="group" aria-label="Garden camera controls">
       <button type="button" aria-label="Zoom out garden" onclick={() => changeZoom(-0.25)} disabled={camera.zoom <= 1}>−</button>
@@ -247,8 +253,6 @@
     </div>
     <div class="garden-camera-status" aria-live="polite" aria-atomic="true">{cameraMessage}</div>
   </div>
-  <SceneLayer src="/assets/scenes/garden/garden-atmosphere.webp" name="garden bees and leaves" x={922} y={180} width={620} height={330} z={4} class="garden-atmosphere" />
-  <SceneLayer src="/assets/scenes/garden/garden-foreground.webp" name="garden foreground foliage" x={0} y={611} width={960} height={330} z={5} class="garden-foreground" />
   {#if visual.status === 'pending'}
     <div class="scene-status pending" aria-hidden="true">Gathering the selected crop…</div>
   {:else if visual.status === 'error'}
@@ -259,9 +263,10 @@
 <style>
   :global(.garden-scene-frame) { margin-top: 1rem; border: 1px solid #725426; box-shadow: inset 0 0 0 1px #120b04; }
   .garden-light { position: absolute; inset: 0; z-index: 1; background: linear-gradient(120deg,#fff1a714,transparent 35%),radial-gradient(ellipse at 51% 49%,transparent 20%,#06100640 86%); pointer-events: none; }
-  .garden-plane-viewport { position: absolute; left: 335px; top: 150px; z-index: 2; width: 1002px; height: 610px; overflow: hidden; touch-action: none; cursor: grab; border: 1px solid #9b713032; }
+  .garden-plane-viewport { position: absolute; inset: 0; z-index: 2; overflow: hidden; touch-action: none; cursor: grab; }
   .garden-plane-viewport:active { cursor: grabbing; }
   .garden-camera-content { position: absolute; top: 0; left: 0; transform-origin: top left; will-change: transform; }
+  .garden-board { position: absolute; z-index: 2; }
   .garden-camera-content.camera-transition { transition: transform 180ms ease-out; }
   .garden-camera-controls { position: absolute; right: 12px; bottom: 12px; z-index: 20; display: flex; overflow: hidden; border: 1px solid #b68a3d; border-radius: 3px; background: #170e08e8; box-shadow: 0 3px 10px #000a; }
   .garden-camera-controls button { min-width: 38px; min-height: 34px; border: 0; border-right: 1px solid #785524; color: #f4d985; background: transparent; font-family: 'Cinzel',serif; font-size: 16px; cursor: pointer; }
