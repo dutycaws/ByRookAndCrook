@@ -11,10 +11,18 @@
 
   let {
     snapshot,
-    selected
+    selected,
+    batchMode = null,
+    batchTargetIds = new Set<string>(),
+    onstartbatch = () => {},
+    oncancelbatch = () => {}
   }: {
     snapshot: GameSnapshot;
     selected: GardenCell | null;
+    batchMode?: 'water' | 'amend' | null;
+    batchTargetIds?: Set<string>;
+    onstartbatch?: (kind: 'water' | 'amend') => void;
+    oncancelbatch?: () => void;
   } = $props();
 
   type PendingAction = {
@@ -23,7 +31,6 @@
     expectedRevision: number;
   };
 
-  let targetIds = $state<Set<string>>(new Set());
   let waterDose = $state(10);
   let amendmentKey = $state('');
   let amendmentDose = $state(1);
@@ -48,7 +55,7 @@
     return available > 0 && batch.id !== snapshot.brewery.activeSession?.ingredientBatchId
       && batch.id !== snapshot.bakery.activeSession?.ingredientBatchId;
   }));
-  let careIds = $derived(targetIds.size > 0 ? [...targetIds] : selected ? [selected.id] : []);
+  let careIds = $derived(batchMode ? [...batchTargetIds] : selected ? [selected.id] : []);
   let canUsePreview = $derived(!!preview && previewSignature === signature(preview.commandKind, previewPayload));
 
   function signature(kind: GardenCommandKind, payload: GardenCommandPayload | null) {
@@ -61,12 +68,6 @@
       amend: 'amend soil', incorporate_clover: 'incorporate clover', compost_ingredient: 'start compost',
       purchase: 'purchase', expand: 'expand garden'
     } satisfies Record<GardenCommandKind, string>)[kind];
-  }
-
-  function toggleTarget(cellId: string) {
-    const next = new Set(targetIds);
-    if (next.has(cellId)) next.delete(cellId); else next.add(cellId);
-    targetIds = next;
   }
 
   function clearPreview(clearMessage = true) {
@@ -139,7 +140,6 @@
         messageError = false;
         pendingAction = null;
         clearPreview(false);
-        targetIds = new Set();
       } else if (data?.pendingAction) {
         message = data?.message ?? 'The outcome is unknown. Retry to recover the same action.';
         messageError = true;
@@ -169,22 +169,25 @@
 
 <section class="workbench" aria-labelledby="garden-care-title">
   <div class="workbench-heading">
-    <div><p class="eyebrow">Garden tools</p><h2 id="garden-care-title">Tend selected land</h2></div>
-    <button type="button" class="text-button" onclick={() => { targetIds = new Set(); clearPreview(); }}>Clear</button>
+    <div><p class="eyebrow">Garden actions</p><h2 id="garden-care-title">Tend {selected?.layoutKey ?? 'selected land'}</h2></div>
+    {#if batchMode}<button type="button" class="text-button" onclick={oncancelbatch}>Cancel batch</button>{/if}
   </div>
 
   <details class="tool-group" open>
-    <summary>Care targets · {careIds.length}</summary>
-    <p class="help">Choose plots for one atomic batch. The same dose applies to every checked plot. With none checked, care applies to the inspected plot.</p>
-    <div class="target-grid" role="group" aria-label="Plots selected for batch care">
-      {#each unlocked as cell}
-        <label><input type="checkbox" checked={targetIds.has(cell.id)} onchange={() => toggleTarget(cell.id)} /><span>{cell.layoutKey}</span></label>
-      {/each}
+    <summary>{batchMode ? `Batch ${batchMode} · ${careIds.length} plots` : `Care ${selected?.layoutKey ?? ''}`}</summary>
+    <p class="help">{batchMode ? 'Choose plots in the garden, then preview the shared care.' : 'Care applies to this plot. Add plots to use the same dose on several.'}</p>
+    <div class="batch-actions">
+      {#if !batchMode}
+        <button type="button" class="text-button" data-batch-start="water" onclick={() => onstartbatch('water')}>Add plots for water</button>
+        <button type="button" class="text-button" data-batch-start="amend" onclick={() => onstartbatch('amend')}>Add plots for soil care</button>
+      {:else}
+        <span>{careIds.length} selected</span>
+      {/if}
     </div>
     <div class="tool-row">
       <form method="POST" action="?/preview" use:enhance={previewEnhancer('water', () => careIds.length ? { cellIds: careIds, dose: waterDose } : null)}>
         <label>Water dose <input type="number" min="1" max="40" bind:value={waterDose} /></label>
-        <button type="submit" class="secondary-button" data-garden-command="water" disabled={!!pendingLabel || careIds.length === 0}>Preview water</button>
+        <button type="submit" class="secondary-button" data-garden-command="water" disabled={!!pendingLabel || careIds.length === 0 || (batchMode !== null && batchMode !== 'water')}>Preview water</button>
       </form>
       <form method="POST" action="?/preview" use:enhance={previewEnhancer('amend', () => careIds.length && (amendmentKey || amendments[0]?.itemKey) ? { cellIds: careIds, itemKey: amendmentKey || amendments[0]!.itemKey, dose: amendmentDose } : null)}>
         <label>Amendment
@@ -193,7 +196,7 @@
           </select>
         </label>
         <label>Dose per plot <input type="number" min="1" max="3" bind:value={amendmentDose} /></label>
-        <button type="submit" class="secondary-button" data-garden-command="amend" disabled={!!pendingLabel || careIds.length === 0 || !amendments.length}>Preview amendment</button>
+        <button type="submit" class="secondary-button" data-garden-command="amend" disabled={!!pendingLabel || careIds.length === 0 || !amendments.length || (batchMode !== null && batchMode !== 'amend')}>Preview amendment</button>
       </form>
     </div>
   </details>
@@ -221,7 +224,7 @@
             {#each unlocked.filter((cell) => cell.id !== selected!.id) as cell}<option value={cell.id}>{cell.layoutKey} · {cell.plantName ?? (cell.kind === 'beehive' ? 'Hive' : 'Open soil')}</option>{/each}
           </select>
         </label>
-        <p class="help">The occupant moves or swaps atomically. Each plot keeps its own soil.</p>
+        <p class="help">The occupant moves or swaps. Each plot keeps its own soil.</p>
         <button type="submit" class="secondary-button" data-garden-command="move" disabled={!!pendingLabel}>Preview move or swap</button>
       </form>
     </details>
@@ -273,14 +276,14 @@
         <details><summary>Per-plot consequences</summary><pre>{JSON.stringify(preview.targets, null, 2)}</pre></details>
       {/if}
       {#if preview.canCommit === false}
-        <p class="form-message error" role="alert">This action cannot be committed with the current resources.</p>
+        <p class="form-message error" role="alert">You do not have what this action needs.</p>
       {:else}
         <form method="POST" action="?/command" use:enhance={commitPreview} data-garden-command={preview.commandKind}>
           <button type="submit" class="primary-button" disabled={!!pendingLabel}>
-            {pendingLabel?.startsWith('commit:') ? 'Committing…' : pendingAction && messageError ? `Retry ${label(preview.commandKind)}` : `Commit ${label(preview.commandKind)}`}
+            {pendingLabel?.startsWith('commit:') ? 'Applying…' : pendingAction && messageError ? `Retry ${label(preview.commandKind)}` : `Apply ${label(preview.commandKind)}`}
           </button>
         </form>
-        {#if preview.canCommit === undefined}<p class="help">The server will revalidate eligibility when you commit.</p>{/if}
+        {#if preview.canCommit === undefined}<p class="help">Availability is checked again when you apply this action.</p>{/if}
       {/if}
     </section>
   {/if}
@@ -303,12 +306,7 @@
   input, select { min-width: 0; min-height: 38px; padding: .4rem .45rem; border: 1px solid #624a26; border-radius: 0; color: #e2cc97; background: #090704; }
   .check-row { display: flex; align-items: center; gap: .4rem; }
   .check-row input { min-height: auto; }
-  .target-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: .25rem; margin-top: .5rem; }
-  .target-grid label { position: relative; display: block; }
-  .target-grid input { position: absolute; opacity: 0; }
-  .target-grid span { display: grid; min-height: 36px; place-items: center; border: 1px solid #594321; color: #b9a06a; background: #0b0804; cursor: pointer; font-size: .68rem; }
-  .target-grid input:checked + span { border-color: #d0a33c; color: #f1d580; background: #2b1e08; }
-  .target-grid input:focus-visible + span { outline: 2px solid #f3d77f; outline-offset: 2px; }
+  .batch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .55rem; color: #c9ad69; font-size: .7rem; }
   .secondary-button, .danger-button { min-height: 40px; padding: .45rem .6rem; border: 1px solid #70552c; color: #d8bc78; background: #1a1309; font-family: 'Cinzel',serif; font-size: .67rem; }
   .danger-button { border-color: #884932; color: #e2a58f; background: #21100b; }
   button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .5; }
@@ -320,5 +318,5 @@
   .preview-card dt { color: #9f8960; font-size: .65rem; text-transform: capitalize; }
   .preview-card dd { max-width: 55%; margin: 0; overflow-wrap: anywhere; color: #dfc789; font-size: .68rem; text-align: right; }
   pre { max-height: 12rem; overflow: auto; color: #c5b083; font-size: .6rem; white-space: pre-wrap; }
-  @media (max-width: 460px) { .tool-row { grid-template-columns: 1fr; } .target-grid { grid-template-columns: repeat(4,minmax(0,1fr)); } }
+  @media (max-width: 460px) { .tool-row { grid-template-columns: 1fr; } }
 </style>

@@ -7,9 +7,16 @@ async function loginAndHarvest(page: Page, email: string, password: string) {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Open the ledger' }).click();
   await page.getByRole('button', { name: 'Start tavern' }).click();
-  await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+  const fennel = page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i });
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await fennel.tap(); else await fennel.click();
+  await expect(fennel).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
+  await page.getByRole('button', { name: 'Actions', exact: true }).click();
   await page.getByRole('button', { name: 'Harvest crop' }).click();
   await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
+  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
+    await page.getByRole('button', { name: 'Close actions' }).click();
+  }
 }
 
 async function sceneProjection(scene: Locator) {

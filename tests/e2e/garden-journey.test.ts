@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { createTestPlayer } from '../helpers/local-supabase';
 
 async function login(page: Page, email: string, password: string) {
@@ -16,6 +16,28 @@ async function openKeeperMenu(page: Page) {
 async function openPantry(page: Page) {
   await openKeeperMenu(page);
   await page.getByRole('link', { name: 'Open pantry', exact: true }).click();
+}
+
+async function openGardenActions(page: Page) {
+  const actions = page.getByRole('button', { name: 'Actions', exact: true });
+  await actions.click();
+  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
+    await expect(page.locator('dialog[open]')).toBeVisible();
+  } else {
+    await expect(actions).toHaveAttribute('aria-expanded', 'true');
+  }
+}
+
+async function closeMobileGardenActions(page: Page) {
+  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
+    await page.getByRole('button', { name: 'Close actions' }).click();
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
+  }
+}
+
+async function selectPlot(page: Page, plot: Locator) {
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await plot.tap(); else await plot.click();
+  await expect(plot).toHaveAttribute('aria-pressed', 'true');
 }
 
 test('harvest persists across routes, reloads, and browser sessions', async ({ page, browser }) => {
@@ -44,14 +66,16 @@ test('harvest persists across routes, reloads, and browser sessions', async ({ p
     expect(hexGeometry.diagonalTopDelta).toBeLessThanOrEqual(1);
     expect(hexGeometry.diagonalXDelta).toBeLessThanOrEqual(1);
 
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
+    await openGardenActions(page);
     await page.getByRole('button', { name: 'Harvest crop' }).click();
     await expect(page.locator('[data-harvest-effect]')).toHaveCount(1);
     await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
     await expect(page.getByRole('button', { name: /c1, empty garden plot/i })).toBeVisible();
     await expect(page.locator('[data-harvest-effect]')).toHaveCount(0);
 
-    await page.getByRole('link', { name: /View ingredients/ }).click();
+    await closeMobileGardenActions(page);
+    await openPantry(page);
     await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
     await expect(page.getByText('Legendary · 1 unit')).toBeVisible();
     await page.reload();
@@ -71,7 +95,7 @@ test('harvest persists across routes, reloads, and browser sessions', async ({ p
 
     await login(page, player.email, player.password);
     await page.goto('/garden');
-    await page.getByRole('button', { name: /c1, empty garden plot/i }).click();
+    await selectPlot(page, page.getByRole('button', { name: /c1, empty garden plot/i }));
     await expect(page.getByRole('heading', { name: 'Open soil' })).toBeVisible();
   } finally {
     await secondContext?.close();
@@ -88,7 +112,7 @@ test('a dropped harvest response retries the same action exactly once', async ({
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
     await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
     await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
 
     await page.route(
@@ -108,6 +132,7 @@ test('a dropped harvest response retries the same action exactly once', async ({
       }
     );
 
+    await openGardenActions(page);
     await page.getByRole('button', { name: 'Harvest crop' }).click();
     await expect(page.getByRole('alert')).toContainText('outcome is unknown');
     await expect(page.locator('[data-harvest-effect]')).toHaveCount(0);
@@ -119,7 +144,8 @@ test('a dropped harvest response retries the same action exactly once', async ({
     expect(submittedActionIds[0]).not.toBe('');
     expect(submittedActionIds[1]).toBe(submittedActionIds[0]);
 
-    await page.getByRole('link', { name: /View ingredients/ }).click();
+    await closeMobileGardenActions(page);
+    await openPantry(page);
     await expect(page.getByText('Legendary · 1 unit')).toBeVisible();
     await expect(page.getByText('1 batch')).toBeVisible();
   } finally {
@@ -142,8 +168,9 @@ test('garden artwork failures keep all plot controls and live details usable', a
     await expect(page.locator('[data-hive-fallback]')).toBeVisible();
     await expect(page.locator('[data-crop-fallback="fennel"]')).toBeVisible();
     await expect(page.locator('.hex-cell')).toHaveCount(12);
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
     await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
+    await openGardenActions(page);
     await expect(page.getByRole('button', { name: 'Harvest crop' })).toBeEnabled();
     await expect(page.locator('[data-scene-layer="garden foreground foliage"]')).toHaveCSS('pointer-events', 'none');
   } finally {
@@ -173,7 +200,8 @@ test('garden ambient and harvest motion suspend without changing authoritative r
     await expect(scene).toHaveAttribute('data-scene-visible', 'true');
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
+    await openGardenActions(page);
     await page.getByRole('button', { name: 'Harvest crop' }).click();
     const effect = page.locator('[data-harvest-effect]');
     await expect(effect).toHaveCount(1);
@@ -196,10 +224,13 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
     await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
+    await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
+    await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
+    await openGardenActions(page);
     await page.getByRole('button', { name: 'Harvest crop' }).click();
     await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
 
+    await closeMobileGardenActions(page);
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await expect(page.getByRole('heading', { name: "Prepare today's infusion" })).toBeVisible();
     await expect(page.getByText('Legendary · 1 unit · Brew +2')).toBeVisible();

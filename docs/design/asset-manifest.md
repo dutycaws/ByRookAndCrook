@@ -8,6 +8,7 @@ Runtime imagery is stored under `static/assets`. Design references and review ev
 | `docs/reference/CozyTavernConceptArt2.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-09. SHA-256 `06925a9fb1eb1603a3f237c54419701f62c11882f181a1d66a9ae5acc8816b8b`. | Garden design reference only. |
 | `docs/reference/CozyTavernConceptArt3.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-09. SHA-256 `9ae79901a389c228751c828649561f3e982aeda78019e60cbfe4211adce6c2ee`. | Brewery design reference only. |
 | `docs/reference/CozyTavernConceptArt4.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-09. SHA-256 `67f9219290374363de2dd156ff1f83556bb94c2906e2e74546068ddacfb239c0`. | Bakery design reference only. |
+| `docs/design/references/CozyTavernConceptArt6.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-11. SHA-256 `b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae`. | Shop design reference only. |
 | `static/assets/scenes/lira-tavern.webp` | 1,672 × 941 WebP, 181 KB | Generated for this project with OpenAI image generation on 2026-09-09, then converted from lossless PNG to quality-84 WebP. | Bar scene for Lira Nightwind. |
 | `static/assets/scenes/torvin-tavern.webp` | 1,672 × 941 WebP, 198 KB | Generated for this project with OpenAI image generation on 2026-09-09, then converted from lossless PNG to quality-84 WebP. | Bar scene for Torvin Ashbeard. |
 | `static/raven.svg` | SVG | Existing repository brand asset. Original provenance was not recorded in this ticket. | Header and keeper seal. |
@@ -103,6 +104,18 @@ The 21 crop assets are 240 × 320 alpha WebPs cut from the generated three-stage
 
 **Garden props brief:** Isolate one pointy-top stone-and-soil bed, one rustic three-box apiary, one lower-edge foliage cluster, and a sparse twelve-element bee/leaf atmosphere in separate quadrants on pure black. Pillow trims, alpha-keys, scales, and exports each reviewed derivative. The atmosphere moves as one bounded layer; it cannot create growth, honey, yield, or other game state.
 
+### Shop
+
+| Runtime asset | Dimensions | Alpha | SHA-256 | Source and use |
+| --- | ---: | :---: | --- | --- |
+| `static/assets/scenes/shop-environment.webp` | 1,672 × 941 | No | `77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180` | OpenAI-generated fixed herb-and-apiary shop plate with an open central counter; it contains no person, text, UI, or price information. |
+| `static/assets/scenes/shop/elara-merchant.webp` | 680 × 528 | No | `022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc` | UI-free crop of the supplied Shop reference, used in a framed merchant scene rather than as a floating cutout. |
+| `static/assets/scenes/shop/elara-portrait.webp` | 280 × 280 | No | `d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880` | UI-free face crop from the supplied Shop reference for the circular shopkeeper portrait. |
+
+**Shop environment brief:** A fixed wide fantasy herb-and-apothecary shop in the supplied reference's warm gold, dark timber, brass, and forest-green language. The environment holds lantern and window light, hanging herbs, jars, honey, apiary tools, shelves, and an open counter. It contains no people, text, signage, logos, price tags, cards, dialogue, or interface so functional HTML retains ownership of every game value.
+
+The first generated merchant-cutout attempt rendered its checker preview into an opaque PNG. It is retained outside the repository and is deliberately not used at runtime. The inspected derivatives above use the generated person-free environment and UI-free crops from the supplied reference, avoiding a misleading fake-transparency layer. Both merchant derivatives are opaque by design and must be displayed in their framed scene or circular portrait crop; failed images cannot suppress the Shop's functional text, filters, or purchase controls.
+
 ### Contract and review evidence
 
 [`static/assets/scenes/motion-proof-contract.json`](../../static/assets/scenes/motion-proof-contract.json) records the design canvas, responsive crops, bounds, anchors, z-order, crop-stage mapping, allowed motion, and static fallbacks. It began as the issues #8 and #9 proof contract and now includes the production Brewery, Bakery, and Garden layers delivered by issues #10–#12.
@@ -113,7 +126,7 @@ The 21 crop assets are 240 × 320 alpha WebPs cut from the generated three-stage
 | `docs/screenshots/motion-assets-bakery.jpg` | Confirms the preparation surface, shadow, dough, first groove, and scoring tool share one oven camera. |
 | `docs/screenshots/motion-asset-contact-sheet.png` | Reviews every cutout against a checker field and both assembled scenes together. |
 
-Run `npm run art:assets:check` to verify the three reference checksums, runtime dimensions, alpha requirements, derivative checksums, file-size ceilings, and absence of PNG source masters under `static/assets`.
+Run `npm run art:assets:check` to verify the four reference checksums, runtime dimensions, alpha requirements, derivative checksums, file-size ceilings, and absence of PNG source masters under `static/assets`.
 
 The issue-#13 [assembled-scene acceptance record](../quality/scene-acceptance.md) uses these exact reference files and runtime derivatives. Its twelve annotated viewport screenshots, three WebM interaction clips, and structured benchmark result live under `docs/screenshots/final-review/`. They are review evidence only and never ship from `static/assets` or participate in game state.
 

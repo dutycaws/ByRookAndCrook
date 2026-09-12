@@ -10,12 +10,16 @@
   let {
     plots,
     selectedId,
+    batchMode = null,
+    batchTargetIds = new Set<string>(),
     scale = 1,
     onselect,
     harvestEffect = null
   }: {
     plots: GardenVisualPlot[];
     selectedId: string | null;
+    batchMode?: 'water' | 'amend' | null;
+    batchTargetIds?: Set<string>;
     scale?: number;
     onselect: (cellId: string) => void;
     harvestEffect?: {
@@ -32,9 +36,14 @@
   let failedAssets = $state<Set<string>>(new Set());
 
   function cellLabel(cell: GardenVisualPlot): string {
-    if (cell.kind === 'empty') return `${cell.layoutKey}, empty garden plot`;
-    if (cell.kind === 'beehive') return `${cell.layoutKey}, beehive`;
-    return `${cell.layoutKey}, ${cell.plantName}, growth stage ${cell.stage}${cell.harvestable ? ', ready to harvest' : ''}`;
+    const base = cell.kind === 'empty'
+      ? `${cell.layoutKey}, empty garden plot`
+      : cell.kind === 'beehive'
+        ? `${cell.layoutKey}, beehive`
+        : `${cell.layoutKey}, ${cell.plantName}, growth stage ${cell.stage}${cell.harvestable ? ', ready to harvest' : ''}`;
+    const attention = cell.attention ? `, needs attention: ${cell.attention.causes.join(', ')}` : '';
+    const batch = batchMode && batchTargetIds.has(cell.id) ? `, selected for batch ${batchMode}` : '';
+    return `${base}${attention}${batch}`;
   }
 
   function cropAsset(plantKey: string | null, stage: number | null): string | null {
@@ -116,6 +125,7 @@
           class="hex-cell {cell.kind}"
           class:selected={cell.id === selectedId}
           class:mature={cell.harvestable}
+          class:batch-selected={batchMode && batchTargetIds.has(cell.id)}
           data-layout-key={cell.layoutKey}
           data-garden-cell
           data-cell-id={cell.id}
@@ -123,13 +133,16 @@
           data-col={cell.col}
           data-row={cell.row}
           aria-label={cellLabel(cell)}
-          aria-pressed={cell.id === selectedId}
+          aria-pressed={batchMode ? batchTargetIds.has(cell.id) : cell.id === selectedId}
           onclick={() => onselect(cell.id)}
           onkeydown={(event) => moveFocus(event, cell)}
         >
           <span class="visually-hidden">{cellLabel(cell)}</span>
           {#if cell.harvestable}
             <span class="ready-dot" title="Ready to harvest" aria-hidden="true"></span>
+          {/if}
+          {#if cell.attention}
+            <span class="attention-marker" data-garden-attention={cell.attention.severity} aria-hidden="true">!</span>
           {/if}
         </button>
       </div>
@@ -154,10 +167,13 @@
   .garden-grid .hex-cell::before { display: none; content: none; }
   .hex-cell::after { position: absolute; inset: 3px; padding: 4px; background: #f2c75a; clip-path: inherit; content: ''; opacity: 0; -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
   .hex-cell:hover::after, .hex-cell.selected::after { opacity: 1; }
+  .hex-cell.batch-selected::after { opacity: 1; background: #e0b644; }
   .hex-cell:hover + *, .plot-node:has(.hex-cell:hover) .plot-base, .plot-node.selected .plot-base { filter: drop-shadow(0 0 8px #efc75b) drop-shadow(0 7px 7px #0008); }
   .hex-cell:focus-visible { outline: none; filter: drop-shadow(0 0 6px #fff3bd) drop-shadow(0 0 2px #241402); }
   .hex-cell:focus-visible::after { opacity: 1; background: #fff2ad; }
   .ready-dot { position: absolute; top: 15%; right: 19%; width: 9px; height: 9px; border: 1px solid #e9f6b9; border-radius: 50%; background: #9bd265; box-shadow: 0 0 10px #91cf58; }
+  .attention-marker { position: absolute; top: 5%; left: 12%; z-index: 7; display: grid; width: 22px; height: 22px; place-items: center; border: 2px solid #ffe2a0; border-radius: 50%; color: #fff0c4; background: #9f3c29; box-shadow: 0 2px 8px #000c; font-family: 'Cinzel', serif; font-size: 14px; font-weight: 900; pointer-events: none; }
+  .attention-marker[data-garden-attention='warning'] { background: #95651e; }
   .harvest-ghost { z-index: 5; animation: harvest-lift 620ms ease-out both; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   @keyframes harvest-lift { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-70px) scale(.9); } }
