@@ -44,7 +44,8 @@ describe('scene presentation contracts', () => {
     expect(visual.plots).toEqual([
       {
         id: 'cell-1', layoutKey: 'c1', col: 2, row: 3, kind: 'plant',
-        plantKey: 'fennel', plantName: 'Fennel', stage: 3, selected: true, harvestable: true
+        plantKey: 'fennel', plantName: 'Fennel', stage: 3, selected: true, harvestable: true,
+        attention: null
       }
     ]);
     expect(visual.status).toBe('ready');
@@ -64,6 +65,38 @@ describe('scene presentation contracts', () => {
     expect(deriveGardenVisualState(game, null, false, null).plots).toMatchObject([
       { id: 'cell-1', layoutKey: 'c1', col: 2, row: 3 }
     ]);
+  });
+
+  it('projects one plot-attached attention state from actionable crop and colony conditions', () => {
+    const game = snapshot();
+    game.cells[0].plant = {
+      id: 'plant-1', speciesKey: 'fennel', lifecycle: 'growing', ageDays: 2, growthProgress: 44,
+      health: 55, productionCycle: 1, floweringDaysRemaining: 0, readySinceDay: null, qualityIndex: 3,
+      symptoms: [
+        { code: 'note', severity: 'info', label: 'Morning dew', cause: 'Rain' },
+        { code: 'dry', severity: 'warning', label: 'Dry soil', cause: 'Missed watering' },
+        { code: 'blight', severity: 'critical', label: 'Leaf blight', cause: 'Fungal pressure' }
+      ]
+    };
+    expect(deriveGardenVisualState(game, null, false, null).plots[0].attention).toEqual({
+      severity: 'critical', causes: ['Dry soil', 'Leaf blight']
+    });
+
+    game.cells[0] = {
+      ...game.cells[0], kind: 'beehive', plant: null, plantKey: null, plantName: null,
+      hive: {
+        id: 'hive-1', equipmentCondition: 90, hasColony: true,
+        colony: {
+          id: 'colony-1', adults: 2_000, brood: 500, health: 65, foodStores: 4, floralHoney: 2,
+          protectedReserve: 1, extractableSurplus: 1, varroaPressure: 0, chalkbroodPressure: 0,
+          nosemaPressure: 0, treatmentKey: null, treatmentDaysRemaining: 0, threatDays: 1,
+          symptoms: [{ code: 'info', severity: 'info', label: 'Foraging', cause: 'Clear weather' }]
+        }
+      }
+    };
+    expect(deriveGardenVisualState(game, null, false, null).plots[0].attention).toEqual({
+      severity: 'critical', causes: ['Colony-loss warning']
+    });
   });
 
   it('derives Brewery setup, active, ready, blocked, and result phases', () => {

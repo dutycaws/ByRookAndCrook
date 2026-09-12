@@ -167,13 +167,16 @@ describe('master storage helpers', () => {
   it('keeps the seeded catalog free of workstation paths and records every current derivative', async () => {
     const catalog = await readCatalog();
     expect(catalog.masters).toHaveLength(20);
-    expect(catalog.runtimeDerivatives).toHaveLength(51);
+    expect(catalog.runtimeDerivatives).toHaveLength(54);
     expect(JSON.stringify(catalog)).not.toContain('/home/');
     expect(catalog.runtimeDerivatives.filter((derivative) => derivative.sourceRevisionId === null).map((derivative) => derivative.path)).toEqual([
       'static/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp',
       'static/assets/scenes/brewery/brewery-wort-mask.webp',
       'static/assets/scenes/bakery/bakery-dough-shadow.webp',
-      'static/assets/scenes/bakery/bakery-score-groove-01.webp'
+      'static/assets/scenes/bakery/bakery-score-groove-01.webp',
+      'static/assets/scenes/shop-environment.webp',
+      'static/assets/scenes/shop/elara-merchant.webp',
+      'static/assets/scenes/shop/elara-portrait.webp'
     ]);
   });
   it('allows immutable revisions to share a logical ID and validates supersedes links', async () => {

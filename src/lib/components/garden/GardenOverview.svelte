@@ -1,13 +1,7 @@
 <script lang="ts">
   import type { GameSnapshot } from '$lib/game/contracts';
 
-  let {
-    snapshot,
-    onselect
-  }: {
-    snapshot: GameSnapshot;
-    onselect: (cellId: string) => void;
-  } = $props();
+  let { snapshot }: { snapshot: GameSnapshot } = $props();
 
   type ReportEvent = { layoutKey: string; label: string; severity: string; message: string };
 
@@ -31,13 +25,6 @@
   }
 
   let unlocked = $derived(snapshot.cells.filter((cell) => cell.unlocked !== false));
-  let threats = $derived(unlocked.flatMap((cell) => {
-    const symptoms = cell.plant?.symptoms.filter((symptom) => symptom.severity !== 'info')
-      ?? cell.hive?.colony?.symptoms?.filter((symptom) => symptom.severity !== 'info')
-      ?? [];
-    const colonyThreat = (cell.hive?.colony?.threatDays ?? 0) > 0;
-    return symptoms.length || colonyThreat ? [{ cell, symptoms, colonyThreat }] : [];
-  }));
   let latestEvents = $derived(reportEvents(snapshot.garden?.latestReport));
 </script>
 
@@ -63,27 +50,6 @@
       </div>
     </section>
   {/if}
-
-  <section class="overview-section" aria-label="Threatened plots">
-    <div class="section-heading">
-      <p class="eyebrow">Threatened plots</p>
-      <span>{threats.length}</span>
-    </div>
-    {#if threats.length}
-      <ul class="threat-list">
-        {#each threats as threat}
-          <li>
-            <button type="button" onclick={() => onselect(threat.cell.id)}>
-              <strong>{threat.cell.layoutKey} · {threat.cell.plantName ?? 'Bee colony'}</strong>
-              <span>{threat.colonyThreat ? 'Colony-loss warning' : threat.symptoms.map((symptom) => symptom.label).join(', ')}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {:else}
-      <p class="empty-note">No active warnings.</p>
-    {/if}
-  </section>
 
   {#if snapshot.garden?.latestReport}
     <details class="overview-section daily-report" open={latestEvents.length > 0}>
@@ -119,20 +85,15 @@
 <style>
   .garden-overview { display: grid; gap: 1rem; }
   .overview-section { display: grid; gap: .55rem; padding-top: .8rem; border-top: 1px solid #3f301a; }
-  .section-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
-  .section-heading span { color: #d4b76b; font-family: 'Cinzel',serif; }
   .forecast-list { display: grid; gap: .35rem; }
   .forecast-list div { display: grid; grid-template-columns: auto 1fr; gap: .15rem .5rem; padding: .45rem .5rem; border: 1px solid #4f3d22; background: #120e08; }
   .forecast-list strong { color: #d8bc77; font-size: .7rem; }
   .forecast-list span { color: #dfcca0; font-size: .75rem; text-align: right; }
   .forecast-list small { grid-column: 1 / -1; color: #9d8962; font-size: .64rem; }
-  .threat-list, .daily-report ul, .compost-jobs ul { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
-  .threat-list button { width: 100%; padding: .5rem .6rem; border: 1px solid #8b572f; color: #d9bd7b; background: #21130a; text-align: left; }
-  .threat-list button strong, .threat-list button span, .daily-report li strong, .daily-report li span, .compost-jobs li strong, .compost-jobs li span { display: block; }
-  .threat-list button strong, .daily-report li strong, .compost-jobs li strong { font-size: .72rem; }
-  .threat-list button span, .daily-report li span, .compost-jobs li span { margin-top: .15rem; color: #aa9670; font-size: .68rem; line-height: 1.35; }
-  .threat-list button:focus-visible { outline: 2px solid #efd27a; outline-offset: 2px; }
-  .empty-note { margin: 0; color: #988563; font-size: .72rem; }
+  .daily-report ul, .compost-jobs ul { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
+  .daily-report li strong, .daily-report li span, .compost-jobs li strong, .compost-jobs li span { display: block; }
+  .daily-report li strong, .compost-jobs li strong { font-size: .72rem; }
+  .daily-report li span, .compost-jobs li span { margin-top: .15rem; color: #aa9670; font-size: .68rem; line-height: 1.35; }
   summary { color: #d6b768; cursor: pointer; font-family: 'Cinzel',serif; font-size: .72rem; }
   .daily-report p { margin: 0; color: #b6a37d; font-size: .72rem; line-height: 1.4; }
   .daily-report li, .compost-jobs li { padding-left: .55rem; border-left: 3px solid #916f36; }

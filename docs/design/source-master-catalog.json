@@ -307,6 +307,24 @@
       "sha256": "36a9ac292097b988424d2271d59e02349d213b3732a60b2f88fcaf07cbcce96d",
       "recipe": "Reviewed crop or WebP conversion; see docs/design/asset-manifest.md.",
       "sourceRevisionId": "exec-5c82dd47-6e10-4ebf-99ed-b786d4675e56@29ae806d5061"
+    },
+    {
+      "path": "static/assets/scenes/shop-environment.webp",
+      "sha256": "77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180",
+      "recipe": "Reviewed WebP conversion; source master remains outside Git pending source-master archive.",
+      "sourceRevisionId": null
+    },
+    {
+      "path": "static/assets/scenes/shop/elara-merchant.webp",
+      "sha256": "022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc",
+      "recipe": "UI-free supplied-reference crop converted to WebP; no separate source master.",
+      "sourceRevisionId": null
+    },
+    {
+      "path": "static/assets/scenes/shop/elara-portrait.webp",
+      "sha256": "d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880",
+      "recipe": "UI-free supplied-reference crop converted to WebP; no separate source master.",
+      "sourceRevisionId": null
     }
   ],
   "masters": [

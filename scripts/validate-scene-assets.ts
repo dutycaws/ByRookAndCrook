@@ -77,10 +77,21 @@ const references: ExpectedAsset[] = [
     alpha: false,
     sha256: '67f9219290374363de2dd156ff1f83556bb94c2906e2e74546068ddacfb239c0',
     maxBytes: 4_000_000
+  },
+  {
+    path: 'docs/design/references/CozyTavernConceptArt6.png',
+    width: 1672,
+    height: 941,
+    alpha: false,
+    sha256: 'b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae',
+    maxBytes: 4_000_000
   }
 ];
 
 const runtimeAssets: ExpectedAsset[] = [
+  { path: 'static/assets/scenes/shop-environment.webp', width: 1672, height: 941, alpha: false, sha256: '77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180', maxBytes: 350_000, sceneContract: false },
+  { path: 'static/assets/scenes/shop/elara-merchant.webp', width: 680, height: 528, alpha: false, sha256: '022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc', maxBytes: 90_000, sceneContract: false },
+  { path: 'static/assets/scenes/shop/elara-portrait.webp', width: 280, height: 280, alpha: false, sha256: 'd0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880', maxBytes: 60_000, sceneContract: false },
   { path: 'static/assets/scenes/garden-environment.webp', width: 1672, height: 941, alpha: false, sha256: '17444dbbcde2554e94d1ecea75551c783eabd5eeac6c2b07fd4156a7ba513e2d', maxBytes: 500_000 },
   { path: 'static/assets/scenes/garden/garden-atmosphere.webp', width: 620, height: 330, alpha: true, sha256: '2a1c9d88886ae253a2321a49adcdb3148ec3b4609305f8035b0860f8c8d25a0f', maxBytes: 80_000 },
   { path: 'static/assets/scenes/garden/garden-beehive.webp', width: 360, height: 300, alpha: true, sha256: '11b5fd9011d5ea874ae2d1dea21fa47c6286478af0f910b8e98d380dc6e8c83e', maxBytes: 90_000 },

@@ -7,10 +7,14 @@
   let {
     visual,
     onselect,
+    batchMode = null,
+    batchTargetIds = new Set<string>(),
     harvestEffect = null
   }: {
     visual: GardenVisualState;
     onselect: (cellId: string) => void;
+    batchMode?: 'water' | 'amend' | null;
+    batchTargetIds?: Set<string>;
     harvestEffect?: { token: number; cellId: string; plantKey: string; stage: number } | null;
   } = $props();
 </script>
@@ -19,7 +23,7 @@
   <SceneLayer src="/assets/scenes/garden-environment.webp" name="garden environment" z={0} essential />
   <div class="garden-light" aria-hidden="true"></div>
   <div class="garden-plane-viewport" data-garden-viewport>
-    <GardenGrid plots={visual.plots} selectedId={visual.selectedCellId} scale={1.85} {harvestEffect} {onselect} />
+    <GardenGrid plots={visual.plots} selectedId={visual.selectedCellId} scale={1.85} {harvestEffect} {onselect} {batchMode} {batchTargetIds} />
   </div>
   <SceneLayer
     src="/assets/scenes/garden/garden-atmosphere.webp"

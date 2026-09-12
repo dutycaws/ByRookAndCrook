@@ -9,6 +9,19 @@ async function login(page: Page, email: string, password: string) {
   await expect(page).toHaveURL(/\/garden$/, { timeout: 15_000 });
 }
 
+async function harvestFromGarden(page: Page) {
+  const fennel = page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i });
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await fennel.tap(); else await fennel.click();
+  await expect(fennel).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
+  await page.getByRole('button', { name: 'Actions', exact: true }).click();
+  await page.getByRole('button', { name: 'Harvest crop' }).click();
+  await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
+  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
+    await page.getByRole('button', { name: 'Close actions' }).click();
+  }
+}
+
 test('harvested ingredients become persistent food through the reload-safe bakery', async ({ page }) => {
   test.setTimeout(60_000);
   const player = await createTestPlayer('bakery-journey');
@@ -17,9 +30,7 @@ test('harvested ingredients become persistent food through the reload-safe baker
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
-    await page.getByRole('button', { name: 'Harvest crop' }).click();
-    await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
+    await harvestFromGarden(page);
 
     await page.getByRole('link', { name: 'Bakery', exact: true }).click();
     await expect(page).toHaveURL(/\/bakery$/);
@@ -95,9 +106,7 @@ test('the bakery exposes a no-craft close and restores the allocation next day',
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
-    await page.getByRole('button', { name: 'Harvest crop' }).click();
-    await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
+    await harvestFromGarden(page);
     await page.getByRole('link', { name: 'Bakery', exact: true }).click();
     await page.getByRole('button', { name: 'Rest without crafting' }).click();
     await expect(page.getByText('Tavern day 2 · Daily craft')).toBeVisible();
@@ -115,9 +124,7 @@ test('overbaked bread remains immediately removable and completion retries exact
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
-    await page.getByRole('button', { name: 'Harvest crop' }).click();
-    await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
+    await harvestFromGarden(page);
     await page.getByRole('link', { name: 'Bakery', exact: true }).click();
     await page.getByRole('button', { name: 'Begin today’s loaf' }).click();
     for (let count = 1; count <= 6; count += 1) {
@@ -198,9 +205,7 @@ test('lost fold and score responses replay the exact frozen gesture', async ({ p
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
-    await page.getByRole('button', { name: 'Harvest crop' }).click();
-    await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
+    await harvestFromGarden(page);
     await page.getByRole('link', { name: 'Bakery', exact: true }).click();
     await page.getByRole('button', { name: 'Begin today’s loaf' }).click();
 

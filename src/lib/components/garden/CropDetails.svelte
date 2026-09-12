@@ -14,7 +14,7 @@
   }
 </script>
 
-<section class="detail-card" data-garden-inspector aria-live="polite">
+<section class="detail-card" data-garden-inspector>
   {#if !cell}
     <p class="muted">Select a garden plot to inspect it.</p>
   {:else}
@@ -128,8 +128,8 @@
     {/if}
 
     {#if cell.soil}
-      <div class="soil-panel" data-soil-diagnostic>
-        <p class="eyebrow">Soil and exposure</p>
+      <details class="soil-panel" data-soil-diagnostic>
+        <summary>Soil and exposure</summary>
         <dl class="soil-grid">
           <div><dt>Nitrogen</dt><dd>{cell.soil.n}</dd></div>
           <div><dt>Phosphorus</dt><dd>{cell.soil.p}</dd></div>
@@ -138,7 +138,7 @@
           <div><dt>Soil quality</dt><dd>{cell.soil.quality}</dd></div>
           <div><dt>Site light</dt><dd>{cell.soil.siteLight}</dd></div>
         </dl>
-      </div>
+      </details>
     {/if}
   {/if}
 </section>
@@ -154,6 +154,8 @@
   dd { margin: 0; color: #ead7aa; font-size: .86rem; }
   .colony-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .soil-panel, .pressure-panel, .symptoms, .harvest-preview { display: grid; gap: .55rem; padding-top: .75rem; border-top: 1px solid #3d2e19; }
+  .soil-panel summary { color: #d6b768; cursor: pointer; font-family: 'Cinzel', serif; font-size: .72rem; }
+  .soil-panel[open] summary { margin-bottom: .55rem; }
   .soil-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .pressure-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .35rem; }
   .pressure-grid span { display: grid; gap: .2rem; padding: .45rem; border: 1px solid #594322; color: #ae9567; font-size: .68rem; text-align: center; }

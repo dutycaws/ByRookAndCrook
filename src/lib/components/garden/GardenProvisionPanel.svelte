@@ -12,7 +12,7 @@
     GardenCommandPreview
   } from '$lib/game/contracts';
 
-  let { snapshot, selected }: { snapshot: GameSnapshot; selected: GardenCell | null } = $props();
+  let { snapshot, selected, includeShop = false }: { snapshot: GameSnapshot; selected: GardenCell | null; includeShop?: boolean } = $props();
 
   type Scope = 'garden' | 'apiary';
   type Kind = GardenCommandKind | ApiaryCommandKind;
@@ -146,9 +146,9 @@
 </script>
 
 <section class="provision-panel" aria-labelledby="provision-heading">
-  <div><p class="eyebrow">Courtyard stores</p><h2 id="provision-heading">Supply and apiary</h2></div>
+  <div><p class="eyebrow">Apiary actions</p><h2 id="provision-heading">Care for this plot</h2></div>
 
-  <details class="provision-group">
+  {#if includeShop}<details class="provision-group">
     <summary>Purchase supplies · {snapshot.save.gold ?? 0} gold</summary>
     <form method="POST" action="?/preview" use:enhance={previewEnhancer('garden', 'purchase', () => (shopItemKey || shop[0]?.itemKey) ? { itemKey: shopItemKey || shop[0]!.itemKey, quantity: shopQuantity } : null)}>
       <label>Item
@@ -159,9 +159,9 @@
       <label>Quantity <input type="number" min="1" max="20" bind:value={shopQuantity} /></label>
       <button type="submit" class="secondary-button" data-garden-command="purchase" disabled={pending || !shop.length}>Preview purchase</button>
     </form>
-  </details>
+  </details>{/if}
 
-  {#if nextExpansion}
+  {#if includeShop && nextExpansion}
     <details class="provision-group">
       <summary>Land expansion</summary>
       <p class="help">Unlock {nextExpansion.plotCount - (garden?.plotCount ?? 12)} new plots without changing existing plot identities.</p>
@@ -225,20 +225,20 @@
 
   {#if preview && hasCurrentPreview}
     <section class="preview-card" aria-live="polite" data-provision-preview data-preview-scope={previewScope}>
-      <p class="eyebrow">Authoritative preview</p>
+      <p class="eyebrow">Preview</p>
       <h3>{actionLabel(preview.commandKind)}</h3>
       <dl>
-        <div><dt>Based on revision</dt><dd>{preview.basedOnRevision}</dd></div>
+        <div><dt>Current garden state</dt><dd>{preview.basedOnRevision}</dd></div>
         {#each Object.entries(preview).filter(([key]) => !['commandKind','basedOnRevision','rulesVersion','normalizedPayload'].includes(key)) as [key, item]}
           <div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{fieldValue(key, item)}</dd></div>
         {/each}
       </dl>
       {#if preview.canCommit === false}
-        <p class="form-message error" role="alert">This action cannot be committed with the current state or resources.</p>
+        <p class="form-message error" role="alert">This action cannot be completed with the current state or resources.</p>
       {:else}
         <form method="POST" action={previewScope === 'apiary' ? '?/apiaryCommand' : '?/command'} use:enhance={commitPreview} data-command-scope={previewScope}>
           <button type="submit" class="primary-button" disabled={pending} data-apiary-command={previewScope === 'apiary' ? preview.commandKind : undefined} data-garden-command={previewScope === 'garden' ? preview.commandKind : undefined}>
-            {pending ? 'Committing…' : pendingAction && messageError ? `Retry ${actionLabel(preview.commandKind)}` : `Commit ${actionLabel(preview.commandKind)}`}
+            {pending ? 'Applying…' : pendingAction && messageError ? `Retry ${actionLabel(preview.commandKind)}` : `Apply ${actionLabel(preview.commandKind)}`}
           </button>
         </form>
       {/if}
