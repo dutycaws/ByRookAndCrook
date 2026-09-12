@@ -154,6 +154,10 @@ artifacts/media-performance/
 # immutable hashes and provenance; image bytes must never enter Git.
 .local/media/source-masters/
 
+# Locally generated runtime derivatives are fixture inputs during prototyping.
+# They are uploaded to local Supabase Storage and never committed as static assets.
+.local/media/runtime-derivatives/
+
 # Supabase local state
 supabase/.branches/
 supabase/.temp/

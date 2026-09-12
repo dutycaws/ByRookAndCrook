@@ -1,19 +1,23 @@
 <script lang="ts">
+  import { PUBLIC_SUPABASE_URL } from '$env/static/public';
   import { enhance } from '$app/forms';
+  import { beforeNavigate } from '$app/navigation';
   import { onMount, tick } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
   import type { GardenCommandKind, GardenCommandPayload, GardenCommandPreview, GameSnapshot, GardenInventoryItem } from '$lib/game/contracts';
+  import { shopItemAssetPublicUrl, shopRuntimeAssetPublicUrl } from '$lib/game/shop-runtime-assets';
 
   type ShopCategory = 'all' | 'seeds' | 'garden' | 'apiary';
   type ShopCommand = Extract<GardenCommandKind, 'purchase' | 'expand'>;
   type ShopPayload = Extract<GardenCommandPayload, { itemKey: string } | { plotCount: 16 | 24 }>;
+  type CompletedOrder = { kind: ShopCommand; itemKey?: string; name: string; quantity?: number; capacity?: number; cost: number; previousGold: number; goldBalance: number };
 
   let { snapshot }: { snapshot: GameSnapshot } = $props();
 
   let category = $state<ShopCategory>('all');
   let affordableOnly = $state(false);
   let selectedItemKey = $state<string | null>(null);
-  let detailOpen = $state(false);
+  let detailMode = $state<'item' | 'expand' | null>(null);
   let detailQuantity = $state(1);
   let hydrated = $state(false);
   let preview = $state<GardenCommandPreview | null>(null);
@@ -23,12 +27,18 @@
   let pending = $state(false);
   let message = $state<string | null>(null);
   let messageError = $state(false);
-  let purchaseDialog: HTMLDialogElement | undefined = $state();
-  let returnFocus: HTMLElement | null = $state(null);
-  let dialogTitle = $state('Purchase supplies');
-  let completedOrder = $state<{ name: string; quantity: number; cost: number; previousGold: number; goldBalance: number } | null>(null);
-  let detailPreviewButton: HTMLButtonElement | undefined = $state();
+  let previewForm: HTMLFormElement | undefined = $state();
+  let previewRequest = $state(0);
+  let expansionReturn = $state<{ category: ShopCategory; selectedItemKey: string | null; scrollTop: number; focusId: string } | null>(null);
+  let completedOrder = $state<CompletedOrder | null>(null);
+  let receiptDialog: HTMLDialogElement | undefined = $state();
   let successAction: HTMLButtonElement | undefined = $state();
+  let goodsGrid: HTMLDivElement | undefined = $state();
+  let prefersReducedMotion = $state(false);
+  let focusRequest = 0;
+  let resizeFrame = 0;
+  let browseScrollTop = 0;
+  let browseFocusId = '';
 
   let garden = $derived(snapshot.garden);
   let goods = $derived(garden?.shop ?? []);
@@ -38,7 +48,8 @@
   let activeGoods = $derived(goods.filter((item) =>
     (category === 'all' || itemCategory(item) === category) && (!affordableOnly || item.price <= (snapshot.save.gold ?? 0))
   ));
-  let selectedItem = $derived(detailOpen ? activeGoods.find((item) => item.itemKey === selectedItemKey) ?? null : null);
+  let selectedItem = $derived(detailMode === 'item' ? activeGoods.find((item) => item.itemKey === selectedItemKey) ?? null : null);
+  let completedItem = $derived(completedOrder?.itemKey ? goods.find((item) => item.itemKey === completedOrder?.itemKey) ?? null : null);
   let detailTotal = $derived(selectedItem ? selectedItem.price * detailQuantity : 0);
   let projectedGold = $derived((snapshot.save.gold ?? 0) - detailTotal);
   let hasCurrentPreview = $derived(!!preview && previewSignature === signature(preview?.commandKind as ShopCommand, previewPayload));
@@ -47,8 +58,20 @@
     all: 'All', seeds: 'Seeds', garden: 'Garden', apiary: 'Apiary'
   };
 
+  const heroAssetUrl = shopRuntimeAssetPublicUrl('elara-counter-hero', PUBLIC_SUPABASE_URL);
+  const portraitAssetUrl = '/assets/scenes/shop/elara-portrait.webp';
+
   onMount(() => {
     hydrated = true;
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateMotion = () => { prefersReducedMotion = motion.matches; };
+    updateMotion();
+    motion.addEventListener('change', updateMotion);
+    return () => motion.removeEventListener('change', updateMotion);
+  });
+
+  beforeNavigate(({ cancel }) => {
+    if (pendingAction) cancel();
   });
 
   function itemCategory(item: Omit<GardenInventoryItem, 'quantity'>): Exclude<ShopCategory, 'all'> {
@@ -61,14 +84,61 @@
     return ({ seed: '✿', amendment: '◒', equipment: '⌂', colony: '♚', feed: '❋', treatment: '✦' } as const)[item.kind];
   }
 
-  function signature(kind: ShopCommand | undefined, payload: ShopPayload | null) {
-    return `${kind ?? 'none'}:${JSON.stringify(payload)}`;
+  function itemArt(item: Omit<GardenInventoryItem, 'quantity'>) {
+    return shopItemAssetPublicUrl(item.itemKey, PUBLIC_SUPABASE_URL);
   }
 
-  function displayField(key: string, value: unknown) {
-    if (key === 'itemKey' && typeof value === 'string') return goods.find((item) => item.itemKey === value)?.name ?? value;
-    if (typeof value === 'number' || typeof value === 'string') return String(value);
-    return JSON.stringify(value);
+  function beginLayoutTransition(update: () => void, direction: 'open' | 'close') {
+    const documentWithTransitions = document as Document & {
+      startViewTransition?: (callback: () => void | Promise<void>) => { finished: Promise<void> };
+    };
+    if (prefersReducedMotion || !documentWithTransitions.startViewTransition) {
+      update();
+      return Promise.resolve();
+    }
+    const root = document.documentElement;
+    root.style.setProperty('--shop-transition-duration', direction === 'open' ? '240ms' : '180ms');
+    root.style.setProperty('--shop-transition-easing', direction === 'open' ? 'cubic-bezier(.22,1,.36,1)' : 'cubic-bezier(.4,0,1,1)');
+    const transition = documentWithTransitions.startViewTransition(async () => {
+      update();
+      await tick();
+    });
+    return transition.finished.catch(() => undefined).finally(() => {
+      root.style.removeProperty('--shop-transition-duration');
+      root.style.removeProperty('--shop-transition-easing');
+    });
+  }
+
+  function rememberBrowsePosition(focusId: string) {
+    browseScrollTop = goodsGrid?.scrollTop ?? browseScrollTop;
+    browseFocusId = focusId;
+  }
+
+  function focusDetailAfter(transition: Promise<unknown>, expectedMode: 'item' | 'expand', expectedItemKey: string | null = null) {
+    const request = ++focusRequest;
+    void transition.then(async () => {
+      await tick();
+      if (request !== focusRequest || detailMode !== expectedMode || (expectedMode === 'item' && selectedItemKey !== expectedItemKey)) return;
+      const heading = document.getElementById('item-detail-title');
+      heading?.focus({ preventScroll: true });
+      if (window.matchMedia('(max-width: 1199px)').matches) {
+        heading?.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+      }
+    });
+  }
+
+  function restoreBrowseFocus(transition: Promise<unknown>, focusId = browseFocusId) {
+    const request = ++focusRequest;
+    void transition.then(async () => {
+      await tick();
+      if (request !== focusRequest || detailMode) return;
+      if (goodsGrid) goodsGrid.scrollTop = browseScrollTop;
+      if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
+    });
+  }
+
+  function signature(kind: ShopCommand | undefined, payload: ShopPayload | null) {
+    return `${kind ?? 'none'}:${JSON.stringify(payload)}`;
   }
 
   function commandLabel(kind: ShopCommand) {
@@ -83,30 +153,139 @@
   }
 
   function selectItem(item: typeof goods[number]) {
-    selectedItemKey = item.itemKey;
-    detailOpen = true;
-    detailQuantity = 1;
-    affordableOnly = false;
-    message = null;
+    if (pendingAction) return;
+    const opening = detailMode === null;
+    rememberBrowsePosition(`shop-good-${item.itemKey}`);
+    const updateSelection = () => {
+      selectedItemKey = item.itemKey;
+      detailMode = 'item';
+      detailQuantity = 1;
+      affordableOnly = false;
+      message = null;
+      invalidatePreview();
+      void tick().then(() => requestPreview('item'));
+    };
+    const transition = opening ? beginLayoutTransition(updateSelection, 'open') : Promise.resolve().then(updateSelection);
+    focusDetailAfter(transition, 'item', item.itemKey);
   }
 
   function selectCategory(nextCategory: ShopCategory) {
-    category = nextCategory;
-    affordableOnly = false;
-    selectedItemKey = null;
-    detailOpen = false;
+    if (pendingAction) return;
+    rememberBrowsePosition(`shop-filter-${nextCategory}`);
+    const transition = detailMode ? beginLayoutTransition(() => {
+      category = nextCategory;
+      affordableOnly = false;
+      selectedItemKey = null;
+      detailMode = null;
+      invalidatePreview();
+    }, 'close') : Promise.resolve().then(() => {
+      category = nextCategory;
+      affordableOnly = false;
+      selectedItemKey = null;
+      invalidatePreview();
+    });
+    restoreBrowseFocus(transition, `shop-filter-${nextCategory}`);
   }
 
   function showAffordableGoods() {
-    affordableOnly = true;
-    selectedItemKey = null;
-    detailOpen = false;
-    closePreview();
+    if (pendingAction) return;
+    rememberBrowsePosition('shop-filter-all');
+    const transition = detailMode ? beginLayoutTransition(() => {
+      affordableOnly = true;
+      selectedItemKey = null;
+      detailMode = null;
+      invalidatePreview();
+    }, 'close') : Promise.resolve().then(() => {
+      affordableOnly = true;
+      selectedItemKey = null;
+      invalidatePreview();
+    });
+    restoreBrowseFocus(transition, 'shop-filter-all');
   }
 
   function closeDetail() {
-    selectedItemKey = null;
-    detailOpen = false;
+    if (pendingAction) return;
+    const itemKey = selectedItemKey;
+    const focusId = itemKey ? `shop-good-${itemKey}` : browseFocusId;
+    const transition = beginLayoutTransition(() => {
+      selectedItemKey = null;
+      detailMode = null;
+      invalidatePreview();
+    }, 'close');
+    restoreBrowseFocus(transition, focusId);
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && detailMode && !pendingAction && !receiptDialog?.open) {
+      event.preventDefault();
+      detailMode === 'expand' ? restoreFromExpansion() : closeDetail();
+    }
+  }
+
+  function handleResize() {
+    if (!detailMode) return;
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
+      const heading = document.getElementById('item-detail-title');
+      if (!heading || document.activeElement !== heading) return;
+      const bounds = heading.getBoundingClientRect();
+      if (bounds.top < 0 || bounds.bottom > window.innerHeight) {
+        heading.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+    });
+  }
+
+  function openExpansion() {
+    if (pendingAction) return;
+    const opening = detailMode === null;
+    const focusId = opening ? 'shop-expand-opening' : selectedItemKey ? `shop-good-${selectedItemKey}` : 'shop-expand-compact';
+    if (detailMode !== 'expand') expansionReturn = { category, selectedItemKey, scrollTop: goodsGrid?.scrollTop ?? 0, focusId };
+    const updateExpansion = () => {
+      selectedItemKey = null;
+      detailMode = 'expand';
+      invalidatePreview();
+      if (nextExpansion) void tick().then(() => requestPreview('expand'));
+    };
+    const transition = opening ? beginLayoutTransition(updateExpansion, 'open') : Promise.resolve().then(updateExpansion);
+    focusDetailAfter(transition, 'expand');
+  }
+
+  function restoreFromExpansion() {
+    if (pendingAction) return;
+    const target = expansionReturn;
+    expansionReturn = null;
+    const targetItemKey = target?.selectedItemKey ?? null;
+    const transition = targetItemKey ? Promise.resolve().then(() => {
+      category = target?.category ?? category;
+      selectedItemKey = targetItemKey;
+      detailMode = 'item';
+      invalidatePreview();
+      void tick().then(() => requestPreview('item'));
+    }) : beginLayoutTransition(() => {
+      category = target?.category ?? category;
+      selectedItemKey = null;
+      detailMode = null;
+      invalidatePreview();
+    }, 'close');
+    browseScrollTop = target?.scrollTop ?? browseScrollTop;
+    if (targetItemKey) {
+      focusDetailAfter(transition, 'item', targetItemKey);
+    } else {
+      restoreBrowseFocus(transition, target?.focusId ?? 'shop-expand-opening');
+    }
+  }
+
+  function invalidatePreview() {
+    previewRequest += 1;
+    pending = false;
+    preview = null;
+    previewPayload = null;
+    previewSignature = '';
+  }
+
+  function requestPreview(expectedMode: 'item' | 'expand') {
+    if (detailMode !== expectedMode || (expectedMode === 'item' && !selectedItem) || (expectedMode === 'expand' && !nextExpansion)) return;
+    if (hydrated && !pendingAction && previewForm) previewForm.requestSubmit();
   }
 
   function previewStatus() {
@@ -126,17 +305,30 @@
     previewPayload = null;
     previewSignature = '';
     pendingAction = null;
-    purchaseDialog?.close();
-    void tick().then(() => detailPreviewButton?.focus());
+    detailQuantity = 1;
+    detailMode = 'item';
+    invalidatePreview();
+    void tick().then(() => requestPreview('item'));
   }
 
   function continueShopping() {
+    if (completedOrder?.kind === 'expand') {
+      completedOrder = null;
+      restoreFromExpansion();
+      return;
+    }
+    const focusId = selectedItemKey ? `shop-good-${selectedItemKey}` : browseFocusId;
     completedOrder = null;
-    closePreview();
+    const transition = detailMode ? beginLayoutTransition(() => {
+      selectedItemKey = null;
+      detailMode = null;
+      invalidatePreview();
+    }, 'close') : Promise.resolve();
+    restoreBrowseFocus(transition, focusId);
   }
 
   function previewEnhancer(kind: ShopCommand, payloadFor: (formData: FormData) => ShopPayload | null): SubmitFunction {
-    return ({ formData, cancel, submitter }) => {
+    return ({ formData, cancel }) => {
       const payload = payloadFor(formData);
       if (!payload) {
         cancel();
@@ -146,20 +338,18 @@
       }
       formData.set('commandKind', kind);
       formData.set('payload', JSON.stringify(payload));
-      returnFocus = submitter instanceof HTMLElement ? submitter : null;
+      const requestId = ++previewRequest;
       pending = true;
       message = null;
       return async ({ result }) => {
-        pending = false;
         const data = 'data' in result ? result.data as { preview?: GardenCommandPreview; message?: string } | undefined : undefined;
+        if (requestId !== previewRequest) return;
+        pending = false;
         if (result.type === 'success' && data?.preview) {
           preview = data.preview;
           previewPayload = payload;
           previewSignature = signature(kind, payload);
-          dialogTitle = kind === 'expand' ? 'Garden expansion' : 'Purchase supplies';
           messageError = false;
-          await tick();
-          if (purchaseDialog && !purchaseDialog.open) purchaseDialog.showModal();
         } else {
           message = data?.message ?? 'Elara cannot prepare that preview right now.';
           messageError = true;
@@ -189,9 +379,9 @@
     pending = true;
     message = null;
     return async ({ result, update }) => {
-      pending = false;
       const data = 'data' in result ? result.data as { message?: string; conflict?: boolean; pendingAction?: object; receipt?: { result?: Record<string, unknown> } } | undefined : undefined;
       if (result.type === 'error') {
+        pending = false;
         message = 'The order outcome is unknown. Retry to recover the same order.';
         messageError = true;
         return;
@@ -199,53 +389,47 @@
       if (result.type === 'success') {
         const receipt = data?.receipt;
         const resultData = receipt?.result;
+        let resolvedOrder: CompletedOrder | null = null;
         if (committedPreview.commandKind === 'purchase' && resultData && typeof resultData === 'object') {
           const order = purchaseSummary(committedPayload);
-          completedOrder = {
+          resolvedOrder = {
+            kind: 'purchase', itemKey: 'itemKey' in committedPayload ? committedPayload.itemKey : undefined,
             name: order?.name ?? 'Supplies', quantity: Number(resultData.quantity ?? order?.quantity ?? 0),
             cost: Number(resultData.goldSpent ?? 0), previousGold: Number(resultData.previousGold ?? 0),
             goldBalance: Number(resultData.goldBalance ?? 0)
           };
           message = 'Purchase complete.';
-        } else {
-          message = data?.message ?? 'The garden expansion is complete.';
+        } else if (committedPreview.commandKind === 'expand') {
+          resolvedOrder = { kind: 'expand', name: 'Garden expanded', capacity: Number(resultData?.plotCount ?? 0), cost: Number(resultData?.goldSpent ?? 0), previousGold: Number(snapshot.save.gold ?? 0), goldBalance: Number(resultData?.goldBalance ?? 0) };
+          message = 'Garden expanded.';
         }
         messageError = false;
         preview = null;
         previewPayload = null;
         previewSignature = '';
+        await update({ reset: false, invalidateAll: true });
+        pending = false;
         pendingAction = null;
-        if (!completedOrder) purchaseDialog?.close();
-        else {
+        completedOrder = resolvedOrder;
+        if (resolvedOrder) {
           await tick();
+          receiptDialog?.showModal();
           successAction?.focus();
         }
+        return;
       } else if (data?.pendingAction) {
+        pending = false;
         message = data.message ?? 'The order outcome is unknown. Retry to recover the same order.';
         messageError = true;
       } else {
+        pending = false;
         message = data?.message ?? 'Elara could not complete that order.';
         messageError = true;
         pendingAction = null;
       }
-      await update({ reset: false, invalidateAll: result.type === 'success' || !!data?.conflict });
+      await update({ reset: false, invalidateAll: !!data?.conflict });
     };
   };
-
-  async function clearPreview() {
-    preview = null;
-    previewPayload = null;
-    previewSignature = '';
-    if (!pending && !(pendingAction && messageError)) pendingAction = null;
-    await tick();
-    returnFocus?.focus();
-    returnFocus = null;
-  }
-
-  function closePreview() {
-    if (purchaseDialog?.open) purchaseDialog.close();
-    else void clearPreview();
-  }
 
   function detailPayload(formData: FormData): ShopPayload | null {
     if (!selectedItem) return null;
@@ -255,180 +439,318 @@
       : null;
   }
 
+  function expansionPayload(): ShopPayload | null {
+    const plotCount = nextExpansion?.plotCount;
+    return plotCount === 16 || plotCount === 24 ? { plotCount } : null;
+  }
+
   function correctQuantity() {
+    if (pendingAction) return;
     detailQuantity = Math.max(1, Math.min(20, previewNumber('remainingStock')));
-    closePreview();
-    void tick().then(() => detailPreviewButton?.focus());
+    invalidatePreview();
+    void tick().then(() => requestPreview('item'));
+  }
+
+  function effectDescription(item: typeof goods[number]) {
+    if (item.kind === 'seed' && typeof item.effect.species === 'string') return `Plant ${item.effect.species} in an empty garden plot.`;
+    if (item.kind === 'amendment') {
+      if (typeof item.effect.n === 'number') return `Adds ${item.effect.n} nitrogen to selected soil.`;
+      if (typeof item.effect.p === 'number') return `Adds ${item.effect.p} phosphorus to selected soil.`;
+      if (typeof item.effect.k === 'number') return `Adds ${item.effect.k} potassium to selected soil.`;
+      if (typeof item.effect.quality === 'number') return `Improves selected soil quality by ${item.effect.quality}.`;
+    }
+    if (item.kind === 'feed' && typeof item.effect.food === 'number') return `Restores ${item.effect.food} food to a bee colony.`;
+    if (item.kind === 'treatment' && typeof item.effect.problem === 'string') return `Treats ${item.effect.problem} in an affected colony.`;
+    if (item.kind === 'equipment') return 'Provides one empty hive for an unlocked garden plot.';
+    if (item.kind === 'colony') return 'Stocks an empty hive with a replacement bee colony.';
+    return item.name;
   }
 </script>
 
-<section class="shop-layout" aria-label="Elara Greenbloom's garden shop">
-  <aside class="shop-status panel" aria-labelledby="shop-status-title">
-    <p class="eyebrow">Shop status</p>
-    <h2 id="shop-status-title">Keeper's ledger</h2>
-    <dl>
-      <div><dt>Gold</dt><dd>{snapshot.save.gold ?? 0}</dd></div>
-      <div><dt>Garden capacity</dt><dd>{capacity} plots</dd></div>
-      <div><dt>Supplies held</dt><dd>{inventory.reduce((sum, item) => sum + item.quantity, 0)}</dd></div>
-    </dl>
-    {#if nextExpansion}
-      <div class="expansion-card">
-        <p class="eyebrow">Next expansion</p>
-        <strong>{nextExpansion.plotCount} plots</strong>
-        <span>{nextExpansion.price} gold</span>
-        <form method="POST" action="?/preview" use:enhance={previewEnhancer('expand', () => ({ plotCount: nextExpansion!.plotCount }))}>
-          <button type="submit" class="secondary-button" disabled={!hydrated || pending}>Expand to {nextExpansion.plotCount} plots</button>
-        </form>
-      </div>
-    {:else}
-      <p class="shop-muted">Every available garden plot is already in your care.</p>
-    {/if}
-  </aside>
+<svelte:window onkeydown={handleKeydown} onresize={handleResize} />
 
-  <section class="shop-scene panel" aria-labelledby="shop-scene-title">
-    <div class="shop-scene-art" aria-hidden="true">
-      <img class="shop-environment" src="/assets/scenes/shop-environment.webp" alt="" onerror={(event) => event.currentTarget.remove()} />
-      <img class="shop-merchant" src="/assets/scenes/shop/elara-merchant.webp" alt="" onerror={(event) => event.currentTarget.remove()} />
-    </div>
-    <div class="shop-scene-copy">
-      <p class="eyebrow">Greenbloom's provisions</p>
-      <h1 id="shop-scene-title">Elara's garden shop</h1>
-      <p>Elara keeps the counter stocked for a good day in the courtyard.</p>
+<section class:art8-layout={!!detailMode} class:art6-layout={!detailMode} class="shop-layout" data-shop-market aria-label="Elara Greenbloom's garden shop">
+  {#if !detailMode}
+    <aside class="opening-status panel" aria-label="Shop status">
+      <p class="eyebrow">Shop status</p>
+      <div class="gold-status"><span>Gold</span><strong>{snapshot.save.gold ?? 0}</strong></div>
+      <details class="status-more">
+        <summary>Garden status</summary>
+        <dl>
+          <div><dt>Garden capacity</dt><dd>{capacity} plots</dd></div>
+          {#if nextExpansion}<div><dt>Next expansion</dt><dd>{nextExpansion.plotCount} plots · {nextExpansion.price} gold</dd></div>{/if}
+        </dl>
+      </details>
+      {#if nextExpansion}
+        <button id="shop-expand-opening" class="secondary-button" type="button" onclick={openExpansion}>Expand garden</button>
+      {:else}
+        <p class="shop-muted">Garden at full capacity.</p>
+      {/if}
+    </aside>
+  {/if}
+  <section class="shop-scene panel" data-shop-merchant aria-label="Elara Greenbloom’s shop counter">
+    {#if detailMode}
+      <div class="compact-identity">
+        <span class="portrait-frame"><img src={portraitAssetUrl} alt="" onerror={(event) => event.currentTarget.remove()} /></span>
+        <span><strong>Elara Greenbloom</strong><small>Shopkeeper</small></span>
+      </div>
+    {/if}
+    <div class="shop-scene-art" role="img" aria-label="Elara Greenbloom at her garden shop counter">
+      <span class="scene-fallback">Elara Greenbloom</span>
+      {#if heroAssetUrl}<img class="shop-merchant" src={heroAssetUrl} alt="" onerror={(event) => event.currentTarget.remove()} />{/if}
     </div>
   </section>
 
-  <aside class="shop-goods panel" aria-labelledby="goods-title">
+  <aside class="shop-goods panel" data-shop-catalog aria-labelledby="goods-title">
+    {#if !detailMode}
+      <div class="opening-identity">
+        <span class="portrait-frame"><img src={portraitAssetUrl} alt="" onerror={(event) => event.currentTarget.remove()} /></span>
+        <span><strong>Elara Greenbloom</strong><small>Shopkeeper</small></span>
+      </div>
+    {/if}
     <header class="merchant-heading">
-      <img src="/assets/scenes/shop/elara-portrait.webp" alt="Elara Greenbloom" onerror={(event) => event.currentTarget.remove()} />
-      <div><p class="eyebrow">Shopkeeper</p><h2>Elara Greenbloom</h2><span>🌿 Druid merchant</span></div>
+      <div><p class="eyebrow">Elara’s counter</p><h2 id="goods-title">Featured goods</h2></div>
+      <div class="market-tools">
+        <p><strong>{snapshot.save.gold ?? 0}</strong> gold</p>
+        {#if detailMode && detailMode !== 'expand' && nextExpansion}<button id="shop-expand-compact" class="text-button" type="button" disabled={!!pendingAction} onclick={openExpansion}>Expand garden</button>{/if}
+        {#if detailMode && !nextExpansion}<span>Full capacity</span>{/if}
+      </div>
     </header>
     <fieldset class="shop-filters">
-      <legend id="goods-title">Featured goods</legend>
+      <legend>Categories</legend>
       <div>
         {#each Object.entries(categoryNames) as [key, label]}
-          <label><input type="radio" name="shop-category" value={key} checked={category === key} onchange={() => selectCategory(key as ShopCategory)} /><span>{label}</span></label>
+          <label><input id={`shop-filter-${key}`} type="radio" name="shop-category" value={key} checked={category === key} disabled={!hydrated || !!pendingAction} onchange={() => selectCategory(key as ShopCategory)} /><span>{label}</span></label>
         {/each}
       </div>
     </fieldset>
     {#if affordableOnly}<p class="shop-filter-status" role="status">Showing goods you can afford. <button class="text-button" type="button" onclick={() => affordableOnly = false}>Show all</button></p>{/if}
-    <div class="goods-grid" aria-live="polite">
+    <div bind:this={goodsGrid} class="goods-grid" aria-live="polite" data-shop-goods-scroll>
       {#each activeGoods as item (item.itemKey)}
-        <article class:selected={selectedItem?.itemKey === item.itemKey} class="good-card" data-good-category={itemCategory(item)}>
-          <span class="good-icon" aria-hidden="true">{itemIcon(item)}</span>
+        {@const artUrl = itemArt(item)}
+        <article class:selected={selectedItem?.itemKey === item.itemKey} class="good-card" data-good-key={item.itemKey} data-good-category={itemCategory(item)}>
+          <span class="good-art" aria-hidden="true"><span class="good-icon">{itemIcon(item)}</span>{#if artUrl}<img src={artUrl} alt="" onerror={(event) => event.currentTarget.remove()} />{/if}</span>
           <h3>{item.name}</h3>
-          <p>{item.price} gold · {item.remainingStock === 0 ? 'Out of stock' : `${item.remainingStock} left`}</p>
-          <button class="secondary-button" type="button" onclick={() => selectItem(item)} aria-pressed={selectedItem?.itemKey === item.itemKey}>View details</button>
+          <p>{item.price} gold</p><span class:sold-out={item.remainingStock === 0}>{item.remainingStock === 0 ? 'Sold out' : `${item.remainingStock} left`}</span>
+          <button id={`shop-good-${item.itemKey}`} class="tile-button" type="button" disabled={!hydrated || !!pendingAction} onclick={() => selectItem(item)} aria-pressed={selectedItem?.itemKey === item.itemKey}><span class="sr-only">Select {item.name}</span></button>
         </article>
       {:else}
         <p class="shop-muted">No goods are stocked in this category today.</p>
       {/each}
     </div>
-    {#if selectedItem}
-      <section class="item-detail" aria-labelledby="item-detail-title">
-        <p class="eyebrow">Selected good</p>
-        <h3 id="item-detail-title">{selectedItem.name}</h3>
-        <p>{selectedItem.effect.description ?? selectedItem.effect.species ?? 'Garden and apiary provision.'}</p>
-        <dl>
-          <div><dt>Unit price</dt><dd>{selectedItem.price} gold</dd></div>
-          <div><dt>Owned</dt><dd>{inventory.find((candidate) => candidate.itemKey === selectedItem!.itemKey)?.quantity ?? 0}</dd></div>
-          <div><dt>Stock today</dt><dd>{selectedItem.remainingStock} / {selectedItem.dailyCap}</dd></div>
-        </dl>
-        {#if selectedItem.remainingStock === 0}
-          <p class="availability warning">Out of stock. Restocks on tavern day {selectedItem.restockDay}.</p>
-          <div class="detail-actions"><button class="secondary-button" type="button" onclick={closeDetail}>Back to goods</button><button class="secondary-button" type="button" onclick={() => { closeDetail(); affordableOnly = false; }}>View alternatives</button></div>
-        {:else}
-          <form method="POST" action="?/preview" use:enhance={previewEnhancer('purchase', detailPayload)}>
-            <label class="quantity-label">Quantity <input name="quantity" type="number" min="1" max="20" bind:value={detailQuantity} /></label>
-            <p class="detail-total">
-              Total {detailTotal} gold · {projectedGold >= 0 ? `${projectedGold} gold remaining` : `Need ${Math.abs(projectedGold)} more gold`}.
-              Up to {selectedItem.remainingStock} are in stock today. Elara confirms the total before any gold is spent.
-            </p>
-            <div class="detail-actions">
-              <button bind:this={detailPreviewButton} class="primary-button" type="submit" disabled={!hydrated || pending}>Preview purchase</button>
-              <button class="secondary-button" type="button" onclick={closeDetail}>Back to goods</button>
-            </div>
-          </form>
-        {/if}
-      </section>
-    {/if}
   </aside>
+  {#if detailMode}<aside class="item-detail panel" data-shop-detail aria-live="polite">
+    {#if detailMode === 'expand'}
+      <p class="eyebrow">Garden capacity</p><h2 id="item-detail-title" tabindex="-1">{nextExpansion ? `Expand to ${nextExpansion.plotCount} plots` : 'Garden at full capacity'}</h2>
+      {#if nextExpansion}
+        <dl>
+          <div><dt>Current capacity</dt><dd>{capacity} plots</dd></div>
+          <div><dt>Next capacity</dt><dd>{nextExpansion.plotCount} plots</dd></div>
+          <div><dt>Price</dt><dd>{preview?.goldCost ?? nextExpansion.price} gold</dd></div>
+          <div><dt>Current gold</dt><dd>{preview?.goldBalance ?? snapshot.save.gold ?? 0}</dd></div>
+        </dl>
+      {:else}
+        <p>Every available garden plot is already in your care.</p>
+      {/if}
+    {:else if selectedItem}
+      {@const selectedArtUrl = itemArt(selectedItem)}
+      <p class="eyebrow">{itemCategory(selectedItem)}</p><h2 id="item-detail-title" tabindex="-1">{selectedItem.name}</h2>
+      <div class="detail-illustration" aria-hidden="true"><span>{itemIcon(selectedItem)}</span>{#if selectedArtUrl}<img src={selectedArtUrl} alt="" onerror={(event) => event.currentTarget.remove()} />{/if}</div>
+      <p>{effectDescription(selectedItem)}</p>
+      <dl><div><dt>Unit price</dt><dd>{selectedItem.price} gold</dd></div><div><dt>Current gold</dt><dd>{preview?.goldBalance ?? snapshot.save.gold ?? 0}</dd></div><div><dt>Owned</dt><dd>{inventory.find((candidate) => candidate.itemKey === selectedItem.itemKey)?.quantity ?? 0}</dd></div><div><dt>In stock</dt><dd>{selectedItem.remainingStock}</dd></div></dl>
+      {#if selectedItem.remainingStock > 0}<label class="quantity-label">Quantity <input name="quantity" type="number" min="1" max="20" disabled={!!pendingAction} bind:value={detailQuantity} onchange={() => { invalidatePreview(); requestPreview('item'); }} /></label>{/if}
+      <p class="detail-total">Total {detailTotal} gold · You will have {projectedGold} gold remaining.</p>
+    {:else}<p class="eyebrow">Garden ledger</p><h2>Choose a good</h2><p>Select a tile to inspect its current terms.</p>{/if}
+
+    {#if detailMode === 'expand' && nextExpansion}
+      {#key `expand:${nextExpansion.plotCount}`}
+        <form bind:this={previewForm} method="POST" action="?/preview" use:enhance={previewEnhancer('expand', expansionPayload)}><input type="hidden" name="plotCount" value={nextExpansion.plotCount} /></form>
+      {/key}
+    {:else if detailMode === 'item' && selectedItem}
+      {#key `purchase:${selectedItem.itemKey}`}
+        <form bind:this={previewForm} method="POST" action="?/preview" use:enhance={previewEnhancer('purchase', detailPayload)}><input type="hidden" name="quantity" value={detailQuantity} /></form>
+      {/key}
+    {/if}
+    {#if detailMode === 'item' && selectedItem?.remainingStock === 0}<p class="form-message error" role="alert"><strong>Out of stock.</strong> Restocks on tavern day {selectedItem.restockDay}.</p><button class="primary-button" type="button" disabled>Buy for {selectedItem.price} gold</button><div class="detail-actions"><button class="secondary-button" type="button" onclick={() => { closeDetail(); affordableOnly = false; }}>View alternatives</button></div>
+    {:else if preview?.canCommit === false}
+      {#if preview.commandKind === 'expand'}<p class="form-message error" role="alert"><strong>Not enough gold.</strong> Need {Math.max(0, previewNumber('goldCost') - previewNumber('goldBalance'))} more gold.</p><button class="primary-button" type="button" disabled>Expand to {nextExpansion?.plotCount} plots for {preview.goldCost ?? nextExpansion?.price} gold</button><div class="detail-actions"><button class="secondary-button" type="button" onclick={showAffordableGoods}>View affordable goods</button></div>
+      {:else if previewStatus() === 'insufficient_gold'}<p class="form-message error" role="alert"><strong>Not enough gold.</strong> Need {previewNumber('goldDeficit')} more gold.</p><button class="primary-button" type="button" disabled>Buy for {preview.goldCost ?? detailTotal} gold</button><div class="detail-actions"><button class="secondary-button" type="button" onclick={showAffordableGoods}>View affordable goods</button></div>
+      {:else if previewStatus() === 'exceeds_stock'}<p class="form-message error" role="alert">Only {preview.remainingStock ?? 0} left.</p><button class="secondary-button" type="button" onclick={correctQuantity}>Use available quantity</button>
+      {:else}<p class="form-message error" role="alert">This capacity change cannot be completed.</p>{/if}
+    {:else if preview && detailMode}<form data-shop-commit method="POST" action="?/command" use:enhance={commitPreview}><button class="primary-button" type="submit" disabled={!hydrated || pending}>{pending ? 'Confirming…' : pendingAction && messageError ? `Retry ${commandLabel(preview.commandKind as ShopCommand)}` : preview.commandKind === 'expand' ? `Expand to ${nextExpansion?.plotCount} plots for ${preview.goldCost ?? '…'} gold` : `Buy for ${preview.goldCost ?? '…'} gold`}</button></form>
+    {:else if detailMode && !messageError}<p class="shop-muted">Checking Elara’s ledger…</p>{/if}
+    {#if message && messageError}<p class="form-message error" role="alert">{message}</p>{/if}
+    <button class="text-button detail-close" type="button" disabled={!!pendingAction} onclick={detailMode === 'expand' ? restoreFromExpansion : closeDetail}>Back to goods</button>
+  </aside>{/if}
 </section>
 
-{#if message && !preview}
+{#if message && !preview && !completedOrder && !detailMode}
   <p class="shop-message" class:error={messageError} role={messageError ? 'alert' : 'status'} aria-live="polite">{message}</p>
 {/if}
 
-<dialog bind:this={purchaseDialog} class="shop-preview" aria-labelledby="preview-title" aria-busy={pending} onclose={() => { if (!pending) void clearPreview(); }}>
-  {#if completedOrder}
-    <section class="purchase-complete" aria-labelledby="preview-title">
-      <p class="eyebrow">Elara's receipt</p><h2 id="preview-title">Purchase complete</h2>
-      <p><strong>{completedOrder.quantity} × {completedOrder.name}</strong></p>
-      <dl><div><dt>Actual cost</dt><dd>{completedOrder.cost} gold</dd></div><div><dt>Gold</dt><dd>{completedOrder.previousGold} → {completedOrder.goldBalance}</dd></div></dl>
-      <div class="detail-actions"><button bind:this={successAction} class="primary-button" type="button" onclick={resetForAnother}>Buy another</button><button class="text-button" type="button" onclick={continueShopping}>Continue shopping</button></div>
-    </section>
-  {:else if preview && previewPayload}
-    <div class="preview-heading"><p class="eyebrow">Elara's tally</p><h2 id="preview-title">{dialogTitle}</h2></div>
-    {#if preview.commandKind === 'purchase' && purchaseSummary(previewPayload)}
-      {@const order = purchaseSummary(previewPayload)!}
-      <section class="order-summary" aria-label="Purchase summary">
-        <div><span>Item</span><strong>{order.name}</strong></div>
-        <div><span>Quantity</span><strong>{order.quantity}</strong></div>
-        <div><span>Resulting inventory</span><strong>{order.held} → {order.after}</strong></div>
-        <div><span>Total</span><strong>{preview.goldCost ?? '…'} gold</strong></div>
-      </section>
+{#if completedOrder}
+  <dialog bind:this={receiptDialog} class="purchase-complete receipt" data-shop-receipt aria-labelledby="receipt-title" oncancel={(event) => event.preventDefault()}>
+    <div class="receipt-check" aria-hidden="true">✓</div>
+    <p class="eyebrow">Elara’s receipt</p>
+    <h2 id="receipt-title">{completedOrder.kind === 'expand' ? 'Garden expanded' : 'Purchase complete'}</h2>
+    {#if completedOrder.kind === 'purchase'}
+      {@const receiptArtUrl = completedItem ? itemArt(completedItem) : null}
+      <div class="receipt-item" aria-hidden="true"><span>{completedItem ? itemIcon(completedItem) : '✿'}</span>{#if receiptArtUrl}<img src={receiptArtUrl} alt="" onerror={(event) => event.currentTarget.remove()} />{/if}</div>
     {/if}
+    <p><strong>{completedOrder.kind === 'expand' ? `${completedOrder.capacity} plots` : `${completedOrder.quantity} × ${completedOrder.name}`}</strong></p>
     <dl>
-      {#each Object.entries(preview).filter(([key]) => !['commandKind', 'basedOnRevision', 'rulesVersion', 'normalizedPayload', 'canCommit'].includes(key)) as [key, value]}
-        <div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{displayField(key, value)}</dd></div>
-      {/each}
+      <div><dt>Actual cost</dt><dd>{completedOrder.cost} gold</dd></div>
+      <div><dt>Previous gold</dt><dd>{completedOrder.previousGold}</dd></div>
+      <div><dt>New gold</dt><dd>{completedOrder.goldBalance}</dd></div>
     </dl>
-    {#if preview.canCommit === false}
-      {#if previewStatus() === 'insufficient_gold'}
-        <p class="form-message error" role="alert">Need {previewNumber('goldDeficit')} more gold. You have {preview.goldBalance ?? 0} gold for this {preview.goldCost ?? 0}-gold order.</p>
-        <div class="detail-actions"><button type="button" class="secondary-button" onclick={closePreview}>Back to goods</button><button type="button" class="secondary-button" onclick={showAffordableGoods}>View affordable goods</button></div>
-      {:else if previewStatus() === 'sold_out'}
-        <p class="form-message error" role="alert">Out of stock. Restocks on tavern day {preview.restockDay ?? selectedItem?.restockDay ?? 'the next day'}.</p>
-        <div class="detail-actions"><button type="button" class="secondary-button" onclick={closePreview}>Back to goods</button><button type="button" class="secondary-button" onclick={() => { selectedItemKey = activeGoods.find((item) => item.remainingStock > 0)?.itemKey ?? null; closePreview(); }}>View alternatives</button></div>
-      {:else if previewStatus() === 'exceeds_stock'}
-        <p class="form-message error" role="alert">Only {preview.remainingStock ?? 0} left. Choose a quantity within today's remaining stock.</p>
-        <button type="button" class="secondary-button" onclick={correctQuantity}>Correct quantity</button>
-      {:else}
-        <p class="form-message error" role="alert">This order cannot be completed with the current capacity.</p>
-        <button type="button" class="secondary-button" onclick={closePreview}>Close</button>
-      {/if}
-    {:else}
-      <form method="POST" action="?/command" use:enhance={commitPreview}>
-        <button class="primary-button" type="submit" disabled={!hydrated || pending}>{pending ? 'Confirming…' : pendingAction && messageError ? `Retry ${commandLabel(preview.commandKind as ShopCommand)}` : preview.commandKind === 'expand' ? 'Expand garden' : `Buy — ${(preview.goldCost ?? '…')} gold`}</button>
-        <button type="button" class="text-button" onclick={closePreview} disabled={pending}>Cancel</button>
-      </form>
-    {/if}
-    {#if message}
-      <p class="shop-message" class:error={messageError} role={messageError ? 'alert' : 'status'} aria-live="polite">{message}</p>
-    {/if}
-  {/if}
-</dialog>
+    <div class="detail-actions">
+      {#if completedOrder.kind === 'purchase'}<button bind:this={successAction} class="primary-button" type="button" onclick={resetForAnother}>Buy another</button>{/if}
+      <button class="text-button" type="button" onclick={continueShopping}>Continue shopping</button>
+    </div>
+  </dialog>
+{/if}
 
 <style>
-  .shop-layout { display:grid; grid-template-columns:minmax(175px,.72fr) minmax(0,1.65fr) minmax(275px,.95fr); gap:1rem; align-items:start; }
-  .shop-status,.shop-goods { padding:1rem; }
-  .shop-status h2,.shop-goods h2,.shop-preview h2 { margin:.2rem 0 .8rem; color:var(--gold-bright); font:600 1rem 'Cinzel',serif; }
-  .shop-status dl,.shop-preview dl { display:grid; gap:.55rem; margin:0; }
-  .shop-status dl div,.shop-preview dl div { display:flex; justify-content:space-between; gap:.8rem; padding-bottom:.45rem; border-bottom:1px solid #3c2d17; }
-  .shop-status dt,.shop-preview dt { color:var(--muted); } .shop-status dd,.shop-preview dd { margin:0; color:var(--gold-bright); text-align:right; }
-  .expansion-card { display:grid; gap:.4rem; margin-top:1rem; padding:.8rem; border:1px solid #654b24; background:#110d07; }
-  .expansion-card strong { color:var(--gold-bright); font:600 .95rem 'Cinzel',serif; }.expansion-card span{color:#bca476;font-size:.8rem}
-  .expansion-card form { margin-top:.25rem; }.shop-muted { margin:.4rem 0; color:var(--muted); font-size:.85rem; }
-  .shop-scene { position:relative; display:grid; grid-template-rows:auto minmax(25rem,1fr); min-height:34rem; overflow:hidden; isolation:isolate; background:radial-gradient(circle at 54% 28%,#705025 0%,#281909 52%,#0d0905 100%); }
-  .shop-scene-art,.shop-scene-art img { width:100%; height:100%; }.shop-scene-art { position:relative; grid-row:2; z-index:0; overflow:hidden; }.shop-scene-art img { position:absolute; inset:0; }.shop-environment { object-fit:cover; }.shop-merchant { object-fit:contain; object-position:50% bottom; transform:scale(1.08); transform-origin:50% bottom; }
-  .shop-scene-copy { position:relative; grid-row:1; z-index:1; padding:.85rem 1rem; border-bottom:1px solid #6b4e24; background:#100b07; }
-  .shop-scene-copy h1 { margin:.25rem 0 .4rem; color:var(--gold-bright); font:600 clamp(1.4rem,3vw,2.2rem) 'Cinzel',serif; }.shop-scene-copy p:last-child{margin:0;color:#d5c092;font-size:1rem;line-height:1.25}
-  .merchant-heading { display:flex; align-items:center; gap:.7rem; padding-bottom:.8rem; border-bottom:1px solid #493719; }.merchant-heading img { width:64px; height:64px; border:1px solid #80602d; border-radius:50%; object-fit:cover; background:#302111; }.merchant-heading h2{margin:.1rem 0}.merchant-heading span{color:#a8c877;font-size:.8rem}
-  .shop-filters { min-width:0; margin:.8rem 0; padding:0; border:0; }.shop-filters legend { margin-bottom:.5rem; color:var(--gold-bright); font:.72rem 'Cinzel',serif; text-transform:uppercase; letter-spacing:.09em; }.shop-filters>div{display:grid; grid-template-columns:repeat(4,minmax(0,1fr));gap:.25rem}.shop-filters label{position:relative;min-width:0}.shop-filters input{position:absolute;opacity:0}.shop-filters span{display:grid;min-height:2rem;place-items:center;padding:.25rem;border:1px solid #55401e;color:#aa9364;background:#100c07;font-size:.72rem;cursor:pointer}.shop-filters input:checked+span{border-color:var(--gold);color:var(--gold-bright);background:#392813}.shop-filters input:focus-visible+span{outline:3px solid #efcf75;outline-offset:2px}
-  .goods-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; }.good-card { display:grid; grid-template-columns:auto 1fr; gap:.15rem .45rem; min-width:0; padding:.55rem; border:1px solid #4d391e; background:#100c07; }.good-card.selected { border-color:var(--gold); box-shadow:inset 0 0 0 1px #8c692a; }.good-icon { grid-row:span 2; display:grid; width:2rem;height:2rem;place-items:center;border:1px solid #795b28;color:#e0bd65;background:#26190c;font-size:1.15rem }.good-card h3,.good-card p{margin:0;min-width:0}.good-card h3{overflow:hidden;color:#e2c989;font:.7rem 'Cinzel',serif;text-overflow:ellipsis;white-space:nowrap}.good-card p{color:var(--gold);font-size:.75rem}.good-card .secondary-button{grid-column:1/-1;margin-top:.25rem}.quantity-label{display:flex;align-items:center;gap:.25rem;color:var(--muted);font-size:.75rem}.quantity-label input{width:100%;min-width:0;min-height:35px;padding:.15rem .25rem;border:1px solid #624a26;color:var(--ink);background:#090704}.secondary-button,.primary-button{min-height:32px;padding:.3rem .45rem;border:1px solid #70552c;color:#d8bc78;background:#1a1309;font:600 .65rem 'Cinzel',serif;cursor:pointer}.primary-button{background:linear-gradient(#d9a83d,#8c5b14);color:#191006;border-color:#f0c868}.secondary-button:disabled,.primary-button:disabled{cursor:not-allowed;opacity:.55}
-  .shop-message { margin:1rem 0 0; padding:.65rem .8rem; border:1px solid #506d35; color:#c6d99a; background:#17200e; }.shop-message.error{border-color:#8c4939;color:#e4a28e;background:#2a110c}
-  .shop-preview { width:min(28rem,calc(100% - 2rem)); padding:1.2rem; border:1px solid #87652c; color:var(--ink); background:#171007; box-shadow:0 22px 70px #000c; }.shop-preview::backdrop{background:#000a}.shop-preview form{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1rem}.shop-preview .primary-button,.shop-preview .text-button{min-height:42px;padding:.55rem .8rem;cursor:pointer}.shop-preview .text-button,.text-button{border:0;color:#d8bc78;background:transparent;cursor:pointer}
-  .order-summary { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;margin:.8rem 0;padding:.7rem;border:1px solid #654b24;background:#0d0905; }.order-summary div{display:grid;gap:.1rem}.order-summary span{color:var(--muted);font-size:.7rem}.order-summary strong{color:var(--gold-bright);font-size:.85rem}
-  .shop-filter-status{margin:.5rem 0;color:#d8bc78;font-size:.75rem}.item-detail{display:grid;gap:.6rem;margin-top:.8rem;padding:.8rem;border:1px solid #80602d;background:#151006}.item-detail h3,.item-detail p{margin:0}.item-detail h3{color:var(--gold-bright);font:600 1rem 'Cinzel',serif}.item-detail dl{display:grid;gap:.35rem;margin:0}.item-detail dl div{display:flex;justify-content:space-between;gap:.5rem}.item-detail dt{color:var(--muted)}.item-detail dd{margin:0;color:var(--gold-bright)}.detail-total{color:var(--muted);font-size:.76rem}.availability.warning{padding:.55rem;border:1px solid #7e4931;color:#e2b28b;background:#2a130b}.detail-actions{display:flex;flex-wrap:wrap;gap:.55rem;margin-top:.7rem}.purchase-complete{padding:1rem;border:1px solid #b68c45;background:linear-gradient(135deg,#2b1b09,#140e06)}.purchase-complete>p{margin:.35rem 0}.purchase-complete dl{margin:.8rem 0}
-  @media(max-width:1000px){.shop-layout{grid-template-columns:minmax(170px,.7fr) minmax(0,1.3fr)}.shop-goods{grid-column:1/-1}.goods-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.shop-scene{min-height:28rem;grid-template-rows:auto minmax(21rem,1fr)}}
-  @media(max-width:620px){.shop-layout{grid-template-columns:1fr;gap:.75rem}.shop-status,.shop-scene,.shop-goods{grid-column:auto}.shop-status{display:grid;grid-template-columns:1fr 1fr;gap:.55rem}.shop-status>p,.shop-status>h2{grid-column:1/-1}.shop-status dl{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}.shop-status dl div{display:grid;gap:.15rem}.shop-status dd{text-align:left}.expansion-card{margin:0}.shop-scene{min-height:25rem;grid-template-rows:auto minmax(17rem,1fr)}.shop-merchant{object-position:50% bottom;object-fit:contain}.goods-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.good-card .secondary-button{width:100%}.merchant-heading{position:sticky;top:0;background:var(--panel);z-index:1}.shop-filters>div{grid-template-columns:repeat(4,minmax(0,1fr))}.shop-filters span{font-size:.64rem}.shop-preview{max-height:calc(100dvh - 2rem);overflow:auto}}
+  .shop-layout {
+    display: grid;
+    width: calc(100% - 2rem);
+    max-width: none;
+    min-width: 0;
+    margin: 0 1rem;
+    gap: .75rem;
+    align-items: start;
+  }
+  .art6-layout { grid-template-columns: minmax(0,18fr) minmax(0,58fr) minmax(0,24fr); }
+  .art8-layout { grid-template-columns: minmax(0,24fr) minmax(0,42fr) minmax(0,34fr); }
+  .opening-status { grid-column: 1; display: grid; gap: .9rem; align-content: start; padding: 1rem; }
+  .art6-layout .shop-scene { grid-column: 2; }
+  .art6-layout .shop-goods { grid-column: 3; }
+  .art8-layout .shop-scene { grid-column: 1; }
+  .art8-layout .shop-goods { grid-column: 2; }
+  .art8-layout .item-detail { grid-column: 3; }
+  .gold-status { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; padding-bottom: .7rem; border-bottom: 1px solid #4c371c; color: var(--muted); }
+  .gold-status strong { color: var(--gold-bright); font: 600 1.35rem 'Cinzel', serif; }
+  .status-more { min-width: 0; }
+  .status-more summary { min-height: 44px; color: #d8bc78; cursor: pointer; }
+  .status-more dl { display: grid; gap: .7rem; margin: 0; }
+  .status-more dl div { display: grid; gap: .2rem; }
+  .status-more dt { color: var(--muted); font-size: .78rem; }
+  .status-more dd { margin: 0; color: var(--gold-bright); font-size: .9rem; }
+  .shop-scene { min-width: 0; overflow: hidden; background: radial-gradient(circle at 50% 30%, #6c4b25, #1c1209 64%, #090603); view-transition-name: shop-merchant; }
+  .shop-scene-art { position: relative; display: grid; width: 100%; aspect-ratio: 4 / 3; place-items: center; overflow: hidden; isolation: isolate; }
+  .scene-fallback { z-index: 0; padding: 1rem; color: #d7bd7a; font: 600 1rem 'Cinzel', serif; text-align: center; }
+  .shop-merchant { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+  .compact-identity, .opening-identity { display: flex; align-items: center; gap: .7rem; padding: .65rem .8rem; color: #d9c28b; background: #100b07; }
+  .compact-identity { border-bottom: 1px solid #6b4e24; }
+  .opening-identity { margin: -.2rem -.2rem .25rem; border-bottom: 1px solid #493719; }
+  .compact-identity > span:last-child, .opening-identity > span:last-child { display: grid; gap: .12rem; min-width: 0; }
+  .compact-identity strong, .opening-identity strong { color: var(--gold-bright); font: 600 .85rem 'Cinzel', serif; }
+  .compact-identity small, .opening-identity small { color: #9fc36c; }
+  .portrait-frame { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; overflow: hidden; border: 1px solid #80602d; border-radius: 50%; background: radial-gradient(circle, #5d4120, #171006); }
+  .portrait-frame img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+  .shop-goods { display: flex; min-width: 0; max-height: calc(100vh - 6.5rem); padding: .8rem; flex-direction: column; overflow: hidden; view-transition-name: shop-catalog; }
+  .merchant-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .7rem; padding-bottom: .7rem; border-bottom: 1px solid #493719; }
+  .merchant-heading h2 { margin: .12rem 0 0; color: var(--gold-bright); font: 600 1rem 'Cinzel', serif; }
+  .market-tools { display: grid; gap: .25rem; justify-items: end; text-align: right; }
+  .market-tools p { margin: 0; color: var(--muted); font-size: .75rem; white-space: nowrap; }
+  .market-tools strong { color: var(--gold-bright); }
+  .market-tools span { color: #9fc36c; font-size: .68rem; }
+  .shop-filters { min-width: 0; margin: .7rem 0; padding: 0; border: 0; }
+  .shop-filters legend { margin-bottom: .42rem; color: var(--gold-bright); font: .68rem 'Cinzel', serif; text-transform: uppercase; letter-spacing: .09em; }
+  .shop-filters > div { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .25rem; }
+  .shop-filters label { position: relative; min-width: 0; }
+  .shop-filters input { position: absolute; opacity: 0; }
+  .shop-filters span { display: grid; min-height: 44px; place-items: center; padding: .25rem; border: 1px solid #55401e; color: #aa9364; background: #100c07; font-size: .7rem; cursor: pointer; }
+  .shop-filters input:checked + span { border-color: var(--gold); color: var(--gold-bright); background: #392813; box-shadow: inset 0 -2px #d4a746; }
+  .shop-filters input:focus-visible + span { outline: 3px solid #efcf75; outline-offset: 2px; }
+  .goods-grid { display: grid; min-height: 0; padding: .1rem; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .45rem; overflow: auto; overscroll-behavior: contain; scrollbar-color: #765522 #110c07; }
+  .art8-layout .goods-grid { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  .good-card { position: relative; display: grid; min-width: 0; min-height: 8.6rem; padding: .42rem; grid-template-rows: minmax(3.8rem,1fr) auto auto; gap: .25rem; border: 1px solid #4d391e; background: linear-gradient(145deg,#171008,#0c0905); text-align: center; }
+  .good-card.selected { border-color: var(--gold); box-shadow: inset 0 0 0 1px #bc8e35, 0 0 12px #d3a33b33; }
+  .good-art { position: relative; display: grid; min-width: 0; min-height: 3.8rem; place-items: center; overflow: hidden; color: #e0bd65; font-size: 1.7rem; }
+  .good-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .good-icon { display: grid; place-items: center; }
+  .good-card h3, .good-card p { margin: 0; min-width: 0; }
+  .good-card h3 { color: #e2c989; font: .64rem/1.25 'Cinzel', serif; overflow-wrap: anywhere; }
+  .good-card p { color: var(--gold); font-size: .7rem; }
+  .good-card > span:last-of-type { color: var(--muted); font-size: .65rem; }
+  .good-card > span.sold-out { color: #e7836b; }
+  .tile-button { position: absolute; inset: 0; min-width: 44px; min-height: 44px; opacity: 0; cursor: pointer; }
+  .tile-button:focus-visible { opacity: 1; outline: 3px solid #efcf75; outline-offset: -3px; background: transparent; }
+  .shop-muted { margin: .4rem 0; color: var(--muted); font-size: .85rem; }
+  .shop-filter-status { margin: .35rem 0 .6rem; color: #d8bc78; font-size: .75rem; }
+  .item-detail { display: grid; min-width: 0; gap: .7rem; align-content: start; padding: 1rem; border: 1px solid #80602d; background: linear-gradient(145deg,#181107,#0e0a05); view-transition-name: shop-detail; }
+  .item-detail h2, .item-detail p { margin: 0; }
+  .item-detail h2 { color: var(--gold-bright); font: 600 clamp(1rem,2vw,1.35rem) 'Cinzel', serif; }
+  .item-detail h2:focus-visible { outline: 2px solid #efcf75; outline-offset: 4px; }
+  .item-detail dl { display: grid; gap: .4rem; margin: 0; }
+  .item-detail dl div { display: flex; justify-content: space-between; gap: .75rem; }
+  .item-detail dt { color: var(--muted); }
+  .item-detail dd { margin: 0; color: var(--gold-bright); text-align: right; }
+  .detail-illustration, .receipt-item { position: relative; display: grid; place-items: center; overflow: hidden; }
+  .detail-illustration { min-height: 11rem; border: 1px solid #765522; color: #e7c96f; background: radial-gradient(circle,#32200d,#130d06); font-size: 4rem; }
+  .detail-illustration img, .receipt-item img { position: absolute; inset: .5rem; width: calc(100% - 1rem); height: calc(100% - 1rem); object-fit: contain; }
+  .quantity-label { display: grid; gap: .35rem; color: var(--muted); font-size: .78rem; }
+  .quantity-label input { width: 100%; min-width: 0; min-height: 44px; padding: .35rem .45rem; border: 1px solid #624a26; color: var(--ink); background: #090704; }
+  .detail-total { color: var(--muted); font-size: .78rem; }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .35rem; }
+  .detail-close { justify-self: start; margin-top: .3rem; }
+  .secondary-button, .primary-button, .text-button { min-height: 44px; padding: .5rem .7rem; font: 600 .7rem 'Cinzel', serif; cursor: pointer; }
+  .secondary-button, .primary-button { border: 1px solid #70552c; color: #d8bc78; background: #1a1309; }
+  .primary-button { border-color: #f0c868; color: #191006; background: linear-gradient(#d9a83d,#8c5b14); }
+  .text-button { border: 1px solid transparent; color: #d8bc78; background: transparent; }
+  .secondary-button:disabled, .primary-button:disabled, .text-button:disabled { cursor: not-allowed; opacity: .55; }
+  .secondary-button:focus-visible, .primary-button:focus-visible, .text-button:focus-visible { outline: 3px solid #efcf75; outline-offset: 2px; }
+  .shop-message { margin: 1rem; padding: .65rem .8rem; border: 1px solid #506d35; color: #c6d99a; background: #17200e; }
+  .shop-message.error { border-color: #8c4939; color: #e4a28e; background: #2a110c; }
+  .purchase-complete { padding: 1rem; border: 1px solid #b68c45; background: linear-gradient(135deg,#2b1b09,#140e06); }
+  .purchase-complete > p { margin: .35rem 0; }
+  .purchase-complete dl { display: grid; gap: .35rem; margin: .8rem 0; }
+  .purchase-complete dl div { display: flex; justify-content: space-between; gap: .5rem; }
+  .purchase-complete dd { margin: 0; }
+  .receipt { width: min(32rem,calc(100% - 2rem)); padding: 1.25rem; border: 2px solid #b18a48; color: #251605; background: linear-gradient(135deg,#f0ddb1,#c9a25e); box-shadow: 0 16px 50px #000d; }
+  .receipt::backdrop { background: #000b; backdrop-filter: blur(3px); }
+  .receipt-check { float: right; display: grid; width: 2.4rem; height: 2.4rem; place-items: center; border-radius: 50%; color: #eaf3d5; background: #507139; font-weight: bold; }
+  .receipt-item { min-height: 9rem; margin: .75rem 0; border: 1px solid #8e713d; color: #765019; background: #ead8ad; font-size: 3rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  :global(::view-transition-group(shop-merchant)), :global(::view-transition-group(shop-catalog)), :global(::view-transition-group(shop-detail)) { animation-duration: var(--shop-transition-duration,240ms); animation-timing-function: var(--shop-transition-easing,cubic-bezier(.22,1,.36,1)); }
+  :global(::view-transition-old(shop-detail)) { animation: shop-detail-out var(--shop-transition-duration,180ms) var(--shop-transition-easing,cubic-bezier(.4,0,1,1)) both; }
+  :global(::view-transition-new(shop-detail)) { animation: shop-detail-in var(--shop-transition-duration,240ms) var(--shop-transition-easing,cubic-bezier(.22,1,.36,1)) both; }
+  @keyframes shop-detail-in { from { opacity: 0; transform: translateX(24px); } }
+  @keyframes shop-detail-out { to { opacity: 0; transform: translateX(18px); } }
+
+  @media (min-width: 1600px) {
+    .art6-layout .goods-grid { grid-template-columns: repeat(4,minmax(0,1fr)); }
+  }
+  @media (min-width: 800px) {
+    .status-more > summary { display: none; }
+    .status-more > dl { display: grid; }
+  }
+  @media (max-width: 1199px) {
+    .shop-layout { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+    .art6-layout .opening-status { grid-column: 1 / -1; display: flex; align-items: center; }
+    .art6-layout .opening-status .gold-status { min-width: 9rem; border: 0; }
+    .art6-layout .opening-status .status-more { flex: 1; }
+    .art6-layout .shop-scene, .art8-layout .shop-scene { grid-column: 1; }
+    .art6-layout .shop-goods, .art8-layout .shop-goods { grid-column: 2; }
+    .art8-layout .item-detail { grid-column: 1 / -1; }
+    .art8-layout .goods-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+    .shop-goods { max-height: 44rem; }
+    @keyframes shop-detail-in { from { opacity: 0; transform: translateY(12px); } }
+    @keyframes shop-detail-out { to { opacity: 0; transform: translateY(10px); } }
+  }
+  @media (max-width: 799px) {
+    .shop-layout { width: calc(100% - 1rem); margin: 0 .5rem; grid-template-columns: minmax(0,1fr); }
+    .art6-layout .opening-status, .art6-layout .shop-scene, .art6-layout .shop-goods, .art8-layout .shop-scene, .art8-layout .shop-goods, .art8-layout .item-detail { grid-column: 1; }
+    .art6-layout .opening-status { display: grid; align-items: stretch; }
+    .status-more > summary { display: flex; align-items: center; }
+    .shop-goods { max-height: none; }
+    .goods-grid, .art8-layout .goods-grid { grid-template-columns: repeat(2,minmax(0,1fr)); overflow: visible; }
+    .merchant-heading { position: static; }
+    .good-card { min-height: 9.5rem; }
+    .detail-illustration { min-height: 10rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(::view-transition-group(shop-merchant)), :global(::view-transition-group(shop-catalog)), :global(::view-transition-group(shop-detail)), :global(::view-transition-old(shop-detail)), :global(::view-transition-new(shop-detail)) { animation-duration: 0s !important; }
+  }
 </style>

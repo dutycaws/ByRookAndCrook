@@ -1,6 +1,6 @@
 # Visual asset manifest
 
-Runtime imagery is stored under `static/assets`. Design references and review evidence stay under `docs` and are not loaded by the application.
+Reviewed runtime imagery can live under `static/assets`. Generated Shop prototype images live only in ignored `.local/media/runtime-derivatives/` and are uploaded to local Supabase Storage by `npm run fixtures:users:local`. Design references and review evidence stay under `docs` and are not loaded by the application.
 
 | Asset | Kind | Provenance | Runtime purpose |
 | --- | --- | --- | --- |
@@ -8,7 +8,8 @@ Runtime imagery is stored under `static/assets`. Design references and review ev
 | `docs/reference/CozyTavernConceptArt2.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-09. SHA-256 `06925a9fb1eb1603a3f237c54419701f62c11882f181a1d66a9ae5acc8816b8b`. | Garden design reference only. |
 | `docs/reference/CozyTavernConceptArt3.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-09. SHA-256 `9ae79901a389c228751c828649561f3e982aeda78019e60cbfe4211adce6c2ee`. | Brewery design reference only. |
 | `docs/reference/CozyTavernConceptArt4.png` | 1,672 × 941 PNG | Supplied by the project owner; imported unchanged on 2026-09-09. SHA-256 `67f9219290374363de2dd156ff1f83556bb94c2906e2e74546068ddacfb239c0`. | Bakery design reference only. |
-| `design-reference-cozy-tavern-art-6@b3429ddfcb61` | 1,672 × 941 PNG | Supplied by the project owner on 2026-09-11. SHA-256 `b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae`. The source remains only in the Git-ignored local content-addressed store at `.local/media/source-masters/v1/sha256/b3/b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae.png`. | Shop design reference and source for the reviewed Elara crops; never a Git asset or hosted service object. |
+| `design-reference-cozy-tavern-art-6@b3429ddfcb61` | 1,672 × 941 PNG | Historical Shop reference, supplied on 2026-09-11. SHA-256 `b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae`. Retained only at its Git-ignored local content-addressed path. | Source for the reviewed Elara merchant and portrait crops; never a Git asset or hosted service object. |
+| `design-reference-cozy-tavern-art-6@21cdb0728f33` | 1,666 × 730 RGBA PNG | Current authoritative Art6 Shop reference, supplied on 2026-09-12. SHA-256 `21cdb0728f337c8864b19aaf081529f4d2d8653ea6fe2413f9e6080eb2541085`. It supersedes the historical record and remains only at `.local/media/source-masters/v1/sha256/21/21cdb0728f337c8864b19aaf081529f4d2d8653ea6fe2413f9e6080eb2541085.png`. | Source reference for the integrated 4:3 Elara-at-counter hero; never a Git asset or hosted service object. |
 | `static/assets/scenes/lira-tavern.webp` | 1,672 × 941 WebP, 181 KB | Generated for this project with OpenAI image generation on 2026-09-09, then converted from lossless PNG to quality-84 WebP. | Bar scene for Lira Nightwind. |
 | `static/assets/scenes/torvin-tavern.webp` | 1,672 × 941 WebP, 198 KB | Generated for this project with OpenAI image generation on 2026-09-09, then converted from lossless PNG to quality-84 WebP. | Bar scene for Torvin Ashbeard. |
 | `static/raven.svg` | SVG | Existing repository brand asset. Original provenance was not recorded in this ticket. | Header and keeper seal. |
@@ -109,12 +110,34 @@ The 21 crop assets are 240 × 320 alpha WebPs cut from the generated three-stage
 | Runtime asset | Dimensions | Alpha | SHA-256 | Source and use |
 | --- | ---: | :---: | --- | --- |
 | `static/assets/scenes/shop-environment.webp` | 1,672 × 941 | No | `77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180` | OpenAI-generated fixed herb-and-apiary shop plate with an open central counter; it contains no person, text, UI, or price information. |
+| Local fixture input `.local/media/runtime-derivatives/v1/sha256/90/90a8aea1cd4fbd9b61364a953ace689c0e96126d0762a8e262131255ed7586fc.webp` | 1,200 × 900 | No | `90a8aea1cd4fbd9b61364a953ace689c0e96126d0762a8e262131255ed7586fc` | Git-ignored opaque WebP derived from `exec-413ef454-79d1-40e2-827f-f6d033030512@819f0f238644`; fixture-upload input for one coherent UI-free 4:3 Elara-at-counter scene. Recommended local Storage target: bucket `prototype-runtime-media`, key `shop/v1/sha256/90/90a8aea1cd4fbd9b61364a953ace689c0e96126d0762a8e262131255ed7586fc.webp`. |
 | `static/assets/scenes/shop/elara-merchant.webp` | 680 × 528 | No | `022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc` | UI-free crop of the supplied Shop reference, used in a framed merchant scene rather than as a floating cutout. |
 | `static/assets/scenes/shop/elara-portrait.webp` | 280 × 280 | No | `d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880` | UI-free face crop from the supplied Shop reference for the circular shopkeeper portrait. |
 
 **Shop environment brief:** A fixed wide fantasy herb-and-apothecary shop in the supplied reference's warm gold, dark timber, brass, and forest-green language. The environment holds lantern and window light, hanging herbs, jars, honey, apiary tools, shelves, and an open counter. It contains no people, text, signage, logos, price tags, cards, dialogue, or interface so functional HTML retains ownership of every game value.
 
-The first generated merchant-cutout attempt rendered its checker preview into an opaque PNG. It is retained outside the repository and is deliberately not used at runtime. The inspected derivatives above use the generated person-free environment and UI-free crops from the supplied reference, avoiding a misleading fake-transparency layer. Both merchant derivatives are opaque by design and must be displayed in their framed scene or circular portrait crop; failed images cannot suppress the Shop's functional text, filters, or purchase controls.
+The current Art6 reference is cataloged as `design-reference-cozy-tavern-art-6@21cdb0728f33` and supersedes the earlier 1,672 × 941 reference without deleting it. The integrated hero is a separate generated master `exec-413ef454-79d1-40e2-827f-f6d033030512@819f0f238644`; its optimized WebP is a Git-ignored local fixture input, not a `static/assets` file. `npm run fixtures:users:local` is the intended upload boundary for the recommended local Storage object. The first generated merchant-cutout attempt rendered its checker preview into an opaque PNG. It is retained outside the repository and is deliberately not used at runtime. The inspected derivatives above use opaque, deliberately framed imagery; failed images cannot suppress the Shop's functional text, filters, or purchase controls.
+
+The Shop has two responsive compositions driven by its existing detail state. With no item or expansion selected, the Art6 opening view presents status, the integrated 4:3 Elara counter scene, and the identity/catalog rail without reserving a detail column. Selecting an item or garden expansion moves the same scene and catalog into the Art8 merchant/catalog/detail composition. Closing details restores the prior filter, catalog position, and focus; reduced-motion users receive the same state change without spatial animation.
+
+### Current Shop SKU illustration inventory
+
+This inventory maps only existing catalog goods. Every local fixture key below is stored beneath ignored `.local/media/runtime-derivatives/` and is intended for `npm run fixtures:users:local` to upload to the local `prototype-runtime-media` bucket under `shop/<fixture key>`. The fixture assets are presentational only and do not add merchandise, prices, or mechanics.
+
+| Existing SKU(s) | Reviewed illustration status |
+| --- | --- |
+| `seed_hops`, `seed_chamomile`, `seed_lavender`, `seed_fennel`, `seed_sage`, `seed_pepper`, `seed_tomatoes` | Use the matching `static/assets/scenes/garden/garden-crop-<species>-stage-3.webp` derivative. |
+| `hive_equipment` | Use `static/assets/scenes/garden/garden-beehive.webp`, the reviewed three-box apiary illustration. |
+| `seed_clover` | Local fixture `v1/sha256/62/6272e2b1874ace058da2f7ad224806c676e5bd6d5ad0e88cf0902d4e53c15977.webp`, sourced from `exec-2ce6e317-a050-48aa-9485-8ead813b1a49@8a5607f2691b`. |
+| `amendment_n` | Local fixture `v1/sha256/4c/4cb5e73cb9e9d31fbd4585c342d2730adf8c38607597be4426c49c46860ed69f.webp`, sourced from `exec-7d274ab6-5458-44dd-8b87-be3ab7a013db@ae14ab8f30f2`. |
+| `amendment_p` | Local fixture `v1/sha256/22/228d283d1f5d53a9c1a432887df0e548878f1f67f89188382097b924ddc3c1d2.webp`, sourced from `exec-04e21fff-0aaa-44e2-985c-c88f7bc50cac@ce174cebbb0d`. |
+| `amendment_k` | Local fixture `v1/sha256/ff/ff992107cccd708f02af7b55577ee1c6ad69ea9bceaa97f4bd94b6149ef5ad76.webp`, sourced from `exec-7e5b6905-6549-46ae-b5b3-e64b06bf1f98@c4b5a338c216`. |
+| `soil_builder` | Local fixture `v1/sha256/7b/7b44c7945b32a129429b21d614d4d5d366063035e8ccd42a1d5d08cdab31a91f.webp`, sourced from `exec-0eacf9e9-1f63-446b-a282-3eca720d7a38@5ae3dcdb22df`. |
+| `bee_feed` | Local fixture `v1/sha256/8a/8a565e523438c2833a9ec2a225b2f0847413022aa452307b272cc8aba8d8984e.webp`, sourced from `exec-6525206e-ee34-4a33-a995-81c32ceff303@a9d6ad7a5a75`. |
+| `treatment_varroa` | Local fixture `v1/sha256/fa/faefc593fb1c773caa2826b32fae6933a2f2eded495b2ee94720e59f7831f4f5.webp`, sourced from `exec-dd71bea2-3af6-4911-8f9b-0508d3efcbc1@c09500503e10`. |
+| `treatment_chalkbrood` | Local fixture `v1/sha256/95/957e75fa98531580d3c75ab9a3c1007aaad0fe6e161687d92072f7d13f821f43.webp`, sourced from `exec-2bb3eaf1-de64-4e6c-a89a-8683ab9b8974@c0128d791a30`. |
+| `treatment_nosema` | Local fixture `v1/sha256/38/38036d51641ddfcf4c58f92362e3c550f6ea9776c1f7d4c2268fb998e6a501a6.webp`, sourced from `exec-8004ae18-5687-458f-861d-b787bf715995@1c6554307b44`. |
+| `replacement_colony` | Local fixture `v1/sha256/49/49b90970e3f0b9724f8bca0e196cec5d030272f602866adbf9ff8efbb8580945.webp`, sourced from `exec-98ae7f89-c62e-4e4e-a405-b38057aa844d@1fd1d22320b1`. |
 
 ### Contract and review evidence
 

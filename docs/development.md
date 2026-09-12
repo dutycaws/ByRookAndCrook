@@ -52,7 +52,7 @@ DO_NOT_TRACK=1 supabase stop --project-id by-rook-and-crook
 
 ## Local pilot accounts
 
-`npm run fixtures:users:local` creates or refreshes two confirmed development users. Their emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
+`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads the ignored Shop prototype art from `.local/media/runtime-derivatives/` into the local-only `prototype-runtime-media` Supabase Storage bucket. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The generated image bytes stay outside Git; a fresh checkout without those optional local files continues to render functional text and reviewed static fallbacks. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
 
 ```sh
 npm run credentials:local
@@ -139,7 +139,7 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 | `npm run media:perf` | Report authenticated mobile cold-cache media and Core Web Vitals proxy measurements for the four scene routes. |
 | `npm run media:perf:calibration -- --directory <reports>` | Require 10 unique valid report-mode runs, calculate each route/metric p75, and prove every p75 is within the activation budgets. |
 | `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
-| `npm run fixtures:users:local` | Create or refresh the two local pilot identities. |
+| `npm run fixtures:users:local` | Create or refresh the two local pilot identities, then verify and upload ignored Shop runtime art to local Supabase Storage. |
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
 | `npm run db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
 | `npm run check` | Run Svelte and TypeScript diagnostics. |

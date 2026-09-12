@@ -7,6 +7,7 @@ This document defines the storage boundary for visual source material, browser-r
 | Class | Canonical location | Git policy | Access and retention |
 | --- | --- | --- | --- |
 | Runtime derivatives | `static/assets/**` | Ordinary Git; optimized WebP, SVG, JSON, and similar browser inputs only | Public through the app. Each raster is at most 500,000 bytes and all runtime media is at most 10 MiB. |
+| Local prototype runtime media | `.local/media/runtime-derivatives/` | Ignored; commit only the typed asset contract, hashes, and provenance | `npm run fixtures:users:local` verifies each file and uploads it to the local-only `prototype-runtime-media` Supabase Storage bucket. Missing local bytes fall back to functional text and reviewed static art. |
 | Source masters | Git-ignored local store `.local/media/source-masters/` | Catalog, hashes, and derivative links only; never source bytes | Content-addressed, append-only, and verified by local read-back hash. Hosted storage is an optional future mode. |
 | Capture candidates | `artifacts/media-captures/**` | Ignored; never commit directly | Local working data. GitHub Actions candidate artifacts expire after 14 days. |
 | Curated still evidence | `docs/screenshots/curated/**` | Ordinary Git, immutable commit-scoped directories | At most 12 stills and 4 MiB per evidence set; every file is at most 1 MiB. |
@@ -44,6 +45,14 @@ MEDIA_MASTER_STORAGE=local
 ```
 
 `.local/` is Git-ignored. Keep all populated credentials in the ignored root `.env`; `.env.example` is documentation only. Before staging any change, run `npm run media:git:check:staged`. The policy rejects newly introduced source-master formats and every newly introduced blob larger than 1 MiB, including a blob that was later deleted in the same pushed range.
+
+Generated Shop art follows the same local boundary. Its optimized WebP fixture inputs live under `.local/media/runtime-derivatives/v1/sha256/`; no generated PNG or WebP is committed. With this repository's local Supabase stack running, seed or refresh the public local runtime bucket with:
+
+```sh
+npm run fixtures:users:local
+```
+
+The fixture command refuses non-local Supabase URLs, verifies every input SHA-256 before upload, uses content-addressed object keys, and verifies the uploaded bytes by reading them back. `npm run brac-app:dev` invokes the same fixture step during normal startup. This is a local development delivery path, not a hosted storage dependency.
 
 Future hosted storage is optional and must be selected explicitly with `MEDIA_MASTER_STORAGE=supabase`. Only then are `MEDIA_SUPABASE_URL` and the server-only `MEDIA_SUPABASE_SECRET_KEY` required. Never use a browser key, commit populated values, or treat a local development store as a hosted deployment requirement.
 
