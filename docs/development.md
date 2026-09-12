@@ -129,8 +129,8 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 | `npm run art:assets:check` | Verify supplied-reference checksums and canonical scene dimensions, alpha, derivative checksums, file-size ceilings, and runtime encoding. |
 | `npm run media:git:check -- --base <oid> --head <oid>` | Fail a committed range that introduces an oversized ordinary Git blob, video, or Git LFS configuration/pointer. |
 | `npm run media:git:check:staged` | Apply the same Git media policy to staged objects before committing. |
-| `npm run media:master:ingest -- --file <master.png> --id <id> [--metadata <metadata.json>]` | Validate, hash, upload, re-download, and catalog a private source-master revision. Metadata is already present for the seeded 20-master import and required for a new revision. Requires hosted `MEDIA_SUPABASE_URL` and preferred `MEDIA_SUPABASE_SECRET_KEY`; `MEDIA_SUPABASE_SERVICE_ROLE_KEY` is temporary compatibility only. |
-| `npm run media:masters:archive` | Build a deterministic local ZIP snapshot from verified private source masters. |
+| `npm run media:master:ingest -- --file <master.png> --id <id> [--metadata <metadata.json>]` | Validate, hash, write, read back, and catalog a private source-master revision in ignored `.local/media/source-masters/` by default. It needs no hosted service or credentials during prototyping. Set `MEDIA_MASTER_STORAGE=supabase` only for a future hosted store. |
+| `npm run media:masters:archive` | Build a deterministic local ZIP snapshot from read-back-verified private source masters in the selected store. |
 | `npm run media:masters:verify -- --archive <zip>` | Verify an archive safely and prove every embedded source-master hash. |
 | `npm run media:masters:confirm-drive -- --archive <id>` | Record manual confirmation that an archive ZIP and checksum were copied to Google Drive. |
 | `npm run media:masters:status` | Hash-check the runtime derivative inventory and report whether every master is primary-verified and covered by a receipt for the exact catalog. |

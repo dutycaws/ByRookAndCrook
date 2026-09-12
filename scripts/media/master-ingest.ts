@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { assertRegularFile, readCatalog, storageKey, uploadAndVerify, validateCatalog, validateMasterBuffer, validateRuntimeDerivativeInventory, writeCatalog, type MasterRecord } from './master-lib.js';
+import { assertRegularFile, readCatalog, storageKey, storageMode, uploadAndVerify, validateCatalog, validateMasterBuffer, validateRuntimeDerivativeInventory, writeCatalog, type MasterRecord } from './master-lib.js';
 
 function argument(name: string, required = true) { const index = process.argv.indexOf(name); const value = index < 0 ? undefined : process.argv[index + 1]; if (required && (!value || value.startsWith('--'))) throw new Error(`missing ${name}`); return value; }
 async function main() {
@@ -8,7 +8,7 @@ async function main() {
   await assertRegularFile(sourcePath); const source = await readFile(sourcePath); const metadata = metadataArgument ? JSON.parse(await readFile(resolve(metadataArgument), 'utf8')) as { provenance: { acquiredAt: string; source: string; rights: string; promptOrNote: string; exportSettings: string }; derivatives?: Array<{ path: string; sha256: string; recipe: string }>; supersedes?: string } : undefined;
   const details = validateMasterBuffer(source); const catalog = await readCatalog();
   const existing = catalog.masters.find((master) => master.id === id && master.sha256 === details.sha256);
-  if (existing) { await uploadAndVerify(existing, source); existing.verifiedAt ??= new Date().toISOString(); await writeCatalog(catalog); console.log(`verified existing catalog record ${existing.id}: ${existing.storageKey}`); return; }
+  if (existing) { await uploadAndVerify(existing, source); existing.verifiedAt ??= new Date().toISOString(); await writeCatalog(catalog); console.log(`verified existing catalog record ${existing.id} in ${storageMode()} storage: ${existing.storageKey}`); return; }
   if (!metadata?.provenance || !metadata.provenance.acquiredAt || !metadata.provenance.source || !metadata.provenance.rights || !metadata.provenance.promptOrNote || !metadata.provenance.exportSettings) throw new Error('new masters require --metadata with complete provenance');
   const record: MasterRecord = { id, revisionId: `${id}@${details.sha256.slice(0, 12)}`, originalFilename: basename(sourcePath), ...details, storageKey: storageKey(details.sha256), provenance: metadata.provenance, derivatives: metadata.derivatives ?? [], ...(metadata.supersedes ? { supersedes: metadata.supersedes } : {}) };
   catalog.masters.push(record);
@@ -24,6 +24,6 @@ async function main() {
   await uploadAndVerify(record, source);
   record.verifiedAt = new Date().toISOString();
   await writeCatalog(catalog);
-  console.log(`verified and cataloged ${record.revisionId}: ${record.storageKey}`);
+  console.log(`verified and cataloged ${record.revisionId} in ${storageMode()} storage: ${record.storageKey}`);
 }
 main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });

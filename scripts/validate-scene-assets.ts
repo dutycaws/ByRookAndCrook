@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { mediaPolicy } from './media/policy.js';
+import { localMasterPath, readCatalog, validateRuntimeDerivativeInventory } from './media/master-lib.js';
 
 const RUNTIME_ASSET_DIRECTORY = 'static/assets';
 const RUNTIME_METADATA_FILES = new Set([
@@ -78,15 +79,13 @@ const references: ExpectedAsset[] = [
     sha256: '67f9219290374363de2dd156ff1f83556bb94c2906e2e74546068ddacfb239c0',
     maxBytes: 4_000_000
   },
-  {
-    path: 'docs/design/references/CozyTavernConceptArt6.png',
-    width: 1672,
-    height: 941,
-    alpha: false,
-    sha256: 'b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae',
-    maxBytes: 4_000_000
-  }
 ];
+
+const LOCAL_ART6_REVISION_ID = 'design-reference-cozy-tavern-art-6@b3429ddfcb61';
+const LOCAL_ART6_DERIVATIVE_PATHS = new Set([
+  'static/assets/scenes/shop/elara-merchant.webp',
+  'static/assets/scenes/shop/elara-portrait.webp'
+]);
 
 const runtimeAssets: ExpectedAsset[] = [
   { path: 'static/assets/scenes/shop-environment.webp', width: 1672, height: 941, alpha: false, sha256: '77bf66f9fe3e595570a556104f763211da08a512d298dc33ada83a763b8d5180', maxBytes: 350_000, sceneContract: false },
@@ -202,6 +201,37 @@ async function assertAsset(expected: ExpectedAsset) {
   ].filter(Boolean);
   if (errors.length) throw new Error(`${expected.path}: ${errors.join('; ')}`);
   console.log(`ok ${expected.path} ${metadata.width}x${metadata.height} ${buffer.length} bytes`);
+}
+
+async function assertLocalArt6Catalog() {
+  const catalog = await readCatalog();
+  await validateRuntimeDerivativeInventory(catalog);
+
+  const master = catalog.masters.find((candidate) => candidate.revisionId === LOCAL_ART6_REVISION_ID);
+  if (!master) throw new Error(`source-master catalog is missing ${LOCAL_ART6_REVISION_ID}`);
+  if (master.sha256 !== 'b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae' ||
+    master.bytes !== 2_200_453 || master.width !== 1672 || master.height !== 941) {
+    throw new Error(`${LOCAL_ART6_REVISION_ID}: catalog metadata differs from the approved Shop reference`);
+  }
+  const linkedPaths = new Set(master.derivatives.map((derivative) => derivative.path));
+  if (linkedPaths.size !== LOCAL_ART6_DERIVATIVE_PATHS.size ||
+    [...LOCAL_ART6_DERIVATIVE_PATHS].some((path) => !linkedPaths.has(path))) {
+    throw new Error(`${LOCAL_ART6_REVISION_ID}: must link exactly the reviewed Elara derivatives`);
+  }
+
+  const masterPath = localMasterPath(master);
+  try {
+    const bytes = await readFile(masterPath);
+    const metadata = pngMetadata(bytes);
+    if (sha256(bytes) !== master.sha256 || bytes.length !== master.bytes ||
+      metadata.width !== master.width || metadata.height !== master.height) {
+      throw new Error(`${masterPath}: local source master differs from its catalog record`);
+    }
+    console.log(`ok local source master ${master.storageKey} ${bytes.length} bytes`);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    console.log(`local source master unavailable (expected in a fresh checkout): ${master.storageKey}`);
+  }
 }
 
 type RuntimeFile = {
@@ -342,6 +372,7 @@ async function assertContract() {
 }
 
 await Promise.all([...references, ...runtimeAssets].map(assertAsset));
+await assertLocalArt6Catalog();
 const runtimeFiles = await inventoryRuntimeFiles(RUNTIME_ASSET_DIRECTORY);
 assertRuntimeInventory(runtimeFiles);
 await stat('static/assets/scenes/motion-proof-contract.json');

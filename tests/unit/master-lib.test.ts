@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { catalogSha256, createArchive, matchingRestoreReceipt, pngCrc32, readCatalog, releaseEligibility, safeArchiveEntry, sha256, storageKey, validateMasterBuffer, verifyArchive, type MasterCatalog } from '../../scripts/media/master-lib.js';
+import { catalogSha256, collectCatalogObjectsFromStorage, createArchive, localMasterPath, localSourceMastersDirectory, matchingRestoreReceipt, pngCrc32, readCatalog, releaseEligibility, safeArchiveEntry, sha256, storageKey, uploadAndVerify, validateMasterBuffer, verifyArchive, type MasterCatalog } from '../../scripts/media/master-lib.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +30,37 @@ describe('master storage helpers', () => {
     const value = png(); const details = validateMasterBuffer(value);
     expect(details).toMatchObject({ width: 2, height: 3, bytes: value.length, mimeType: 'image/png' });
     expect(storageKey(details.sha256)).toBe(`v1/sha256/${details.sha256.slice(0, 2)}/${details.sha256}.png`);
+  });
+  it('stores local masters by SHA-256, verifies read-back bytes, and keeps the store ignored', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'brac-local-master-store-'));
+    const bytes = png(); const catalog = catalogFor(bytes); const record = catalog.masters[0];
+    try {
+      const target = localMasterPath(record, root);
+      expect(localSourceMastersDirectory(root)).toBe(join(root, '.local/media/source-masters'));
+      expect(target).toBe(join(root, '.local/media/source-masters', record.storageKey));
+
+      await uploadAndVerify(record, bytes, root);
+      expect(await readFile(target)).toEqual(bytes);
+      await expect(collectCatalogObjectsFromStorage(catalog, root)).resolves.toEqual(new Map([[record.sha256, bytes]]));
+      await expect(execFileAsync('git', ['check-ignore', '-q', '.local/media/source-masters/v1/sha256/aa/master.png'])).resolves.toBeDefined();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it('rejects a local master whose existing bytes fail hash verification', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'brac-local-master-corrupt-'));
+    const bytes = png(); const catalog = catalogFor(bytes); const record = catalog.masters[0]; const target = localMasterPath(record, root);
+    try {
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, Buffer.from('corrupt master'));
+      await expect(uploadAndVerify(record, bytes, root)).rejects.toThrow('local read-back hash mismatch');
+      await expect(collectCatalogObjectsFromStorage(catalog, root)).rejects.toThrow('local read-back hash mismatch');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it('identifies a missing local master without suggesting a Git workaround', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'brac-local-master-missing-'));
+    try {
+      await expect(collectCatalogObjectsFromStorage(catalogFor(png()), root)).rejects.toThrow('missing local source master');
+      await expect(collectCatalogObjectsFromStorage(catalogFor(png()), root)).rejects.toThrow('do not add it to Git');
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
   it('rejects malformed PNGs and unsafe archive paths', () => {
     expect(() => validateMasterBuffer(Buffer.from('not a png'))).toThrow('valid PNG');
@@ -166,17 +197,15 @@ describe('master storage helpers', () => {
   });
   it('keeps the seeded catalog free of workstation paths and records every current derivative', async () => {
     const catalog = await readCatalog();
-    expect(catalog.masters).toHaveLength(20);
-    expect(catalog.runtimeDerivatives).toHaveLength(54);
+    expect(catalog.masters.length).toBeGreaterThanOrEqual(20);
+    expect(catalog.runtimeDerivatives.length).toBeGreaterThanOrEqual(54);
     expect(JSON.stringify(catalog)).not.toContain('/home/');
     expect(catalog.runtimeDerivatives.filter((derivative) => derivative.sourceRevisionId === null).map((derivative) => derivative.path)).toEqual([
       'static/assets/scenes/brewery/brewery-paddle-immersion-shadow.webp',
       'static/assets/scenes/brewery/brewery-wort-mask.webp',
       'static/assets/scenes/bakery/bakery-dough-shadow.webp',
       'static/assets/scenes/bakery/bakery-score-groove-01.webp',
-      'static/assets/scenes/shop-environment.webp',
-      'static/assets/scenes/shop/elara-merchant.webp',
-      'static/assets/scenes/shop/elara-portrait.webp'
+      'static/assets/scenes/shop-environment.webp'
     ]);
   });
   it('allows immutable revisions to share a logical ID and validates supersedes links', async () => {

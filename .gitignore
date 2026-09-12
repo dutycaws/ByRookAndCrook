@@ -150,6 +150,10 @@ artifacts/media-captures/
 artifacts/media-master-backups/
 artifacts/media-performance/
 
+# Private source-image masters for local prototyping. The catalog records only
+# immutable hashes and provenance; image bytes must never enter Git.
+.local/media/source-masters/
+
 # Supabase local state
 supabase/.branches/
 supabase/.temp/

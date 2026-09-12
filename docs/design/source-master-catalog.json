@@ -317,17 +317,48 @@
     {
       "path": "static/assets/scenes/shop/elara-merchant.webp",
       "sha256": "022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc",
-      "recipe": "UI-free supplied-reference crop converted to WebP; no separate source master.",
-      "sourceRevisionId": null
+      "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md.",
+      "sourceRevisionId": "design-reference-cozy-tavern-art-6@b3429ddfcb61"
     },
     {
       "path": "static/assets/scenes/shop/elara-portrait.webp",
       "sha256": "d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880",
-      "recipe": "UI-free supplied-reference crop converted to WebP; no separate source master.",
-      "sourceRevisionId": null
+      "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md.",
+      "sourceRevisionId": "design-reference-cozy-tavern-art-6@b3429ddfcb61"
     }
   ],
   "masters": [
+    {
+      "id": "design-reference-cozy-tavern-art-6",
+      "revisionId": "design-reference-cozy-tavern-art-6@b3429ddfcb61",
+      "originalFilename": "CozyTavernConceptArt6.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 2200453,
+      "sha256": "b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae",
+      "mimeType": "image/png",
+      "storageKey": "v1/sha256/b3/b3429ddfcb61496411733d82eb438b2d34d680f0224f648156d061efa812fdae.png",
+      "provenance": {
+        "acquiredAt": "2026-09-11",
+        "source": "Supplied by the project owner for the Shop concept reference; retained in the ignored local prototype source-master store.",
+        "rights": "Project-provided reference asset for By Rook and Crook prototyping.",
+        "promptOrNote": "CozyTavernConceptArt6 is the approved Shop reference. Its UI-free crops supply Elara's framed merchant scene and portrait; the complete PNG never ships or enters Git.",
+        "exportSettings": "Supplied PNG retained unchanged."
+      },
+      "derivatives": [
+        {
+          "path": "static/assets/scenes/shop/elara-merchant.webp",
+          "sha256": "022e692f31cff46903a649f9c8726b69a2d7a03ec6042d6cef9a50693e3b8ddc",
+          "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md."
+        },
+        {
+          "path": "static/assets/scenes/shop/elara-portrait.webp",
+          "sha256": "d0baf79bb61ef8666031ec7f4017a46419e4e57c0fdc640e273767107f5c1880",
+          "recipe": "UI-free supplied-reference crop converted to reviewed WebP; see docs/design/asset-manifest.md."
+        }
+      ],
+      "verifiedAt": "2026-09-12T15:45:06.633Z"
+    },
     {
       "id": "exec-0a0923e7-4115-4f04-ad69-4f153c578e56",
       "revisionId": "exec-0a0923e7-4115-4f04-ad69-4f153c578e56@ccc018f670a5",

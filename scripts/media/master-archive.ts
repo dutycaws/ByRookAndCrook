@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { collectCatalogObjectsFromStorage, createArchive, readCatalog, readReceipts, writeCatalog, writeReceipts } from './master-lib.js';
 async function main() {
   const catalog = await readCatalog();
-  // A successful download/hash pass is the primary-storage verification event. Persist it
+  // A successful read-back/hash pass is the primary-storage verification event. Persist it
   // before creating the archive so the receipt covers the exact release-eligible catalog.
   const objects = await collectCatalogObjectsFromStorage(catalog);
   const verifiedAt = new Date().toISOString();
