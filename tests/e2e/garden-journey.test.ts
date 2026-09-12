@@ -19,20 +19,13 @@ async function openPantry(page: Page) {
 }
 
 async function openGardenActions(page: Page) {
-  const actions = page.getByRole('button', { name: 'Actions', exact: true });
-  await actions.click();
-  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
-    await expect(page.locator('dialog[open]')).toBeVisible();
-  } else {
-    await expect(actions).toHaveAttribute('aria-expanded', 'true');
-  }
+  await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
 }
 
 async function closeMobileGardenActions(page: Page) {
-  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
-    await page.getByRole('button', { name: 'Close actions' }).click();
-    await expect(page.locator('dialog[open]')).toHaveCount(0);
-  }
+  const close = page.getByRole('button', { name: 'Close plot actions' });
+  if (await close.count()) await close.click();
+  await expect(page.locator('[data-garden-action-menu]')).toHaveCount(0);
 }
 
 async function selectPlot(page: Page, plot: Locator) {

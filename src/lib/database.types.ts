@@ -1181,6 +1181,51 @@ export type Database = {
           },
         ]
       }
+      garden_shop_stock: {
+        Row: {
+          daily_cap: number
+          item_key: string
+          remaining_quantity: number
+          restock_day: number
+          rules_version: string
+          save_id: string
+          updated_at: string
+        }
+        Insert: {
+          daily_cap: number
+          item_key: string
+          remaining_quantity: number
+          restock_day: number
+          rules_version: string
+          save_id: string
+          updated_at?: string
+        }
+        Update: {
+          daily_cap?: number
+          item_key?: string
+          remaining_quantity?: number
+          restock_day?: number
+          rules_version?: string
+          save_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_shop_stock_rules_version_item_key_fkey"
+            columns: ["rules_version", "item_key"]
+            isOneToOne: false
+            referencedRelation: "garden_item_catalog"
+            referencedColumns: ["rules_version", "item_key"]
+          },
+          {
+            foreignKeyName: "garden_shop_stock_save_id_fkey"
+            columns: ["save_id"]
+            isOneToOne: false
+            referencedRelation: "tavern_saves"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       garden_species_profiles: {
         Row: {
           base_bake_bonus: number

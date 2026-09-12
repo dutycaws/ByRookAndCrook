@@ -37,6 +37,13 @@ test('the Shop is reachable from Garden and filters Elara’s catalog without ch
     await expect(page.locator('[data-good-category="garden"], [data-good-category="apiary"]')).toHaveCount(0);
     await page.getByRole('radio', { name: 'Apiary' }).check();
     await expect(page.locator('[data-good-category="apiary"]')).not.toHaveCount(0);
+    await page.locator('[data-good-category="apiary"]').first().getByRole('button', { name: 'View details' }).click();
+    await expect(page.getByText('Selected good', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview purchase' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back to goods' }).click();
+    await expect(page.getByText('Selected good', { exact: true })).toBeHidden();
+    await page.getByRole('radio', { name: 'Seeds' }).check();
+    await expect(page.getByText('Selected good', { exact: true })).toBeHidden();
 
     await page.goto('/garden');
     await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
@@ -59,8 +66,9 @@ test('Shop purchase and expansion use previews, preserve retry ids, and update t
     await fundPlayer(page, state.save.id);
 
     const seed = page.locator('[data-good-category="seeds"]').first();
-    await seed.locator('input[name="quantity"]').fill('2');
-    await seed.getByRole('button', { name: /^Buy / }).click();
+    await seed.getByRole('button', { name: 'View details' }).click();
+    await page.getByLabel('Quantity').fill('2');
+    await page.getByRole('button', { name: 'Preview purchase' }).click();
     const dialog = page.locator('dialog.shop-preview');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('region', { name: 'Purchase summary' })).toContainText('Quantity2');
@@ -80,17 +88,54 @@ test('Shop purchase and expansion use previews, preserve retry ids, and update t
     await dialog.getByRole('button', { name: /^Buy — / }).click();
     await expect(page.getByRole('alert')).toContainText('outcome is unknown');
     await dialog.getByRole('button', { name: /Retry buy supplies/i }).click();
-    await expect(page.getByRole('status')).toContainText('Purchase complete');
+    await expect(dialog.getByRole('heading', { name: 'Purchase complete' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Buy another' })).toBeFocused();
     expect(actionIds).toHaveLength(2);
     expect(actionIds[0]).not.toBe('');
     expect(actionIds[1]).toBe(actionIds[0]);
 
+    await dialog.getByRole('button', { name: 'Continue shopping' }).click();
     await page.getByRole('button', { name: /Expand to 16 plots/ }).click();
     await expect(dialog).toContainText('Garden expansion');
     await dialog.getByRole('button', { name: 'Expand garden' }).click();
     await expect(dialog).toBeHidden();
     await page.goto('/garden');
     await expect(page.locator('[data-garden-cell]')).toHaveCount(16);
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('Shop keeps unavailable details inspectable and reconciles affordable and stock-correction flows', async ({ page }) => {
+  const player = await createTestPlayer('shop-unavailable');
+  try {
+    await loginAndCreate(page, player.email, player.password);
+    const snapshot = await player.client.rpc('get_tavern_snapshot');
+    const state = snapshot.data as unknown as { save: { id: string } };
+    await page.goto('/shop');
+    await fundPlayer(page, state.save.id, 0);
+
+    const firstGood = page.locator('[data-good-category]').first();
+    await firstGood.getByRole('button', { name: 'View details' }).click();
+    await page.getByRole('button', { name: 'Preview purchase' }).click();
+    const dialog = page.locator('dialog.shop-preview');
+    await expect(dialog.getByRole('alert')).toContainText(/Need \d+ more gold/);
+    await dialog.getByRole('button', { name: 'View affordable goods' }).click();
+    await expect(page.getByText('Showing goods you can afford.', { exact: false })).toBeVisible();
+    await expect(page.getByText('Selected good', { exact: true })).toBeHidden();
+
+    await fundPlayer(page, state.save.id, 500);
+    execFileSync('docker', [
+      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', `update public.garden_shop_stock set remaining_quantity=1 where save_id='${state.save.id}'::uuid`
+    ]);
+    await page.reload();
+    await page.locator('[data-good-category="seeds"]').first().getByRole('button', { name: 'View details' }).click();
+    await page.getByLabel('Quantity').fill('2');
+    await page.getByRole('button', { name: 'Preview purchase' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Only 1 left');
+    await dialog.getByRole('button', { name: 'Correct quantity' }).click();
+    await expect(page.getByLabel('Quantity')).toHaveValue('1');
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -107,7 +152,7 @@ test('Shop remains usable when its illustrative assets fail and at a mobile widt
     await page.goto('/shop');
     await expect(page.getByRole('heading', { name: "Elara's garden shop" })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Garden' })).toBeVisible();
-    await expect(page.locator('[data-good-category]').first().getByRole('button', { name: /^Buy / })).toBeVisible();
+    await expect(page.locator('[data-good-category]').first().getByRole('button', { name: 'View details' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

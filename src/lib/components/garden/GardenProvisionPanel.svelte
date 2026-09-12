@@ -5,12 +5,15 @@
     ApiaryCommandKind,
     ApiaryCommandPayload,
     ApiaryCommandPreview,
+    ApiaryCommandReceipt,
     GameSnapshot,
     GardenCell,
     GardenCommandKind,
     GardenCommandPayload,
-    GardenCommandPreview
+    GardenCommandPreview,
+    GardenCommandReceipt
   } from '$lib/game/contracts';
+  import { apiarySuccessFeedback, gardenSuccessFeedback } from '$lib/game/garden-feedback';
 
   let { snapshot, selected, includeShop = false }: { snapshot: GameSnapshot; selected: GardenCell | null; includeShop?: boolean } = $props();
 
@@ -110,14 +113,24 @@
     message = null;
     return async ({ result, update }) => {
       pending = false;
-      const data = 'data' in result ? result.data as { message?: string; conflict?: boolean; pendingAction?: object } | undefined : undefined;
+      const data = 'data' in result ? result.data as {
+        message?: string;
+        conflict?: boolean;
+        pendingAction?: object;
+        receipt?: GardenCommandReceipt | ApiaryCommandReceipt;
+      } | undefined : undefined;
       if (result.type === 'error') {
         message = 'The outcome is unknown. Retry to recover the same action.';
         messageError = true;
         return;
       }
       if (result.type === 'success') {
-        message = data?.message ?? 'The garden ledger has been updated.';
+        const cellLabel = (id: string) => snapshot.cells.find((cell) => cell.id === id)?.layoutKey;
+        message = data?.receipt
+          ? previewScope === 'garden'
+            ? gardenSuccessFeedback(data.receipt.commandKind as GardenCommandKind, data.receipt, { cellLabel })
+            : apiarySuccessFeedback(data.receipt.commandKind as ApiaryCommandKind, data.receipt, { cellLabel })
+          : data?.message ?? 'Action complete';
         messageError = false;
         preview = null;
         previewPayload = null;

@@ -12,6 +12,7 @@ import type {
   GardenCommandKind,
   GardenCommandPayload
 } from '$lib/game/contracts';
+import { apiarySuccessFeedback, gardenSuccessFeedback } from '$lib/game/garden-feedback';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -135,7 +136,7 @@ export async function handleGardenCommand(
     const receipt = await commitGardenCommand(locals.supabase, pendingAction);
     return {
       success: true,
-      message: options.successMessage ?? 'The garden ledger has been updated.',
+      message: options.successMessage ?? gardenSuccessFeedback(parsed.commandKind, receipt),
       receipt
     };
   } catch (cause) {
@@ -187,7 +188,7 @@ export async function handleApiaryCommand(
     const receipt = await commitApiaryCommand(locals.supabase, pendingAction);
     return {
       success: true,
-      message: options.successMessage ?? 'The apiary ledger has been updated.',
+      message: options.successMessage ?? apiarySuccessFeedback(parsed.commandKind, receipt),
       receipt
     };
   } catch (cause) {

@@ -6,8 +6,10 @@
     GardenCell,
     GardenCommandKind,
     GardenCommandPayload,
-    GardenCommandPreview
+    GardenCommandPreview,
+    GardenCommandReceipt
   } from '$lib/game/contracts';
+  import { gardenSuccessFeedback } from '$lib/game/garden-feedback';
 
   let {
     snapshot,
@@ -130,13 +132,17 @@
     message = null;
     return async ({ result, update }) => {
       pendingLabel = null;
-      const data = 'data' in result ? result.data as { message?: string; conflict?: boolean; pendingAction?: object } | undefined : undefined;
+      const data = 'data' in result ? result.data as { message?: string; conflict?: boolean; pendingAction?: object; receipt?: GardenCommandReceipt } | undefined : undefined;
       if (result.type === 'error') {
         message = 'The outcome is unknown. Retry to recover the same action.';
         messageError = true;
         return;
       } else if (result.type === 'success') {
-        message = data?.message ?? 'The garden ledger has been updated.';
+        message = data?.receipt
+          ? gardenSuccessFeedback(data.receipt.commandKind, data.receipt, {
+              cellLabel: (id) => snapshot.cells.find((cell) => cell.id === id)?.layoutKey
+            })
+          : data?.message ?? 'Garden action complete';
         messageError = false;
         pendingAction = null;
         clearPreview(false);

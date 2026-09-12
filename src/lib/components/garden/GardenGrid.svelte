@@ -14,6 +14,8 @@
     batchTargetIds = new Set<string>(),
     scale = 1,
     onselect,
+    onnavigate = onselect,
+    onplotfocus = undefined,
     harvestEffect = null
   }: {
     plots: GardenVisualPlot[];
@@ -22,6 +24,10 @@
     batchTargetIds?: Set<string>;
     scale?: number;
     onselect: (cellId: string) => void;
+    /** Keyboard roving selection can update the inspector without opening a menu. */
+    onnavigate?: (cellId: string) => void;
+    /** Camera/menu integration point. Coordinates remain on the board, not the viewport. */
+    onplotfocus?: (cellId: string) => void;
     harvestEffect?: {
       token: number;
       cellId: string;
@@ -68,7 +74,7 @@
     if (!target) return;
     const grid = (event.currentTarget as HTMLElement).closest('[data-garden-grid]');
     event.preventDefault();
-    onselect(target.id);
+    onnavigate(target.id);
     requestAnimationFrame(() => {
       grid?.querySelector<HTMLElement>(`[data-cell-id="${target.id}"]`)?.focus();
     });
@@ -77,14 +83,13 @@
   let bounds = $derived(hexGridBounds(plots));
 </script>
 
-<div class="garden-grid-scroll" data-garden-board>
-  <div
-    class="garden-grid"
-    data-garden-grid
-    role="group"
-    aria-label={`Tavern garden, ${plots.length} unlocked plots`}
-    style={`--hex-width: ${GARDEN_HEX_WIDTH * scale}px; --hex-height: ${GARDEN_HEX_HEIGHT * scale}px; width: ${bounds.width * scale}px; height: ${bounds.height * scale}px`}
-  >
+<div
+  class="garden-grid"
+  data-garden-grid
+  role="group"
+  aria-label={`Tavern garden, ${plots.length} unlocked plots`}
+  style={`--hex-width: ${GARDEN_HEX_WIDTH * scale}px; --hex-height: ${GARDEN_HEX_HEIGHT * scale}px; width: ${bounds.width * scale}px; height: ${bounds.height * scale}px`}
+>
     <div class="sunwash" aria-hidden="true"></div>
     {#each plots as cell (cell.id)}
       {@const position = oddRHexPosition(cell)}
@@ -92,6 +97,9 @@
       <div
         class="plot-node {cell.kind}"
         class:selected={cell.id === selectedId}
+        data-garden-anchor={cell.id}
+        data-garden-anchor-x={position.x * scale + (GARDEN_HEX_WIDTH * scale) / 2}
+        data-garden-anchor-y={position.y * scale + (GARDEN_HEX_HEIGHT * scale) / 2}
         style={`--cell-x: ${position.x * scale}px; --cell-y: ${position.y * scale}px; --plot-z: ${cell.row}`}
       >
         <div class="plot-art" aria-hidden="true">
@@ -136,6 +144,7 @@
           aria-pressed={batchMode ? batchTargetIds.has(cell.id) : cell.id === selectedId}
           onclick={() => onselect(cell.id)}
           onkeydown={(event) => moveFocus(event, cell)}
+          onfocus={() => onplotfocus?.(cell.id)}
         >
           <span class="visually-hidden">{cellLabel(cell)}</span>
           {#if cell.harvestable}
@@ -147,11 +156,9 @@
         </button>
       </div>
     {/each}
-  </div>
 </div>
 
 <style>
-  .garden-grid-scroll { width: 100%; min-width: min-content; height: 100%; overflow: visible; padding: 12px; }
   .garden-grid { position: relative; margin: 0; filter: drop-shadow(0 18px 24px #0008); }
   .sunwash { position: absolute; inset: -75px; background: radial-gradient(circle, #f1c7681c, transparent 58%); pointer-events: none; }
   .plot-node { position: absolute; top: var(--cell-y); left: var(--cell-x); width: var(--hex-width); height: var(--hex-height); z-index: calc(3 + var(--plot-z)); }

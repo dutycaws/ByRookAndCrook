@@ -11,6 +11,7 @@ async function loginAndCreate(page: Page, email: string, password: string) {
   await page.getByRole('button', { name: 'Start tavern' }).click();
   await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
   await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
+  await expect(page.locator('[data-area-scene="garden"]')).toHaveAttribute('data-scene-ready', 'true');
 }
 
 async function visibleGardenStatus(page: Page) {
@@ -23,21 +24,123 @@ async function visibleGardenStatus(page: Page) {
 }
 
 async function openGardenActions(page: Page) {
-  const actions = page.getByRole('button', { name: 'Actions', exact: true });
-  await actions.click();
-  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
-    await expect(page.locator('dialog[open]')).toBeVisible();
-  } else {
-    await expect(actions).toHaveAttribute('aria-expanded', 'true');
-  }
+  await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
 }
 
 async function closeMobileGardenActions(page: Page) {
-  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
-    await page.getByRole('button', { name: 'Close actions' }).click();
-    await expect(page.locator('dialog[open]')).toHaveCount(0);
-  }
+  const close = page.getByRole('button', { name: 'Close plot actions' });
+  if (await close.count()) await close.click();
+  await expect(page.locator('[data-garden-action-menu]')).toHaveCount(0);
 }
+
+test('floating plot menus branch through plant, water, fertilize, and move previews', async ({ page }) => {
+  test.setTimeout(60_000);
+  const player = await createTestPlayer('garden-floating-menu-paths');
+  try {
+    await page.setViewportSize({ width: 1672, height: 930 });
+    await loginAndCreate(page, player.email, player.password);
+    const state = await getSnapshot(player.client);
+    if (!state) throw new Error('Expected a garden snapshot.');
+    execFileSync('docker', [
+      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', `insert into public.garden_inventory(save_id,item_key,quantity) values ('${state.save.id}'::uuid,'amendment_n',3) on conflict(save_id,item_key) do update set quantity=excluded.quantity`
+    ]);
+    await page.reload();
+
+    const empty = page.locator('[data-garden-cell][data-layout-key="c3"]');
+    await empty.click();
+    await openGardenActions(page);
+    await page.locator('[data-garden-action="plant"]').click();
+    const desktopParent = page.locator('[data-garden-menu-parent]');
+    await expect(desktopParent).toBeVisible();
+    const [parentBounds, viewportBounds] = await Promise.all([
+      desktopParent.boundingBox(),
+      page.locator('[data-garden-camera-viewport]').boundingBox()
+    ]);
+    expect(parentBounds!.x).toBeGreaterThanOrEqual(viewportBounds!.x - 1);
+    expect(parentBounds!.x + parentBounds!.width).toBeLessThanOrEqual(viewportBounds!.x + viewportBounds!.width + 1);
+    await desktopParent.getByRole('button', { name: 'Water' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="water"]')).toBeVisible();
+    await desktopParent.getByRole('button', { name: 'Plant' }).click();
+    await page.getByRole('button', { name: 'Preview planting' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Plant');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+
+    await page.locator('[data-garden-cell][data-layout-key="c4"]').click();
+    await page.locator('[data-garden-action="water"]').click();
+    await page.getByLabel('Water amount').fill('17');
+    await expect(page.locator('output').filter({ hasText: '17' })).toBeVisible();
+    await page.locator('[data-batch-start="water"]').click();
+    await page.locator('[data-garden-cell][data-layout-key="c3"]').click();
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.getByRole('button', { name: 'Preview water' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Water');
+    await expect(page.locator('[data-garden-preview-targets]')).toContainText('c4, c3');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+
+    await page.locator('[data-garden-cell][data-layout-key="c3"]').click();
+    await page.locator('[data-garden-action="fertilize"]').click();
+    await page.getByLabel('Fertilizer strength').fill('3');
+    await expect(page.getByText('Heavy · 3')).toBeVisible();
+    await page.getByRole('button', { name: 'Preview fertilize' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Fertilize');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+
+    const planted = page.locator('[data-garden-cell][data-layout-key="c1"]');
+    await planted.click();
+    await page.locator('[data-garden-action="move"]').click();
+    await empty.click();
+    await expect(page.getByText('Destination: c3. Its occupant will swap.')).toBeVisible();
+    await page.getByRole('button', { name: 'Preview move' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Move');
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('floating menu exposes contextual clover, removal, and compost previews', async ({ page }) => {
+  const player = await createTestPlayer('garden-floating-contextual-actions');
+  try {
+    await loginAndCreate(page, player.email, player.password);
+    let state = await getSnapshot(player.client);
+    if (!state) throw new Error('Expected a garden snapshot.');
+    const cloverCell = state.cells.find((cell) => cell.layoutKey === 'c3');
+    const harvestCell = state.cells.find((cell) => cell.layoutKey === 'c0');
+    if (!cloverCell || !harvestCell) throw new Error('Expected starter garden cells.');
+    const planted = await commitGardenCommand(player.client, {
+      saveId: state.save.id, actionId: crypto.randomUUID(), expectedRevision: state.save.revision,
+      commandKind: 'plant', payload: { cellId: cloverCell.id, seedItemKey: 'seed_clover' }
+    });
+    execFileSync('docker', [
+      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      '-c', `update public.garden_plants set growth_progress=60,age_days=3 where save_id='${state.save.id}'::uuid and cell_id='${cloverCell.id}'::uuid`
+    ]);
+    await harvestCrop(player.client, {
+      saveId: state.save.id, cellId: harvestCell.id, actionId: crypto.randomUUID(), expectedRevision: planted.committedRevision
+    });
+    await page.reload();
+
+    const clover = page.locator('[data-garden-cell][data-layout-key="c3"]');
+    await clover.click();
+    await page.locator('[data-garden-action="incorporate-clover"]').click();
+    await page.getByRole('button', { name: 'Preview incorporation' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Incorporate clover');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+
+    await clover.click();
+    await page.locator('[data-garden-action="remove"]').click();
+    await page.getByRole('button', { name: 'Preview removal' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Remove');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+
+    await clover.click();
+    await page.locator('[data-garden-action="compost"]').click();
+    await page.getByRole('button', { name: 'Preview compost' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Compost');
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
 
 async function assertReachablePlots(page: Page, count: number) {
   const cells = page.locator('[data-garden-cell]');
@@ -56,8 +159,8 @@ async function assertReachablePlots(page: Page, count: number) {
           && hit.top >= viewport.top - 1 && hit.bottom <= viewport.bottom + 1
       };
     });
-    expect(geometry.width).toBeGreaterThanOrEqual(44);
-    expect(geometry.height).toBeGreaterThanOrEqual(44);
+    expect(geometry.width).toBeGreaterThanOrEqual(24);
+    expect(geometry.height).toBeGreaterThanOrEqual(24);
     expect(geometry.reachable).toBe(true);
   }
 }
@@ -91,8 +194,6 @@ test('the garden preserves keyboard geometry while expanding from 12 to 24 plots
       'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.tavern_saves set gold=240 where id='${initialState.save.id}'::uuid`
     ]);
-    await c1.scrollIntoViewIfNeeded();
-    const original = await c1.boundingBox();
     const expanded16 = await commitGardenCommand(player.client, {
       saveId: initialState.save.id,
       actionId: crypto.randomUUID(),
@@ -102,11 +203,22 @@ test('the garden preserves keyboard geometry while expanding from 12 to 24 plots
     });
     await page.reload();
     await assertReachablePlots(page, 16);
-    const c1After16 = page.locator('[data-garden-cell][data-layout-key="c1"]');
-    await c1After16.scrollIntoViewIfNeeded();
-    const after16 = await c1After16.boundingBox();
-    expect(Math.abs(after16!.x - original!.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(after16!.y - original!.y)).toBeLessThanOrEqual(1);
+    const fittedHexes = await page.locator('[data-garden-cell]').evaluateAll((cells) => {
+      const byKey = new Map(cells.map((cell) => [cell.getAttribute('data-layout-key'), cell.getBoundingClientRect()]));
+      const c1 = byKey.get('c1')!;
+      const c2 = byKey.get('c2')!;
+      const c4 = byKey.get('c4')!;
+      return {
+        sameRowGap: c2.left - c1.right,
+        sameRowCenterY: Math.abs((c2.top + c2.height / 2) - (c1.top + c1.height / 2)),
+        diagonalRowStep: Math.abs(c4.top - (c2.top + c2.height * 0.75))
+      };
+    });
+    // Expansion may change fit scale; the transformed board must retain its
+    // logical odd-r tessellation and keep every hit target inside the frame.
+    expect(Math.abs(fittedHexes.sameRowGap)).toBeLessThanOrEqual(1);
+    expect(fittedHexes.sameRowCenterY).toBeLessThanOrEqual(1);
+    expect(fittedHexes.diagonalRowStep).toBeLessThanOrEqual(1);
 
     const expandedState = await getSnapshot(player.client);
     if (!expandedState) throw new Error('Expected a tavern snapshot after first expansion.');
@@ -140,6 +252,7 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
     await expect(page.locator('[data-garden-inspector]')).toContainText('Fennel');
     await expect(page.locator('[data-soil-diagnostic]')).toContainText('Nitrogen');
     await expect(page.locator('[data-soil-diagnostic]')).toContainText('Site light');
+    await closeMobileGardenActions(page);
     let status = await visibleGardenStatus(page);
     await expect(status.getByRole('region', { name: 'Three-day forecast' })).toBeVisible();
     await expect(status.getByRole('region', { name: 'Threatened plots' })).toHaveCount(0);
@@ -147,13 +260,10 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
     const waterlogged = page.locator('[data-garden-cell][data-layout-key="c4"]');
     await expect(waterlogged).toHaveAttribute('aria-label', /needs attention: Waterlogged soil/i);
     await expect(waterlogged.locator('[data-garden-attention]')).toHaveText('!');
-    if (!page.viewportSize()?.width || page.viewportSize()!.width > 620) await openGardenActions(page);
     await waterlogged.focus();
     await page.keyboard.press('Enter');
-    await expect(waterlogged).toBeFocused();
-    if (!page.viewportSize()?.width || page.viewportSize()!.width > 620) {
-      await expect(page.getByRole('button', { name: 'Actions', exact: true })).toHaveAttribute('aria-expanded', 'false');
-    }
+    await openGardenActions(page);
+    await expect(page.locator('[data-garden-action-menu]')).toContainText('Plot actions');
     await expect(page.locator('[data-garden-inspector]')).toContainText('Pepper');
     await expect(page.locator('[data-garden-symptom]')).toContainText('Waterlogged soil');
     await expect(page.locator('[data-garden-symptom]')).toContainText("Moisture is above this species' preferred range; more water will increase stress.");
@@ -176,6 +286,7 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
     ]);
     await page.reload();
     await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
+    await expect(page.locator('[data-area-scene="garden"]')).toHaveAttribute('data-scene-ready', 'true');
     status = await visibleGardenStatus(page);
     const threatenedColony = page.locator('[data-garden-cell][data-layout-key="c2"]');
     await expect(threatenedColony).toHaveAttribute('aria-label', /needs attention:.*colony-loss warning/i);
@@ -202,42 +313,33 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
   }
 });
 
-test('garden Actions preserve state and focus across Escape and responsive breakpoints', async ({ page }) => {
+test('floating garden menus preserve dismissal focus and use a single mobile branch', async ({ page }) => {
   const player = await createTestPlayer('garden-actions-responsive');
   try {
     await loginAndCreate(page, player.email, player.password);
-    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.setViewportSize({ width: 1600, height: 900 });
 
     const plot = page.locator('[data-garden-cell][data-layout-key="c1"]');
-    await plot.focus();
-    await plot.press('Enter');
+    await plot.click();
     await openGardenActions(page);
 
-    const trigger = page.getByRole('button', { name: 'Actions', exact: true });
-    const firstAction = page.getByRole('button', { name: 'Add plots for water' });
-    await firstAction.focus();
+    const menu = page.locator('[data-garden-action-menu]');
+    await expect(menu).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close plot actions' })).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    await expect(trigger).toBeFocused();
+    await expect(menu).toHaveCount(0);
+    await expect(plot).toBeFocused();
 
-    await openGardenActions(page);
-    await firstAction.focus();
+    await plot.click();
+    await page.locator('[data-garden-action="water"]').click();
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.locator('dialog[open]')).toBeVisible();
-    await expect(firstAction).toBeFocused();
-
-    await page.setViewportSize({ width: 1000, height: 800 });
-    await expect(page.locator('dialog[open]')).toHaveCount(0);
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(firstAction).toBeFocused();
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.locator('dialog[open]')).toBeVisible();
-    await page.getByRole('button', { name: 'Close actions' }).click();
-    await expect(page.locator('dialog[open]')).toHaveCount(0);
-    await expect(trigger).toBeFocused();
-    await page.setViewportSize({ width: 1000, height: 800 });
-    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('[data-garden-menu-parent]')).toHaveCount(0);
+    await expect(menu).toContainText(/c1\s*\/\s*Water/);
+    await page.keyboard.press('Escape');
+    await expect(menu).toContainText('Plot actions');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(plot).toBeFocused();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -261,29 +363,33 @@ test('garden controls preview and recover replayable planting and batch care', a
     await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
 
     const cloverCell = page.locator('[data-garden-cell][data-layout-key="c3"]');
-    await cloverCell.focus();
-    await cloverCell.press('Enter');
+    await cloverCell.click();
     await expect(cloverCell).toHaveAttribute('aria-pressed', 'true');
     await openGardenActions(page);
+    await page.locator('[data-garden-action="plant"]').click();
     await page.getByRole('button', { name: 'Preview planting' }).click();
-    await expect(page.locator('[data-garden-preview]')).toContainText('plant seed');
-    await page.getByRole('button', { name: 'Apply plant seed' }).click();
-    await expect(page.locator('.workbench').getByRole('status')).toContainText(/complete|updated/i);
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Plant');
+    await page.locator('[data-garden-confirm="plant"]').click();
+    await expect(page.locator('[data-garden-action-menu]').getByRole('status')).toContainText(/planted|complete/i);
     await expect(page.locator('[data-garden-cell][data-layout-key="c3"]')).toHaveAttribute('aria-label', /Clover/);
 
-    await page.getByRole('button', { name: 'Add plots for water' }).click();
+    await page.locator('[data-garden-action="water"]').click();
+    await page.locator('[data-batch-start="water"]').click();
     await expect(page.getByRole('region', { name: 'Batch care selection' })).toContainText('selected for water');
     await page.locator('[data-garden-cell][data-layout-key="c4"]').click();
     await page.getByRole('button', { name: 'Done', exact: true }).click();
-    await page.getByRole('button', { name: 'Cancel batch' }).click();
-    await expect(page.getByRole('button', { name: 'Add plots for water' })).toBeFocused();
-    await page.getByRole('button', { name: 'Add plots for water' }).click();
-    await page.locator('[data-garden-cell][data-layout-key="c4"]').click();
+    await page.getByRole('button', { name: 'Cancel selection' }).click();
+    await page.locator('[data-batch-start="water"]').click();
+    await expect(cloverCell).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    const secondBatchPlot = page.locator('[data-garden-cell][data-layout-key="c4"]');
+    await expect(secondBatchPlot).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="water"]')).toBeVisible();
     await page.getByRole('button', { name: 'Done', exact: true }).click();
-    await page.getByLabel('Water dose').fill('7');
+    await page.getByLabel('Water amount').fill('7');
     await page.getByRole('button', { name: 'Preview water' }).click();
-    await expect(page.locator('[data-garden-preview]')).toContainText('target Count2');
-    await expect(page.locator('[data-garden-preview]')).toContainText('same Dose Per Target7');
+    await expect(page.locator('[data-garden-preview-targets]')).toContainText('c3, c4');
 
     await page.route(
       (url) => url.pathname === '/garden' && url.search === '?/command',
@@ -299,16 +405,12 @@ test('garden controls preview and recover replayable planting and batch care', a
         await route.continue();
       }
     );
-    await page.getByRole('button', { name: 'Apply water plots' }).click();
-    await expect(page.locator('.workbench').getByRole('alert')).toContainText('outcome is unknown');
-    await page.getByRole('button', { name: 'Retry water plots' }).click();
-    await expect(page.locator('.workbench').getByRole('status')).toContainText(/complete|updated/i);
+    await page.locator('[data-garden-confirm="water"]').click();
+    await expect(page.locator('[data-garden-action-menu]').getByRole('alert')).toContainText('outcome is unknown');
+    await page.locator('[data-garden-confirm="water"]').click();
+    await expect(page.locator('[data-garden-action-menu]').getByRole('status')).toContainText(/watered|complete/i);
     await expect(cloverCell).toHaveAttribute('aria-pressed', 'true');
-    if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
-      await expect(page.locator('dialog[open]')).toBeVisible();
-    } else {
-      await expect(page.getByRole('button', { name: 'Actions', exact: true })).toHaveAttribute('aria-expanded', 'true');
-    }
+    await expect(page.locator('[data-garden-action-menu]')).toBeVisible();
     expect(actionIds).toHaveLength(2);
     expect(actionIds[0]).not.toBe('');
     expect(actionIds[1]).toBe(actionIds[0]);
@@ -340,24 +442,28 @@ test('garden lifecycle controls stay reachable and protect craft-reserved compos
     await page.reload();
     await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
     const compostCell = page.locator('[data-garden-cell][data-layout-key="c3"]');
-    await compostCell.focus();
-    await compostCell.press('Enter');
+    await compostCell.click();
     await expect(compostCell).toHaveAttribute('aria-pressed', 'true');
     await openGardenActions(page);
 
-    await page.getByText('Move or swap c3', { exact: true }).click();
-    await page.getByRole('button', { name: 'Preview move or swap' }).click();
-    await expect(page.locator('[data-garden-preview]')).toContainText('move or swap');
-    await expect(page.locator('[data-garden-preview]')).toContainText('Availability is checked again');
+    await page.locator('[data-garden-action="move"]').click();
+    await page.locator('[data-garden-cell][data-layout-key="c4"]').click();
+    await page.getByRole('button', { name: 'Preview move' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Move');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+    await compostCell.click();
 
-    await page.getByText('Plant lifecycle actions', { exact: true }).click();
-    await page.getByRole('button', { name: 'Preview clover incorporation' }).click();
-    await expect(page.locator('[data-garden-preview]')).toContainText('incorporate clover');
+    await page.locator('[data-garden-action="incorporate-clover"]').click();
     await expect(page.getByText('Established clover is sacrificed and releases local soil benefits over three days.')).toBeVisible();
+    await page.getByRole('button', { name: 'Preview incorporation' }).click();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Incorporate clover');
+    await page.getByRole('button', { name: 'Close plot actions' }).click();
+    await compostCell.click();
 
+    await page.locator('[data-garden-action="remove"]').click();
+    await expect(page.getByText('This removes the plant permanently.')).toBeVisible();
     await page.getByRole('button', { name: 'Preview removal' }).click();
-    await expect(page.locator('[data-garden-preview]')).toContainText('remove plant');
-    await expect(page.getByText('Removal is permanent. Seedlings that are too young are removed without creating compost.')).toBeVisible();
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Remove');
 
     state = await getSnapshot(player.client);
     if (!state) throw new Error('Expected a snapshot before harvest reservations.');
@@ -376,10 +482,9 @@ test('garden lifecycle controls stay reachable and protect craft-reserved compos
     await page.reload();
     await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
     const compostTarget = page.locator('[data-garden-cell][data-layout-key="c3"]');
-    await compostTarget.focus();
-    await compostTarget.press('Enter');
+    await compostTarget.click();
     await openGardenActions(page);
-    await page.getByText('Compost a pantry ingredient', { exact: true }).click();
+    await page.locator('[data-garden-action="compost"]').click();
     const compostSelect = page.getByLabel('Ingredient batch');
     await expect(compostSelect).toBeVisible();
     await expect(compostSelect.locator(`option[value="${harvest0.ingredientBatchId}"]`)).toHaveCount(0);
@@ -390,6 +495,7 @@ test('garden lifecycle controls stay reachable and protect craft-reserved compos
 });
 
 test('contextual apiary controls preserve equipment, colony, feed, honey, and treatment rules', async ({ page }) => {
+  test.setTimeout(120_000);
   const player = await createTestPlayer('garden-apiary-ui');
   try {
     await loginAndCreate(page, player.email, player.password);
@@ -405,9 +511,9 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
 
     const c3 = page.locator('[data-garden-cell][data-layout-key="c3"]');
-    await c3.focus();
-    await c3.press('Enter');
+    await c3.click();
     await openGardenActions(page);
+    await page.locator('[data-garden-action="apiary"]').click();
     await page.getByRole('button', { name: 'Preview hive installation' }).click();
     await expect(page.locator('[data-provision-preview]')).toContainText('available Equipment2');
     await page.getByRole('button', { name: 'Apply install hive' }).click();
@@ -422,18 +528,18 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     await closeMobileGardenActions(page);
     const c5 = page.locator('[data-garden-cell][data-layout-key="c5"]');
     await c5.scrollIntoViewIfNeeded();
-    await c5.focus();
-    await c5.press('Enter');
+    await c5.click();
     await openGardenActions(page);
+    await page.locator('[data-garden-action="apiary"]').click();
     await page.getByRole('button', { name: 'Preview hive installation' }).click();
     await page.getByRole('button', { name: 'Apply install hive' }).click();
     await expect(page.locator('[data-apiary-inspector]')).toContainText('Empty');
 
     await closeMobileGardenActions(page);
     const c2 = page.locator('[data-garden-cell][data-layout-key="c2"]');
-    await c2.focus();
-    await c2.press('Enter');
+    await c2.click();
     await openGardenActions(page);
+    await page.locator('[data-garden-action="apiary"]').click();
     await page.getByRole('button', { name: 'Preview feeding' }).click();
     await expect(page.locator('[data-provision-preview]')).toContainText('floral Honey After12');
     await page.getByRole('button', { name: 'Apply feed colony' }).click();

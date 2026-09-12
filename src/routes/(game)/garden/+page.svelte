@@ -2,7 +2,7 @@
   import { enhance } from '$app/forms';
   import { onDestroy, onMount, tick } from 'svelte';
   import CropDetails from '$lib/components/garden/CropDetails.svelte';
-  import GardenActions from '$lib/components/garden/GardenActions.svelte';
+  import GardenActionMenu from '$lib/components/garden/GardenActionMenu.svelte';
   import GardenOverview from '$lib/components/garden/GardenOverview.svelte';
   import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
   import IllustratedActionButton from '$lib/components/scene/IllustratedActionButton.svelte';
@@ -25,6 +25,9 @@
   let batchTargetIds = $state<Set<string>>(new Set());
   let batchOriginId = $state<string | null>(null);
   let previousBatchTargetIds = $state<Set<string>>(new Set());
+  let moveSourceId = $state<string | null>(null);
+  let moveTargetId = $state<string | null>(null);
+  let menuOpen = $state(false);
 
   type ReceiptContext = { cellId: string | null; openRequest: string | null };
 
@@ -77,6 +80,10 @@
   });
 
   function selectPlot(cellId: string) {
+    if (moveSourceId) {
+      if (cellId !== moveSourceId) moveTargetId = cellId;
+      return;
+    }
     if (selectingBatchPlots) {
       const next = new Set(batchTargetIds);
       if (next.has(cellId)) next.delete(cellId); else next.add(cellId);
@@ -84,11 +91,29 @@
       return;
     }
     selectedId = cellId;
+    menuOpen = true;
+  }
+
+  function navigatePlot(cellId: string) {
+    // In target-selection modes, arrow keys only move focus. Enter/Space then
+    // confirms the focused plot without replacing the action's source or menu.
+    if (selectingBatchPlots || moveSourceId) return;
+    selectedId = cellId;
+    menuOpen = false;
+    cancelMove();
   }
 
   async function focusPlot(cellId: string | null) {
     await tick();
     if (cellId) document.querySelector<HTMLElement>(`[data-cell-id="${cellId}"]`)?.focus();
+  }
+
+  async function closePlotMenu() {
+    menuOpen = false;
+    cancelMove();
+    // The parent owns the rendered plot. Wait for the floating menu to leave
+    // the DOM before returning focus, so responsive unmounting cannot steal it.
+    await focusPlot(selectedId);
   }
 
   async function returnToActions(selector: string) {
@@ -117,6 +142,17 @@
     selectingBatchPlots = false;
     batchTargetIds = new Set(previousBatchTargetIds);
     await returnToActions(`[data-batch-start="${kind}"]`);
+  }
+
+  async function startMove() {
+    moveSourceId = selected?.id ?? null;
+    moveTargetId = null;
+    await focusPlot(moveSourceId);
+  }
+
+  function cancelMove() {
+    moveSourceId = null;
+    moveTargetId = null;
   }
 
   async function finishBatch() {
@@ -190,7 +226,7 @@
   <meta name="description" content="Tend and harvest the tavern garden." />
 </svelte:head>
 
-<main class="page-shell" data-hydrated={hydrated}>
+<main class="page-shell crafting-page" data-hydrated={hydrated}>
   {#if !data.snapshot}
     <section class="onboarding panel" aria-labelledby="start-title">
       <span class="large-icon" aria-hidden="true">🌿</span>
@@ -226,18 +262,7 @@
             </div>
             <span class="legend"><i></i> Ready</span>
           </div>
-          <GardenScene {visual} {harvestEffect} batchMode={selectingBatchPlots ? batchMode : null} {batchTargetIds} onselect={selectPlot} />
-          {#if selectingBatchPlots}
-            <section class="batch-toolbar" aria-label="Batch care selection">
-              <strong>{batchTargetIds.size} plot{batchTargetIds.size === 1 ? '' : 's'} selected for {batchMode}</strong>
-              <div><button type="button" class="secondary-button" onclick={finishBatch}>Done</button><button type="button" class="text-button" onclick={cancelBatch}>Cancel</button></div>
-            </section>
-          {/if}
-        </section>
-      {/snippet}
-      {#snippet inspector()}
-        <div class="garden-sidebar">
-          <CropDetails cell={selected} />
+          <GardenScene {visual} {harvestEffect} batchMode={selectingBatchPlots ? batchMode : null} {batchTargetIds} onselect={selectPlot} onnavigate={navigatePlot} />
           {#snippet harvestAction()}
             {#if selected?.kind === 'plant' && selected.harvestable}
               <form method="POST" action="?/harvest" use:enhance={enhanceHarvest}>
@@ -256,20 +281,32 @@
               </form>
             {/if}
           {/snippet}
-
-          {#key selected?.id}
-            <GardenActions
+          {#if menuOpen}
+            <GardenActionMenu
               snapshot={data.snapshot!}
               {selected}
-              {batchMode}
+              batchMode={batchMode}
               {batchTargetIds}
-              openRequest={completedAction.cellId === selected?.id ? completedAction.openRequest : null}
+              {moveTargetId}
               onstartbatch={startBatch}
               oncancelbatch={cancelBatch}
+              onstartmove={startMove}
+              oncancelmove={cancelMove}
+              onclose={closePlotMenu}
               harvest={harvestAction}
             />
-          {/key}
-
+          {/if}
+          {#if selectingBatchPlots}
+            <section class="batch-toolbar" data-garden-batch-toolbar aria-label="Batch care selection">
+              <strong>{batchTargetIds.size} plot{batchTargetIds.size === 1 ? '' : 's'} selected for {batchMode}</strong>
+              <div><button type="button" class="secondary-button" onclick={finishBatch}>Done</button><button type="button" class="text-button" onclick={cancelBatch}>Cancel</button></div>
+            </section>
+          {/if}
+        </section>
+      {/snippet}
+      {#snippet inspector()}
+        <div class="garden-sidebar">
+          <CropDetails cell={selected} />
           {#if transportError}
             <div class="form-message error" role="alert" aria-live="assertive">{transportError}</div>
           {/if}

@@ -108,6 +108,12 @@ export interface GardenInventoryItem {
   effect: Record<string, Json>;
 }
 
+export interface ShopItem extends Omit<GardenInventoryItem, 'quantity'> {
+  dailyCap: number;
+  remainingStock: number;
+  restockDay: number;
+}
+
 export interface GardenState {
   rulesVersion: string;
   plotCount: 12 | 16 | 24;
@@ -120,7 +126,7 @@ export interface GardenState {
     lightDelta: number;
   }>;
   inventory: GardenInventoryItem[];
-  shop: Omit<GardenInventoryItem, 'quantity'>[];
+  shop: ShopItem[];
   compostJobs: Array<{
     id: string;
     cellId: string;
