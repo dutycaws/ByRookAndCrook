@@ -4,16 +4,12 @@
  * the database contract.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
+import sharp from 'sharp';
 import type { NpcSheet } from '$lib/game/npc-sheet';
 
-const execFileAsync = promisify(execFile);
 export const PORTRAIT_STYLE_VERSION = 'community-npc-portrait-sprite-v1';
 export const PORTRAIT_REFERENCE_SET = 'brac-character-look-v1';
 export const PORTRAIT_REFERENCE_REVISION = 'brac-character-look-v1@private-v1';
@@ -104,12 +100,18 @@ export function lockedPortraitPrompt(sheet: NpcSheet, controls: Partial<Portrait
   ].filter(Boolean).join('\n');
 }
 
-export function portraitProviderAvailability(config: Record<string, string | undefined>): PortraitProviderAvailability {
+export function portraitProviderAvailability(config: Record<string, string | undefined>, projectRoot = process.cwd()): PortraitProviderAvailability {
+  const configured = portraitProviderConfiguration(config);
+  if (!configured.available) return configured;
+  try { loadPrivatePortraitReferences(projectRoot); } catch { return { available: false, reason: 'missing_private_references' }; }
+  return configured;
+}
+
+export function portraitProviderConfiguration(config: Record<string, string | undefined>): PortraitProviderAvailability {
   const provider = config.NPC_IMAGE_PROVIDER ?? 'openai';
   if (provider === 'local') return { available: false, reason: 'local_not_implemented' };
   if (provider !== 'openai') return { available: false, reason: 'unknown_provider' };
   if (!(config.NPC_IMAGE_API_KEY ?? config.OPENAI_API_KEY)) return { available: false, reason: 'missing_image_api_key' };
-  try { loadPrivatePortraitReferences(); } catch { return { available: false, reason: 'missing_private_references' }; }
   return { available: true, provider: 'openai', model: config.NPC_IMAGE_MODEL ?? 'gpt-image-2' };
 }
 
@@ -153,7 +155,7 @@ async function openAiImageRequest(config: Record<string, string | undefined>, re
 }
 
 export function createPortraitProvider(config: Record<string, string | undefined>): PortraitProvider {
-  const availability = portraitProviderAvailability(config);
+  const availability = portraitProviderConfiguration(config);
   if (!availability.available) return { async generate() { throw new PortraitProviderError('provider_unavailable', availability.reason); } };
   return { generate: (request, signal) => openAiImageRequest(config, request, signal) };
 }
@@ -193,16 +195,18 @@ export function validatePortraitPng(bytes: Buffer): ValidatedPortraitPng {
 
 export type OptimizedPortrait = ValidatedPortraitPng & { runtimeBytes: Buffer; runtimeSha256: string; runtimeMimeType: 'image/webp' };
 export async function optimisePortraitWebp(png: Buffer): Promise<OptimizedPortrait> {
-  const source = validatePortraitPng(png); const directory = await mkdtemp(join(tmpdir(), 'brac-portrait-')); const input = join(directory, 'portrait.png'); const output = join(directory, 'portrait.webp');
+  const source = validatePortraitPng(png);
   try {
-    await writeFile(input, png); let converted: Buffer | null = null;
-    for (const quality of [100, 92, 84, 76]) { await execFileAsync('cwebp', ['-quiet', '-q', String(quality), input, '-o', output]); const bytes = await readFile(output); if (bytes.length <= PORTRAIT_RUNTIME_MAX_BYTES) { converted = bytes; break; } }
+    let converted: Buffer | null = null;
+    for (const quality of [100, 92, 84, 76]) {
+      const candidate = await sharp(png).webp({ quality, alphaQuality: 100 }).toBuffer();
+      if (candidate.length <= PORTRAIT_RUNTIME_MAX_BYTES) { converted = candidate; break; }
+    }
     if (!converted) throw new PortraitProviderError('invalid_output', 'The portrait cannot be optimized below the runtime size limit.');
-    const { stdout } = await execFileAsync('identify', ['-format', '%w,%h,%[channels]', output]);
-    if (stdout.trim() !== `${PORTRAIT_WIDTH},${PORTRAIT_HEIGHT},srgba`) throw new PortraitProviderError('invalid_output', 'The optimized portrait lost required dimensions or transparency.');
+    const metadata = await sharp(converted).metadata();
+    if (metadata.width !== PORTRAIT_WIDTH || metadata.height !== PORTRAIT_HEIGHT || !metadata.hasAlpha) throw new PortraitProviderError('invalid_output', 'The optimized portrait lost required dimensions or transparency.');
     return { ...source, runtimeBytes: converted, runtimeSha256: hash(converted), runtimeMimeType: 'image/webp' };
   } catch (cause) { if (cause instanceof PortraitProviderError) throw cause; throw new PortraitProviderError('invalid_output', 'The portrait derivative could not be validated.'); }
-  finally { await rm(directory, { recursive: true, force: true }); }
 }
 
 export type PrivatePortraitStorage = { from(bucket: string): { upload(key: string, body: Buffer, options: { contentType: string; cacheControl: string; upsert: boolean }): Promise<{ error: { message: string } | null }>; download(key: string): Promise<{ data: Blob | null; error: { message: string } | null }>; createSignedUrl(key: string, seconds: number): Promise<{ data: { signedUrl: string } | null; error: { message: string } | null }>; remove(keys: string[]): Promise<{ error: { message: string } | null }> } };

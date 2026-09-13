@@ -1,20 +1,23 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { createFixtureNpcSheet } from '../../scripts/community-npc-fixtures.js';
 import {
   createPortraitProvider, lockedPortraitPrompt, optimisePortraitWebp, portraitItemOptions,
-  portraitProviderAvailability, validatePortraitPng, visualInputHash, PortraitProviderError, ensurePrivatePortraitBuckets, PRIVATE_PORTRAIT_BUCKET, PRIVATE_PORTRAIT_MASTER_BUCKET, type PrivatePortraitStorage
+  portraitProviderAvailability, portraitProviderConfiguration, validatePortraitPng, visualInputHash, PortraitProviderError, ensurePrivatePortraitBuckets, PRIVATE_PORTRAIT_BUCKET, PRIVATE_PORTRAIT_MASTER_BUCKET, type PortraitReference, type PrivatePortraitStorage
 } from '../../src/lib/server/community-npc-portraits/index.js';
 import { runPortraitBatch } from '../../src/lib/server/community-npc-portraits/service.js';
 
 async function transparentPng() {
-  const directory = await mkdtemp(join(tmpdir(), 'brac-portrait-test-')); const output = join(directory, 'sprite.png');
-  try { execFileSync('convert', ['-size', '1024x1536', 'xc:none', '-fill', '#9d733f', '-draw', 'rectangle 120,80 900,1450', 'PNG32:' + output]); return await readFile(output); }
-  finally { await rm(directory, { recursive: true, force: true }); }
+  return sharp({ create: { width: 1024, height: 1536, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: { create: { width: 781, height: 1371, channels: 4, background: { r: 157, g: 115, b: 63, alpha: 1 } } }, left: 120, top: 80 }])
+    .png()
+    .toBuffer();
 }
+
+const fixtureReferences: PortraitReference[] = [{ revision: 'test-reference@v1', filename: 'test-reference.png', sha256: 'f'.repeat(64), bytes: Buffer.from('test-reference') }];
 
 function storage(): PrivatePortraitStorage {
   const objects = new Map<string, Buffer>();
@@ -39,11 +42,17 @@ describe('community NPC portrait provider boundary', () => {
     expect(visualInputHash(sheet, { expression: 'warm' })).not.toBe(visualInputHash(sheet, { expression: 'stern' }));
   });
 
-  it('uses the dedicated image key and reports provider availability honestly', () => {
-    expect(portraitProviderAvailability({ NPC_IMAGE_API_KEY: 'key' })).toEqual({ available: true, provider: 'openai', model: 'gpt-image-2' });
-    expect(portraitProviderAvailability({ NPC_IMAGE_PROVIDER: 'local' })).toEqual({ available: false, reason: 'local_not_implemented' });
-    const provider = createPortraitProvider({});
-    return expect(provider.generate({ idempotencyKey: 'test', prompt: 'x', references: [], alternativeOrdinal: 1, width: 1024, height: 1536, outputFormat: 'png', background: 'transparent' }, AbortSignal.timeout(1_000))).rejects.toMatchObject({ code: 'provider_unavailable' });
+  it('uses the dedicated image key and reports provider availability honestly', async () => {
+    const emptyRoot = await mkdtemp(join(tmpdir(), 'brac-missing-portrait-references-'));
+    try {
+      expect(portraitProviderConfiguration({ NPC_IMAGE_API_KEY: 'key' })).toEqual({ available: true, provider: 'openai', model: 'gpt-image-2' });
+      expect(portraitProviderAvailability({ NPC_IMAGE_API_KEY: 'key' }, emptyRoot)).toEqual({ available: false, reason: 'missing_private_references' });
+      expect(portraitProviderAvailability({ NPC_IMAGE_PROVIDER: 'local' })).toEqual({ available: false, reason: 'local_not_implemented' });
+      const provider = createPortraitProvider({});
+      await expect(provider.generate({ idempotencyKey: 'test', prompt: 'x', references: [], alternativeOrdinal: 1, width: 1024, height: 1536, outputFormat: 'png', background: 'transparent' }, AbortSignal.timeout(1_000))).rejects.toMatchObject({ code: 'provider_unavailable' });
+    } finally {
+      await rm(emptyRoot, { recursive: true, force: true });
+    }
   });
 
   it('initializes the master and runtime buckets as private with their constrained MIME types', async () => {
@@ -66,16 +75,15 @@ describe('community NPC portrait provider boundary', () => {
   });
 
   it('rejects opaque or uncropped portrait output', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'brac-portrait-invalid-')); const opaque = join(directory, 'opaque.png');
-    try { execFileSync('convert', ['-size', '1024x1536', 'xc:#663300', 'PNG32:' + opaque]); await expect(readFile(opaque).then(validatePortraitPng)).rejects.toMatchObject({ code: 'invalid_output' }); }
-    finally { await rm(directory, { recursive: true, force: true }); }
+    const opaque = await sharp({ create: { width: 1024, height: 1536, channels: 4, background: { r: 102, g: 51, b: 0, alpha: 1 } } }).png().toBuffer();
+    expect(() => validatePortraitPng(opaque)).toThrow(expect.objectContaining({ code: 'invalid_output' }));
   });
 
   it('completes partial batches without retrying a refused alternative', async () => {
     const png = await transparentPng(); const completions: unknown[] = []; let calls = 0;
     const provider = { async generate(request: { alternativeOrdinal: number }) { calls += 1; if (request.alternativeOrdinal === 2) throw new PortraitProviderError('provider_refused', 'refused'); return { bytes: png, provider: 'deterministic-test', model: 'test-model' }; } };
     const client = { async rpc(_name: string, args: Record<string, unknown>) { completions.push(args); return { error: null }; } };
-    const result = await runPortraitBatch(client, { jobId: '00000000-0000-4000-8000-000000000001', npcId: '00000000-0000-4000-8000-000000000002', sheet: createFixtureNpcSheet(), controls: { pose: 'relaxed', expression: 'warm', clothingCondition: 'well_kept' }, alternatives: 2, visualInputHash: 'a'.repeat(64) }, { config: { NPC_IMAGE_API_KEY: 'test' }, storage: storage(), provider });
+    const result = await runPortraitBatch(client, { jobId: '00000000-0000-4000-8000-000000000001', npcId: '00000000-0000-4000-8000-000000000002', sheet: createFixtureNpcSheet(), controls: { pose: 'relaxed', expression: 'warm', clothingCondition: 'well_kept' }, alternatives: 2, visualInputHash: 'a'.repeat(64) }, { config: { NPC_IMAGE_API_KEY: 'test' }, storage: storage(), provider, references: fixtureReferences });
     expect(result).toEqual({ status: 'completed', completed: 1, failed: 1 });
     expect(calls).toBe(2);
     expect(completions).toHaveLength(1);
@@ -86,7 +94,7 @@ describe('community NPC portrait provider boundary', () => {
     const calls: number[] = []; const completions: unknown[] = [];
     const provider = { async generate(request: { alternativeOrdinal: number }) { calls.push(request.alternativeOrdinal); throw new PortraitProviderError('provider_timeout', 'timeout'); } };
     const client = { async rpc(_name: string, args: Record<string, unknown>) { completions.push(args); return { error: null }; } };
-    const result = await runPortraitBatch(client, { jobId: '00000000-0000-4000-8000-000000000003', npcId: '00000000-0000-4000-8000-000000000004', sheet: createFixtureNpcSheet(), controls: { pose: 'automatic', expression: 'from_sheet', clothingCondition: 'from_sheet' }, alternatives: 3, visualInputHash: 'b'.repeat(64) }, { config: { NPC_IMAGE_API_KEY: 'test' }, storage: storage(), provider });
+    const result = await runPortraitBatch(client, { jobId: '00000000-0000-4000-8000-000000000003', npcId: '00000000-0000-4000-8000-000000000004', sheet: createFixtureNpcSheet(), controls: { pose: 'automatic', expression: 'from_sheet', clothingCondition: 'from_sheet' }, alternatives: 3, visualInputHash: 'b'.repeat(64) }, { config: { NPC_IMAGE_API_KEY: 'test' }, storage: storage(), provider, references: fixtureReferences });
     expect(result).toEqual({ status: 'failed', completed: 0, failed: 3, errorCode: 'provider_timeout' });
     expect(calls).toEqual([1, 2, 3]);
     expect(completions[0]).toMatchObject({ p_candidates: [], p_error_code: 'provider_timeout' });

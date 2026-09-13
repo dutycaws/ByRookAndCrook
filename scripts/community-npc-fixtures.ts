@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import sharp from 'sharp';
 import type { NpcSheet } from '../src/lib/game/npc-sheet.js';
 import { LOCAL_SHOP_RUNTIME_ASSET_BUCKET } from '../src/lib/game/shop-runtime-assets.js';
 import {
@@ -22,9 +23,9 @@ const COMMUNITY_NPC_LOCAL_DIRECTORY = '.local/media/runtime-derivatives/communit
 const COMMUNITY_NPC_SETTING_MASTER = '.local/media/source-masters/community-npcs/settings/CozyTavernBackground.png';
 const COMMUNITY_NPC_SETTINGS_DIRECTORY = `${COMMUNITY_NPC_LOCAL_DIRECTORY}/settings`;
 const COMMUNITY_NPC_SETTING_VARIANTS = [
-  { id: 'c0370000-0000-4000-8000-000000000001', filename: 'lantern-lit-tavern-table.webp', crop: '900x506+760+300' },
-  { id: 'c0370000-0000-4000-8000-000000000002', filename: 'hearth-side-booth.webp', crop: '950x534+0+160' },
-  { id: 'c0370000-0000-4000-8000-000000000003', filename: 'quiet-window-table.webp', crop: '1000x562+250+80' }
+  { id: 'c0370000-0000-4000-8000-000000000001', filename: 'lantern-lit-tavern-table.webp', crop: { width: 900, height: 506, left: 760, top: 300 } },
+  { id: 'c0370000-0000-4000-8000-000000000002', filename: 'hearth-side-booth.webp', crop: { width: 950, height: 534, left: 0, top: 160 } },
+  { id: 'c0370000-0000-4000-8000-000000000003', filename: 'quiet-window-table.webp', crop: { width: 1000, height: 562, left: 250, top: 80 } }
 ] as const;
 // The shared local fixture bucket deliberately admits only WebP derivatives.
 const COMMUNITY_NPC_EXTENSIONS = new Set(['.webp']);
@@ -44,15 +45,19 @@ function sha256(bytes: Buffer): string {
  * The setting library is derived only from the ignored, user-supplied source
  * master.  Nothing is synthesized or committed by this helper.
  */
-export function deriveLocalCommunityNpcSettingVariants(projectRoot = process.cwd()): string[] {
+export async function deriveLocalCommunityNpcSettingVariants(projectRoot = process.cwd()): Promise<string[]> {
   const source = resolve(projectRoot, COMMUNITY_NPC_SETTING_MASTER);
   if (!existsSync(source)) return [];
   const outputDirectory = resolve(projectRoot, COMMUNITY_NPC_SETTINGS_DIRECTORY);
   mkdirSync(outputDirectory, { recursive: true });
-  for (const variant of COMMUNITY_NPC_SETTING_VARIANTS) {
+  await Promise.all(COMMUNITY_NPC_SETTING_VARIANTS.map(async (variant) => {
     const output = resolve(outputDirectory, variant.filename);
-    execFileSync('convert', [source, '-crop', variant.crop, '+repage', '-resize', '1600x900!', '-strip', '-quality', '86', output]);
-  }
+    await sharp(source)
+      .extract(variant.crop)
+      .resize(1600, 900, { fit: 'fill' })
+      .webp({ quality: 86 })
+      .toFile(output);
+  }));
   return COMMUNITY_NPC_SETTING_VARIANTS.map((variant) => `settings/${variant.filename}`);
 }
 
@@ -99,7 +104,7 @@ export function listLocalCommunityNpcSceneAssets(projectRoot = process.cwd()): L
 /** Uploads only dedicated community-NPC runtime derivatives to local Storage. */
 export async function seedLocalCommunityNpcRuntimeAssets(storage: LocalAssetStorage, projectRoot = process.cwd()): Promise<LocalCommunityNpcSceneAsset[]> {
   await ensureLocalShopRuntimeAssetBucket(storage);
-  deriveLocalCommunityNpcSettingVariants(projectRoot);
+  await deriveLocalCommunityNpcSettingVariants(projectRoot);
   const root = resolve(projectRoot, COMMUNITY_NPC_LOCAL_DIRECTORY);
   const bucket = storage.from(LOCAL_SHOP_RUNTIME_ASSET_BUCKET);
   const assets = listLocalCommunityNpcSceneAssets(projectRoot);
