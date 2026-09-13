@@ -3,6 +3,11 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { assertLocalSupabaseUrl, seedLocalShopRuntimeAssets } from './local-shop-runtime-assets.js';
+import {
+  seedLocalCommunityNpcFixture,
+  seedLocalCommunityNpcRuntimeAssets,
+  seedOptionalLocalCommunityNpcScale
+} from './community-npc-fixtures.js';
 
 const environmentFile = fileURLToPath(new URL('../.env', import.meta.url));
 if (!existsSync(environmentFile)) throw new Error('Missing .env. Run `npm run env:local` first.');
@@ -53,6 +58,7 @@ async function main() {
   const { data: listed, error: listError } = await admin.auth.admin.listUsers({ perPage: 1000 });
   if (listError) throw listError;
 
+  const pilotIds = new Map<string, string>();
   for (const account of DEFAULT_USERS) {
     const existing = listed.users.find((user) => user.email === account.email);
     const response = existing
@@ -67,11 +73,39 @@ async function main() {
         });
 
     if (response.error) throw response.error;
+    if (!response.data.user) throw new Error(`Local pilot ${account.email} did not return an identity.`);
+    pilotIds.set(account.email, response.data.user.id);
     console.info(`${existing ? 'Updated' : 'Created'} local pilot ${account.email}`);
   }
 
   const assets = await seedLocalShopRuntimeAssets(admin.storage);
   console.info(`Verified ${assets.length} local Shop runtime asset(s) in local Supabase Storage.`);
+  const communitySceneAssets = await seedLocalCommunityNpcRuntimeAssets(admin.storage);
+  console.info(`Verified ${communitySceneAssets.length} dedicated local Community NPC runtime scene asset(s) in local Supabase Storage.`);
+  const first = DEFAULT_USERS[0];
+  const second = DEFAULT_USERS[1];
+  const fixture = await seedLocalCommunityNpcFixture(
+    admin,
+    apiUrl.toString(),
+    status.PUBLISHABLE_KEY ?? required('PUBLIC_SUPABASE_PUBLISHABLE_KEY'),
+    {
+      administrator: { id: pilotIds.get(first.email)!, ...first },
+      reviewer: { id: pilotIds.get(second.email)!, ...second }
+    },
+    communitySceneAssets[0] ?? null
+  );
+  console.info(fixture.state === 'published'
+    ? `Verified local community-NPC author→review→publish fixture${fixture.npcId ? ` (${fixture.npcId})` : ''}.`
+    : 'Community-NPC publishing fixture skipped because optional local media is unavailable.');
+
+  if (process.env.FIXTURE_NPC_SCALE === '1') {
+    const creator = await createClient(apiUrl.toString(), status.PUBLISHABLE_KEY ?? required('PUBLIC_SUPABASE_PUBLISHABLE_KEY'), { auth: { autoRefreshToken: false, persistSession: false } }).auth.signInWithPassword(first);
+    if (creator.error || !creator.data.session) throw new Error(`Unable to create local scale fixture session: ${creator.error?.message ?? 'no session'}`);
+    const creatorClient = createClient(apiUrl.toString(), status.PUBLISHABLE_KEY ?? required('PUBLIC_SUPABASE_PUBLISHABLE_KEY'), { global: { headers: { Authorization: `Bearer ${creator.data.session.access_token}` } } });
+    const tavern = await creatorClient.rpc('create_tavern');
+    if (tavern.error || !tavern.data?.saveId) throw new Error(`Unable to create local scale fixture tavern: ${tavern.error?.message ?? 'no save'}`);
+    seedOptionalLocalCommunityNpcScale(status.DB_URL ?? '', pilotIds.get(first.email)!, tavern.data.saveId as string);
+  }
 }
 
 main().catch((cause) => {

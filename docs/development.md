@@ -52,13 +52,17 @@ DO_NOT_TRACK=1 supabase stop --project-id by-rook-and-crook
 
 ## Local pilot accounts
 
-`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads the ignored Shop prototype art from `.local/media/runtime-derivatives/` into the local-only `prototype-runtime-media` Supabase Storage bucket. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The generated image bytes stay outside Git; a fresh checkout without those optional local files continues to render functional text and reviewed static fallbacks. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
+`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads ignored runtime derivatives from `.local/media/runtime-derivatives/` into the local-only `prototype-runtime-media` Supabase Storage bucket. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The first pilot is bootstrapped as the local Community NPC administrator and author; the second is the independent reviewer. The fixture exercises the real author → scene selection → submission → evaluation → review → publication path for **Willow Vellum** only when a dedicated scene derivative is present under `.local/media/runtime-derivatives/community-npcs/`. Those files are stored only under `community-npcs/...` object keys; Shop and item art are never used as NPC scenes. Re-running the command verifies the already-published fixture instead of making another one.
+
+Generated image bytes stay outside Git. A fresh checkout without optional dedicated Community NPC runtime derivatives still renders functional text and reviewed static fallbacks; in that situation the fixture truthfully reports that it skipped the optional scene-backed publication path. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
 
 ```sh
 npm run credentials:local
 ```
 
 The fixture script asks the local CLI for a short-lived administrative connection, verifies `127.0.0.1:57321`, and refuses a hosted target. The credentials can be overridden with `LOCAL_PILOT_ONE_EMAIL`, `LOCAL_PILOT_ONE_PASSWORD`, `LOCAL_PILOT_TWO_EMAIL`, and `LOCAL_PILOT_TWO_PASSWORD` in `.env`.
+
+For roster-performance work only, set `FIXTURE_NPC_SCALE=1` when running the command. That opt-in fixture creates 1,000 disposable local community identities and assigns 100 of them to the first pilot's tavern. It uses the local Docker database container and never contacts a hosted service. It is deliberately excluded from normal startup so ordinary fixture runs remain quick.
 
 Public sign-up is disabled. Hosted pilot accounts must be provisioned outside the browser flow.
 
@@ -139,7 +143,7 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 | `npm run media:perf` | Report authenticated mobile cold-cache media and Core Web Vitals proxy measurements for the four scene routes. |
 | `npm run media:perf:calibration -- --directory <reports>` | Require 10 unique valid report-mode runs, calculate each route/metric p75, and prove every p75 is within the activation budgets. |
 | `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
-| `npm run fixtures:users:local` | Create or refresh the two local pilot identities, then verify and upload ignored Shop runtime art to local Supabase Storage. |
+| `npm run fixtures:users:local` | Create or refresh pilots, local Community NPC capabilities, and the Willow Vellum author→review→publish fixture; verify and upload ignored runtime derivatives to local Supabase Storage. Set `FIXTURE_NPC_SCALE=1` for the optional 1,000-identity/100-resident roster fixture. |
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
 | `npm run db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
 | `npm run check` | Run Svelte and TypeScript diagnostics. |

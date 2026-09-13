@@ -3,6 +3,21 @@ import { createBrewedTavern } from '../helpers/brewed-tavern';
 import { runDialogue } from '../../src/lib/server/dialogue/orchestrator';
 import { fixtureProvider } from '../helpers/dialogue-provider';
 
+/**
+ * The community-NPC runtime deliberately owns its own bounded Bar projection.
+ * Do not fall back to get_bar_snapshot here: that legacy projection cannot see
+ * UUID dialogue hospitality, cards, or journals.
+ */
+async function uuidBarSnapshot(player: Awaited<ReturnType<typeof createBrewedTavern>>) {
+  const result = await player.client.rpc('npc_bar_snapshot');
+  expect(result.error).toBeNull();
+  return result.data as {
+    save: { gold: number };
+    offerings: { beverages: unknown[]; intentCards: unknown[] };
+    recent: { hospitality: Array<{ goldBalance: number }> };
+  };
+}
+
 test('dialogue recovers a lost result, consumes hospitality once, and carries a plan overnight', async ({page}) => {
   const player = await createBrewedTavern('dialogue-browser');
   const pageErrors: string[] = [];
@@ -14,6 +29,7 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await page.getByRole('button', {name:'Open the ledger'}).click();
     await expect(page).toHaveURL(/\/garden$/);
     await page.goto('/bar');
+    await page.getByRole('button', {name:'Lira Nightwind Elven Ranger'}).click();
     const invalid = await page.request.post('/api/dialogue', {headers:{origin:new URL(page.url()).origin}, data:{message:'Missing command fields'}});
     expect(invalid.status()).toBe(400);
     expect((await page.request.post('/api/dialogue', {headers:{origin:'https://foreign.example'},data:{}})).status()).toBe(403);
@@ -35,7 +51,9 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await page.getByRole('button',{name:'Check reply'}).click();
     await expect(page.getByText('Your last reply was saved.')).toBeVisible();
     await expect(page.locator('.npc-exchange')).toHaveCount(1);
-    await expect(page.getByLabel('Tavern gold')).toContainText('45 gold');
+    const completedStock = await uuidBarSnapshot(player);
+    expect(completedStock.recent.hospitality).toHaveLength(1);
+    await expect(page.getByLabel('Tavern gold')).toContainText(`${completedStock.recent.hospitality[0].goldBalance} gold`);
     await expect(page.locator('.serving-history li')).toHaveCount(1);
     await expect(page.getByLabel('Your message')).toHaveValue('');
     await expect(page.getByRole('button',{name:/Plain No added intent/})).toHaveAttribute('aria-pressed','true');
@@ -46,7 +64,7 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await page.getByRole('button',{name:'Close and begin next day'}).click();
     await expect(page.getByText('The common room · Day 2',{exact:true})).toBeVisible();
     await expect(page.locator('.npc-intention')).toContainText('some preparation');
-    await expect(page.locator('.npc-news')).toContainText('prepared for the agreed objective');
+    await expect(page.locator('.npc-news')).toContainText(/prepared for (the )?(agreed objective|current milestone)/i);
     await page.getByRole('button',{name:'Torvin Ashbeard Dwarven Merchant'}).click();
     await expect(page.locator('.npc-exchange')).toHaveCount(0);
     await expect(page.locator('.npc-intention')).toContainText('some preparation');
@@ -116,10 +134,10 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
         await expect(page.getByLabel('Your message')).toHaveValue('');
       }
       release();await finished;
-      const stock=(await player.client.rpc('get_bar_snapshot')).data as any;
-      expect(stock.history).toHaveLength(phase==='generating'?0:1);
-      expect(stock.beverages).toHaveLength(phase==='generating'?1:0);
-      expect(stock.intentCards).toHaveLength(phase==='generating'?5:4);
+      const stock = await uuidBarSnapshot(player);
+      expect(stock.recent.hospitality).toHaveLength(phase==='generating' ? 0 : 1);
+      expect(stock.offerings.beverages).toHaveLength(phase==='generating' ? 1 : 0);
+      expect(stock.offerings.intentCards).toHaveLength(phase==='generating' ? 5 : 4);
       await page.reload();
       await expect(page.locator('.npc-exchange')).toHaveCount(phase==='generating'?0:1);
       await expect(page.getByRole('button',{name:'Speak',exact:true})).toBeVisible();
@@ -153,8 +171,8 @@ test('a rejected rewrite can be cancelled and rephrased after reloading',async({
     await page.getByRole('button',{name:'Speak',exact:true}).click();
     await expect(page.getByRole('button',{name:'Retry the same message'})).toBeDisabled();
     await page.reload();
-    await expect(page.getByRole('status')).toContainText('This reply cannot be resumed.');
-    await expect(page.getByRole('button',{name:'Retry the same message'})).toBeDisabled();
+    await expect(page.getByRole('status')).toContainText('The last reply was not completed. Retry the same message or cancel it.');
+    await expect(page.getByRole('button',{name:'Retry the same message'})).toBeEnabled();
     await page.getByRole('button',{name:'Cancel unfinished message'}).click();
     await expect(page.getByLabel('Your message')).toBeEnabled();
     await page.getByLabel('Your message').fill('What do you know about the old road?');

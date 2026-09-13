@@ -9,7 +9,7 @@ describe('dialogue boundaries',()=>{
     expect(result).toContain('OPENAI_API_KEY="test-only-placeholder"');expect(result).toContain('CUSTOM="first\nsecond"');expect(result).not.toContain('=old');
   });
   it('accepts intent and hospitality independently and validates message/sequence',()=>{
-    const input={turnId:crypto.randomUUID(),patronKey:'lira' as const,message:'Hello',expectedConversationSequence:0,interactionVersion:'dialogue-v2' as const};
+    const input={turnId:crypto.randomUUID(),npcId:crypto.randomUUID(),message:'Hello',expectedConversationSequence:0,interactionVersion:'dialogue-v2' as const};
     expect(parseInput(input)).toMatchObject({intentCardId:null,offering:null});
     expect(parseInput({...input,intentCardId:crypto.randomUUID()}).offering).toBeNull();
     expect(parseInput({...input,offering:{kind:'beverage',itemId:crypto.randomUUID()}}).intentCardId).toBeNull();

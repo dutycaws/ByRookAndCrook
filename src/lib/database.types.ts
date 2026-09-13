@@ -1771,6 +1771,54 @@ export type Database = {
           },
         ]
       }
+      npc_daily_analytics: {
+        Row: {
+          abandonments: number
+          active_worlds: number
+          assignments: number
+          campaign_completions: number
+          days_present: number
+          dialogue_turns: number
+          dismissals: number
+          event_day: string
+          hospitality_interactions: number
+          milestone_failures: number
+          milestone_successes: number
+          report_band: string
+          version_id: string
+        }
+        Insert: {
+          abandonments?: number
+          active_worlds?: number
+          assignments?: number
+          campaign_completions?: number
+          days_present?: number
+          dialogue_turns?: number
+          dismissals?: number
+          event_day: string
+          hospitality_interactions?: number
+          milestone_failures?: number
+          milestone_successes?: number
+          report_band?: string
+          version_id: string
+        }
+        Update: {
+          abandonments?: number
+          active_worlds?: number
+          assignments?: number
+          campaign_completions?: number
+          days_present?: number
+          dialogue_turns?: number
+          dismissals?: number
+          event_day?: string
+          hospitality_interactions?: number
+          milestone_failures?: number
+          milestone_successes?: number
+          report_band?: string
+          version_id?: string
+        }
+        Relationships: []
+      }
       patron_catalog: {
         Row: {
           arc_steps: string[]
@@ -1873,6 +1921,45 @@ export type Database = {
           icon?: string
           plant_key?: string
           rules_version?: string
+        }
+        Relationships: []
+      }
+      player_profiles: {
+        Row: {
+          adult_attested_at: string | null
+          bio: string
+          created_at: string
+          creator_terms_accepted_at: string | null
+          creator_terms_version: string | null
+          display_name: string
+          mature_content_enabled: boolean
+          normalized_display_name: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          adult_attested_at?: string | null
+          bio?: string
+          created_at?: string
+          creator_terms_accepted_at?: string | null
+          creator_terms_version?: string | null
+          display_name: string
+          mature_content_enabled?: boolean
+          normalized_display_name?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          adult_attested_at?: string | null
+          bio?: string
+          created_at?: string
+          creator_terms_accepted_at?: string | null
+          creator_terms_version?: string | null
+          display_name?: string
+          mature_content_enabled?: boolean
+          normalized_display_name?: string | null
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -2019,6 +2106,7 @@ export type Database = {
       }
       tavern_saves: {
         Row: {
+          community_npc_level: number
           created_at: string
           current_day: number
           daily_craft_kind: string | null
@@ -2033,6 +2121,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          community_npc_level?: number
           created_at?: string
           current_day?: number
           daily_craft_kind?: string | null
@@ -2047,6 +2136,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          community_npc_level?: number
           created_at?: string
           current_day?: number
           daily_craft_kind?: string | null
@@ -2186,6 +2276,313 @@ export type Database = {
           p_expected_revision: number
           p_save_id: string
         }
+        Returns: Json
+      }
+      npc_admin_audit: {
+        Args: { p_cursor?: string; p_kind?: string; p_limit?: number }
+        Returns: Json
+      }
+      npc_admin_quarantine_or_purge: {
+        Args: { p_npc: string; p_purge: boolean; p_reason: string }
+        Returns: undefined
+      }
+      npc_admin_release_name: {
+        Args: { p_npc: string; p_reason: string }
+        Returns: undefined
+      }
+      npc_admin_set_capability: {
+        Args: {
+          p_capability: string
+          p_enabled: boolean
+          p_reason?: string
+          p_user: string
+        }
+        Returns: undefined
+      }
+      npc_admin_transfer: {
+        Args: { p_new_owner: string; p_npc: string; p_reason: string }
+        Returns: undefined
+      }
+      npc_admin_users: {
+        Args: { p_limit?: number; p_query?: string }
+        Returns: Json
+      }
+      npc_appeal_report: {
+        Args: { p_body: string; p_report: string }
+        Returns: string
+      }
+      npc_archived_resident: { Args: { p_instance: string }; Returns: Json }
+      npc_archived_roster: {
+        Args: { p_cursor?: string; p_limit?: number; p_query?: string }
+        Returns: Json
+      }
+      npc_author_add_scene: {
+        Args: {
+          p_alt_text: string
+          p_generation?: Json
+          p_npc_id: string
+          p_storage_key: string
+        }
+        Returns: Json
+      }
+      npc_author_analytics: { Args: never; Returns: Json }
+      npc_author_assistance_complete: {
+        Args: { p_error_code?: string; p_job_id: string; p_proposal: Json }
+        Returns: undefined
+      }
+      npc_author_assistance_disposition: {
+        Args: {
+          p_accept: boolean
+          p_event_id: string
+          p_expected_revision: number
+        }
+        Returns: Json
+      }
+      npc_author_assistance_status: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
+      npc_author_create: { Args: { p_sheet: Json }; Returns: Json }
+      npc_author_request_assistance: {
+        Args: {
+          p_expected_revision: number
+          p_instruction: string
+          p_npc_id: string
+          p_section_path: string
+        }
+        Returns: Json
+      }
+      npc_author_request_scene: {
+        Args: {
+          p_alternative?: number
+          p_expected_revision: number
+          p_npc_id: string
+          p_prompt: string
+        }
+        Returns: Json
+      }
+      npc_author_reserve_call: {
+        Args: { p_kind: string; p_npc_id: string; p_request?: Json }
+        Returns: Json
+      }
+      npc_author_resolve_review_comment: {
+        Args: { p_comment_id: string }
+        Returns: undefined
+      }
+      npc_author_sandbox_complete: {
+        Args: { p_error_code?: string; p_job_id: string; p_reply: string }
+        Returns: undefined
+      }
+      npc_author_sandbox_start: {
+        Args: {
+          p_expected_revision: number
+          p_message: string
+          p_npc_id: string
+        }
+        Returns: Json
+      }
+      npc_author_sandbox_status: {
+        Args: { p_sandbox_id: string }
+        Returns: Json
+      }
+      npc_author_save: {
+        Args: { p_expected_revision: number; p_npc_id: string; p_sheet: Json }
+        Returns: Json
+      }
+      npc_author_scene_complete: {
+        Args: { p_candidates: Json; p_error_code?: string; p_job_id: string }
+        Returns: Json
+      }
+      npc_author_scene_status: { Args: { p_job_id: string }; Returns: Json }
+      npc_author_select_scene: {
+        Args: {
+          p_asset_id: string
+          p_expected_revision: number
+          p_npc_id: string
+        }
+        Returns: Json
+      }
+      npc_author_submit: {
+        Args: { p_expected_revision: number; p_npc_id: string }
+        Returns: Json
+      }
+      npc_author_workspace: { Args: never; Returns: Json }
+      npc_author_workspace_detail: { Args: { p_npc_id: string }; Returns: Json }
+      npc_bar_snapshot: { Args: never; Returns: Json }
+      npc_bar_summary: { Args: never; Returns: Json }
+      npc_bootstrap_admin: { Args: { p_user: string }; Returns: undefined }
+      npc_dialogue_begin: {
+        Args: {
+          p_actor: string
+          p_expected_sequence: number
+          p_intent_card_id?: string
+          p_message: string
+          p_npc_id: string
+          p_offering_item_id?: string
+          p_offering_kind?: string
+          p_turn_id: string
+        }
+        Returns: Json
+      }
+      npc_dialogue_checkpoint: {
+        Args: {
+          p_actor: string
+          p_fence: string
+          p_stage: string
+          p_turn_id: string
+          p_value?: Json
+        }
+        Returns: undefined
+      }
+      npc_dialogue_complete: {
+        Args: { p_actor: string; p_fence: string; p_turn_id: string }
+        Returns: Json
+      }
+      npc_dialogue_context: {
+        Args: {
+          p_actor: string
+          p_category?: string
+          p_query?: string
+          p_turn_id: string
+        }
+        Returns: Json
+      }
+      npc_dialogue_status: {
+        Args: { p_cancel?: boolean; p_turn_id: string }
+        Returns: Json
+      }
+      npc_dismiss: { Args: { p_instance: string }; Returns: undefined }
+      npc_evaluation_complete: {
+        Args: { p_error_code?: string; p_result: Json; p_version: string }
+        Returns: undefined
+      }
+      npc_generation_complete: {
+        Args: { p_error_code?: string; p_job: string; p_result: Json }
+        Returns: undefined
+      }
+      npc_inbox: { Args: { p_limit?: number }; Returns: Json }
+      npc_inbox_mark_read: { Args: { p_ids: string[] }; Returns: number }
+      npc_journals: { Args: { p_instance_ids: string[] }; Returns: Json }
+      npc_my_capabilities: { Args: never; Returns: Json }
+      npc_profile_me: { Args: never; Returns: Json }
+      npc_public_creator: { Args: { p_normalized_name: string }; Returns: Json }
+      npc_public_creator_npcs: {
+        Args: { p_cursor?: string; p_limit?: number; p_normalized_name: string }
+        Returns: Json
+      }
+      npc_record_engagement: {
+        Args: {
+          p_actor: string
+          p_kind: string
+          p_metadata?: Json
+          p_version: string
+        }
+        Returns: undefined
+      }
+      npc_report: {
+        Args: { p_category: string; p_evidence: string; p_version: string }
+        Returns: string
+      }
+      npc_request_retirement: {
+        Args: { p_npc: string; p_reason: string }
+        Returns: string
+      }
+      npc_resident: { Args: { p_instance: string }; Returns: Json }
+      npc_reviewer_comment: {
+        Args: {
+          p_body: string
+          p_npc_id: string
+          p_section: string
+          p_version_id: string
+        }
+        Returns: string
+      }
+      npc_reviewer_decide: {
+        Args: {
+          p_decision: string
+          p_notes?: string
+          p_rating?: string
+          p_version_id: string
+        }
+        Returns: Json
+      }
+      npc_reviewer_moderation_queue: {
+        Args: { p_cursor?: string; p_kind?: string; p_limit?: number }
+        Returns: Json
+      }
+      npc_reviewer_publish: { Args: { p_version_id: string }; Returns: Json }
+      npc_reviewer_queue: { Args: never; Returns: Json }
+      npc_reviewer_report_detail: {
+        Args: { p_report_id: string }
+        Returns: Json
+      }
+      npc_reviewer_resolve_report: {
+        Args: {
+          p_action: string
+          p_creator_reason: string
+          p_report: string
+          p_reviewer_reason: string
+          p_uphold: boolean
+        }
+        Returns: undefined
+      }
+      npc_reviewer_retirement: {
+        Args: { p_approve: boolean; p_reason: string; p_request: string }
+        Returns: undefined
+      }
+      npc_reviewer_submission: { Args: { p_version_id: string }; Returns: Json }
+      npc_rollup_analytics: { Args: { p_day: string }; Returns: undefined }
+      npc_roster: {
+        Args: { p_cursor?: string; p_limit?: number; p_query?: string }
+        Returns: Json
+      }
+      npc_serve_hospitality: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_instance_id: string
+          p_item_id: string
+          p_item_kind: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      npc_set_mature_preference: {
+        Args: { p_attest?: boolean; p_enabled: boolean }
+        Returns: Json
+      }
+      npc_share_conversation: {
+        Args: {
+          p_expected_hash: string
+          p_include_display_name?: boolean
+          p_instance: string
+        }
+        Returns: string
+      }
+      npc_share_preview: { Args: { p_instance: string }; Returns: Json }
+      npc_share_view: { Args: { p_token: string }; Returns: Json }
+      npc_update_community_settings: {
+        Args: {
+          p_attest_adult: boolean
+          p_bio: string
+          p_creator_terms: boolean
+          p_display_name: string
+          p_mature: boolean
+        }
+        Returns: Json
+      }
+      npc_update_profile: {
+        Args: {
+          p_attest_adult: boolean
+          p_bio: string
+          p_creator_terms: boolean
+          p_display_name: string
+          p_mature: boolean
+        }
+        Returns: Json
+      }
+      npc_world_accept_plan: {
+        Args: { p_actor: string; p_instance: string; p_steps: Json }
         Returns: Json
       }
       preview_apiary_command: {
