@@ -5,6 +5,7 @@
   import AssistancePanel from '$lib/components/community/AssistancePanel.svelte';
   import PortraitPanel from '$lib/components/community/PortraitPanel.svelte';
   import SettingPanel from '$lib/components/community/SettingPanel.svelte';
+  import AuthoringScenePreview from '$lib/components/community/AuthoringScenePreview.svelte';
   import SandboxPanel from '$lib/components/community/SandboxPanel.svelte';
   import HistoryPanel from '$lib/components/community/HistoryPanel.svelte';
   import RetirementPanel from '$lib/components/community/RetirementPanel.svelte';
@@ -14,6 +15,8 @@
   const lifecycleLabel = $derived(detail.draft.lifecycle.replaceAll('_', ' '));
   const portrait = $derived(detail.portrait as AuthoringPortraitWorkspace);
   const settings = $derived(detail.settings as AuthoringSettingsWorkspace);
+  const selectedPortrait = $derived(portrait.candidates.find((candidate) => candidate.id === portrait.selectedCandidateId) ?? null);
+  const selectedSetting = $derived(settings.settings.find((setting) => setting.id === settings.selectedSettingId) ?? null);
   const portraitSummary = $derived([
     { label: 'Title and role', values: [detail.draft.sheet.identity.title, detail.draft.sheet.identity.shortDescription].filter(Boolean) },
     { label: 'Physical appearance', values: [detail.draft.sheet.appearance.physicalAppearance].filter(Boolean) },
@@ -46,9 +49,10 @@
     <a href="#draft-editor"><span>01</span> Shape the companion</a>
     <a href="#portrait-artwork"><span>02</span> Create artwork</a>
     <a href="#setting-library"><span>03</span> Choose a setting</a>
-    <a href="#assistance-heading"><span>04</span> Refine a section</a>
-    <a href="#sandbox-heading"><span>05</span> Try the voice</a>
-    <a href="#history-heading"><span>06</span> Submit for review</a>
+    <a href="#scene-preview"><span>04</span> Preview the scene</a>
+    <a href="#assistance-heading"><span>05</span> Refine a section</a>
+    <a href="#sandbox-heading"><span>06</span> Try the voice</a>
+    <a href="#history-heading"><span>07</span> Submit for review</a>
   </nav>
 
   <section class="workspace-intro" aria-label="How this workspace works">
@@ -64,6 +68,12 @@
   </section>
 
   <SettingPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {settings} />
+
+  <AuthoringScenePreview
+    npcName={detail.draft.sheet.identity.name || 'This companion'}
+    portrait={selectedPortrait ? { previewUrl: selectedPortrait.previewUrl, altText: selectedPortrait.altText } : null}
+    setting={selectedSetting ? { previewUrl: selectedSetting.previewUrl, altText: selectedSetting.altText, name: selectedSetting.name } : null}
+  />
 
   <AssistancePanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.assistance} assistance={detail.assistance} quota={detail.quota.assistanceDaily} />
 

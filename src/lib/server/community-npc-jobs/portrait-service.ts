@@ -4,6 +4,7 @@ import { env } from '$env/dynamic/private';
 import type { Database } from '$lib/database.types';
 import type { NpcSheet } from '$lib/game/npc-sheet';
 import { getSupabaseConfig } from '$lib/server/config';
+import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import {
   authorizedPortraitPreview,
   purgePrivatePortrait,
@@ -14,18 +15,19 @@ import {
 import { runPortraitBatch, type PortraitBatchOutcome, type PortraitCompletionClient } from '$lib/server/community-npc-portraits/service';
 
 export type DispatchPortraitJob = { jobId: string; npcId: string; sheet: NpcSheet; controls: Partial<PortraitControls>; alternatives?: number; visualInputHash: string };
-export function portraitProviderAvailability(config: Record<string, string | undefined> = env) { return availability(config); }
+function runtimeConfig() { return privateRuntimeEnvironment(env); }
+export function portraitProviderAvailability(config: Record<string, string | undefined> = runtimeConfig()) { return availability(config); }
 
 type RpcClient = { rpc(name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: { message: string } | null }> };
 function object(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function serviceClient() {
-  if (!env.SUPABASE_SERVICE_ROLE_KEY) return null;
+function serviceClient(config = runtimeConfig()) {
+  if (!config.SUPABASE_SERVICE_ROLE_KEY) return null;
   const { url } = getSupabaseConfig();
-  return createClient<Database>(url, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  return createClient<Database>(url, config.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
 /** Refreshes the persisted availability used by workspace DTOs before a reservation. */
-export async function syncPortraitProviderStatus(config: Record<string, string | undefined> = env) {
+export async function syncPortraitProviderStatus(config: Record<string, string | undefined> = runtimeConfig()) {
   const state = availability(config); const client = serviceClient();
   if (!client) return { available: false, reason: 'service_unavailable' } as const;
   const result = await (client as unknown as RpcClient).rpc('npc_author_set_portrait_provider_status', {
@@ -56,9 +58,10 @@ export async function resolvePortraitPreview(viewer: RpcClient, previewToken: st
 
 /** Work begins only after the author action has atomically reserved its credits. */
 export async function dispatchPortraitJob(job: DispatchPortraitJob): Promise<PortraitBatchOutcome> {
-  if (!env.SUPABASE_SERVICE_ROLE_KEY) return { status: 'failed', completed: 0, failed: job.alternatives ?? 2, errorCode: 'provider_unavailable' };
-  const client = serviceClient()!;
-  return runPortraitBatch(client as unknown as PortraitCompletionClient, { ...job, alternatives: job.alternatives ?? 2 }, { config: env, storage: client.storage as unknown as PrivatePortraitStorage });
+  const config = runtimeConfig();
+  if (!config.SUPABASE_SERVICE_ROLE_KEY) return { status: 'failed', completed: 0, failed: job.alternatives ?? 2, errorCode: 'provider_unavailable' };
+  const client = serviceClient(config)!;
+  return runPortraitBatch(client as unknown as PortraitCompletionClient, { ...job, alternatives: job.alternatives ?? 2 }, { config, storage: client.storage as unknown as PrivatePortraitStorage });
 }
 
 /**

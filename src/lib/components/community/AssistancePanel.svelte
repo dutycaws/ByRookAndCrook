@@ -26,7 +26,7 @@
 </script>
 
 <section class="workspace-panel" aria-labelledby="assistance-heading">
-  <div class="workspace-panel-heading"><span class="workspace-step">02</span><div><p class="eyebrow">Try a refinement</p><h2 id="assistance-heading">Section assistance</h2><p>Ask for one focused change. Suggestions never alter the draft until you apply them.</p></div></div>
+  <div class="workspace-panel-heading"><span class="workspace-step">05</span><div><p class="eyebrow">Try a refinement</p><h2 id="assistance-heading">Section assistance</h2><p>Ask for one focused change. Suggestions never alter the draft until you apply them.</p></div></div>
   {#if !provider.available}
     <div class="workspace-callout unavailable" role="status"><strong>Assistance is unavailable</strong><span>{provider.reason ?? 'The current provider is not configured for authoring.'}</span></div>
   {:else if !capability.canRequestAssistance}

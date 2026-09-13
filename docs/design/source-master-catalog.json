@@ -1129,6 +1129,106 @@
         "exportSettings": "Lossless PNG"
       },
       "derivatives": []
+    },
+    {
+      "id": "issue-24-shop-elara-sprite",
+      "revisionId": "issue-24-shop-elara-sprite@83c434f785e8",
+      "originalFilename": "elara-greenbloom-sprite-v1.png",
+      "sha256": "83c434f785e8afa3bf187c8260db9e324bc5e7cf06e1664bd45792f78ccd5122",
+      "bytes": 2039802,
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1536,
+      "storageKey": "v1/sha256/83/83c434f785e8afa3bf187c8260db9e324bc5e7cf06e1664bd45792f78ccd5122.png",
+      "provenance": {
+        "acquiredAt": "2026-09-13",
+        "source": "Built-in image generation for issue #24; retained only in the Git-ignored local prototype source-master store.",
+        "rights": "Project-generated asset for By Rook and Crook prototyping.",
+        "promptOrNote": "Layered Shop Elara sprite source master. See docs/design/asset-manifest.md for the composition brief.",
+        "exportSettings": "Generated RGBA PNG retained unchanged; locally seeded WebP derivative is resized, optimized, and checksum-verified."
+      },
+      "derivatives": [],
+      "verifiedAt": "2026-09-13T20:00:05.401Z"
+    },
+    {
+      "id": "issue-24-shop-counter-occlusion",
+      "revisionId": "issue-24-shop-counter-occlusion@d5411328b83d",
+      "originalFilename": "shop-counter-occlusion-v1.png",
+      "sha256": "d5411328b83d4906dfcbf78f579cf01aed1a1c556f4d07f3be38eeb73aac0f0b",
+      "bytes": 1621167,
+      "mimeType": "image/png",
+      "width": 2014,
+      "height": 781,
+      "storageKey": "v1/sha256/d5/d5411328b83d4906dfcbf78f579cf01aed1a1c556f4d07f3be38eeb73aac0f0b.png",
+      "provenance": {
+        "acquiredAt": "2026-09-13",
+        "source": "Built-in image generation for issue #24; retained only in the Git-ignored local prototype source-master store.",
+        "rights": "Project-generated asset for By Rook and Crook prototyping.",
+        "promptOrNote": "Layered Shop foreground counter-occlusion source master. See docs/design/asset-manifest.md for the composition brief.",
+        "exportSettings": "Generated RGBA PNG retained unchanged; locally seeded WebP derivative is resized, optimized, and checksum-verified."
+      },
+      "derivatives": [],
+      "verifiedAt": "2026-09-13T20:00:06.226Z"
+    },
+    {
+      "id": "issue-24-bar-lira-sprite",
+      "revisionId": "issue-24-bar-lira-sprite@96732867aa96",
+      "originalFilename": "lira-nightwind-sprite-v1.png",
+      "sha256": "96732867aa9624d108b863c5e87658652e56fc60cb551ed3e0101dbf6b69d1d2",
+      "bytes": 1969315,
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1536,
+      "storageKey": "v1/sha256/96/96732867aa9624d108b863c5e87658652e56fc60cb551ed3e0101dbf6b69d1d2.png",
+      "provenance": {
+        "acquiredAt": "2026-09-13",
+        "source": "Built-in image generation for issue #24; retained only in the Git-ignored local prototype source-master store.",
+        "rights": "Project-generated asset for By Rook and Crook prototyping.",
+        "promptOrNote": "Layered Bar Lira Nightwind sprite source master. See docs/design/asset-manifest.md for the composition brief.",
+        "exportSettings": "Generated RGBA PNG retained unchanged; locally seeded WebP derivative is resized, optimized, and checksum-verified."
+      },
+      "derivatives": [],
+      "verifiedAt": "2026-09-13T20:00:07.078Z"
+    },
+    {
+      "id": "issue-24-bar-torvin-sprite",
+      "revisionId": "issue-24-bar-torvin-sprite@36649bd068b5",
+      "originalFilename": "torvin-ashbeard-sprite-v1.png",
+      "sha256": "36649bd068b562b1d4cb6f7aa54b7820152b59e8a3604b32e12ec43a50fceafc",
+      "bytes": 2191224,
+      "mimeType": "image/png",
+      "width": 1024,
+      "height": 1536,
+      "storageKey": "v1/sha256/36/36649bd068b562b1d4cb6f7aa54b7820152b59e8a3604b32e12ec43a50fceafc.png",
+      "provenance": {
+        "acquiredAt": "2026-09-13",
+        "source": "Built-in image generation for issue #24; retained only in the Git-ignored local prototype source-master store.",
+        "rights": "Project-generated asset for By Rook and Crook prototyping.",
+        "promptOrNote": "Layered Bar Torvin Ashbeard sprite source master. See docs/design/asset-manifest.md for the composition brief.",
+        "exportSettings": "Generated RGBA PNG retained unchanged; locally seeded WebP derivative is resized, optimized, and checksum-verified."
+      },
+      "derivatives": [],
+      "verifiedAt": "2026-09-13T20:00:07.900Z"
+    },
+    {
+      "id": "issue-24-bar-counter-occlusion",
+      "revisionId": "issue-24-bar-counter-occlusion@96b09f008a30",
+      "originalFilename": "bar-counter-occlusion-v1.png",
+      "sha256": "96b09f008a3019acb9109f0436eb5f159162542a2c3a122ab66b3de47ea19203",
+      "bytes": 1169906,
+      "mimeType": "image/png",
+      "width": 1671,
+      "height": 941,
+      "storageKey": "v1/sha256/96/96b09f008a3019acb9109f0436eb5f159162542a2c3a122ab66b3de47ea19203.png",
+      "provenance": {
+        "acquiredAt": "2026-09-13",
+        "source": "Built-in image generation for issue #24; retained only in the Git-ignored local prototype source-master store.",
+        "rights": "Project-generated asset for By Rook and Crook prototyping.",
+        "promptOrNote": "Layered Bar foreground counter-occlusion source master. See docs/design/asset-manifest.md for the composition brief.",
+        "exportSettings": "Generated RGBA PNG retained unchanged; locally seeded WebP derivative is resized, optimized, and checksum-verified."
+      },
+      "derivatives": [],
+      "verifiedAt": "2026-09-13T20:00:08.651Z"
     }
   ]
 }

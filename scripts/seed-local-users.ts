@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { assertLocalSupabaseUrl, seedLocalShopRuntimeAssets } from './local-shop-runtime-assets.js';
+import { seedLocalSceneRuntimeAssets } from './local-scene-runtime-assets.js';
 import { ensurePrivatePortraitBuckets } from '../src/lib/server/community-npc-portraits/index.js';
 import {
   registerLocalCommunityNpcSettingLibrary,
@@ -81,8 +82,10 @@ async function main() {
   }
 
   const assets = await seedLocalShopRuntimeAssets(admin.storage);
+  const sceneAssets = await seedLocalSceneRuntimeAssets(admin.storage);
   await ensurePrivatePortraitBuckets(admin.storage);
   console.info(`Verified ${assets.length} local Shop runtime asset(s) in local Supabase Storage.`);
+  console.info(`Verified ${sceneAssets.length} local layered-scene runtime asset(s) in local Supabase Storage.`);
   const communitySceneAssets = await seedLocalCommunityNpcRuntimeAssets(admin.storage);
   await registerLocalCommunityNpcSettingLibrary(admin, communitySceneAssets);
   console.info(`Verified ${communitySceneAssets.length} dedicated local Community NPC runtime scene asset(s) in local Supabase Storage.`);

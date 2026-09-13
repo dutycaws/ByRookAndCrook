@@ -35,6 +35,7 @@
     "screenshots": "tsx scripts/capture-screenshots.ts",
     "motion:proof:capture": "tsx scripts/capture-motion-proofs.ts",
     "scene:acceptance:capture": "tsx scripts/capture-scene-acceptance.ts",
+    "issue:24:scene:capture": "tsx scripts/capture-issue-24-scene-acceptance.ts",
     "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live",
     "art:assets:check": "tsx scripts/validate-scene-assets.ts",
     "media:git:check": "tsx scripts/media/git-policy.ts",

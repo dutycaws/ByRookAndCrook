@@ -5,6 +5,7 @@ import { dialogueAvailability } from '$lib/server/dialogue/runtime';
 import { databaseError } from '$lib/server/dialogue/orchestrator';
 import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
+import { presentBarPatrons } from '$lib/game/bar-scene';
 import type { Journal } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -20,9 +21,19 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
       const rpc = locals.supabase.rpc.bind(locals.supabase) as any;
       const requested = uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc')! : null;
       const archived = url.searchParams.get('archive') === '1';
-      const rosterResult = await rpc(archived ? 'npc_archived_roster' : 'npc_roster', { p_limit: 20, p_cursor: null, p_query: null });
-      if (rosterResult.error) throw rosterResult.error;
-      const roster = (Array.isArray(rosterResult.data) ? rosterResult.data : []).map((resident: any) => ({
+      const rosterFunction = archived ? 'npc_archived_roster' : 'npc_roster';
+      const rawRoster: any[] = [];
+      let cursor: string | null = null;
+      do {
+        const rosterResult: { data: unknown; error: { message?: string } | null } = await rpc(rosterFunction, { p_limit: 20, p_cursor: cursor, p_query: null });
+        if (rosterResult.error) throw rosterResult.error;
+        const page: any[] = Array.isArray(rosterResult.data) ? rosterResult.data : [];
+        rawRoster.push(...page);
+        // The RPC uses an instance UUID cursor and clamps each page to twenty.
+        // Stop on a short page rather than guessing a total roster count.
+        cursor = page.length === 20 ? page.at(-1)?.instanceId ?? null : null;
+      } while (cursor);
+      const roster = rawRoster.map((resident: any) => ({
         ...resident, sceneStorageKey: localScenePublicUrl(resident.sceneStorageKey ?? '', PUBLIC_SUPABASE_URL)
       }));
       if (requested && !roster.some((resident: any) => resident.instanceId === requested)) {
@@ -30,10 +41,9 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
         if (!selected.error && selected.data) roster.unshift({ ...selected.data, sceneStorageKey: localScenePublicUrl(selected.data.sceneStorageKey ?? '', PUBLIC_SUPABASE_URL) });
       }
       snapshot.roster = roster as typeof snapshot.roster;
-      const selectedInstanceId = requested && roster.some((resident: any) => resident.instanceId === requested)
-        ? requested : roster[0]?.instanceId;
-      if(selectedInstanceId) {
-        const result=await rpc('npc_journals',{p_instance_ids:[selectedInstanceId]});
+      const instanceIds = roster.map((resident: any) => resident.instanceId);
+      if (instanceIds.length) {
+        const result=await rpc('npc_journals',{p_instance_ids: instanceIds});
       if(result.error)throw result.error;
       for (const [instanceId, raw] of Object.entries(result.data as Record<string, any>)) {
         const journal = raw as any;
@@ -48,6 +58,11 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
         };
       }
       }
+      // The roster is a bounded browse projection.  The illustrated room may
+      // only show residents whose authoritative journal says they are present.
+      // Keep roster intact for the archive/safety tools, but make the smaller
+      // presentation list explicit so the client never guesses availability.
+      snapshot.patrons = presentBarPatrons(roster, journals) as typeof snapshot.patrons;
     }
     return { snapshot, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc') : null, dialogueUnavailable:dialogueAvailability() };
   } catch (cause) {

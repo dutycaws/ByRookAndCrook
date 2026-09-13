@@ -3,11 +3,12 @@
   import type { HTMLAttributes } from 'svelte/elements';
   import { SCENE_DESIGN_SIZE, type SceneTransform } from '$lib/presentation/scene';
 
-  type Area = 'garden' | 'brewery' | 'bakery' | 'shop';
+  type Area = 'garden' | 'brewery' | 'bakery' | 'shop' | 'bar';
   type Props = Omit<HTMLAttributes<HTMLDivElement>, 'children'> & {
     area: Area;
     label: string;
     children: Snippet;
+    designSize?: { width: number; height: number };
     element?: HTMLDivElement;
     transform?: SceneTransform;
     fallback?: string | null;
@@ -18,6 +19,7 @@
     area,
     label,
     children,
+    designSize = SCENE_DESIGN_SIZE,
     element = $bindable(),
     transform = $bindable({ scale: 1, offsetX: 0, offsetY: 0 }),
     fallback = null,
@@ -37,11 +39,11 @@
       const bounds = entry.contentRect;
       const sceneFirstPhone = bounds.width <= 620;
       const scale = sceneFirstPhone
-        ? bounds.height / SCENE_DESIGN_SIZE.height
-        : bounds.width / SCENE_DESIGN_SIZE.width;
+        ? bounds.height / designSize.height
+        : bounds.width / designSize.width;
       transform = {
         scale,
-        offsetX: sceneFirstPhone ? (bounds.width - SCENE_DESIGN_SIZE.width * scale) / 2 : 0,
+        offsetX: sceneFirstPhone ? (bounds.width - designSize.width * scale) / 2 : 0,
         offsetY: 0
       };
       transformReady = false;
@@ -73,6 +75,7 @@
   {...attributes}
   bind:this={element}
   class="area-scene {className}"
+  style={`--scene-design-aspect:${designSize.width} / ${designSize.height}`}
   data-area-scene={area}
   data-scene-visible={visible}
   data-reduced-motion={reducedMotion}
@@ -87,7 +90,7 @@
   <div
     class="area-scene-plane"
     inert={!transformReady}
-    style={`width:${SCENE_DESIGN_SIZE.width}px;height:${SCENE_DESIGN_SIZE.height}px;transform:translate(${transform.offsetX}px,${transform.offsetY}px) scale(${transform.scale})`}
+    style={`width:${designSize.width}px;height:${designSize.height}px;transform:translate(${transform.offsetX}px,${transform.offsetY}px) scale(${transform.scale})`}
   >
     {@render children()}
   </div>
@@ -103,7 +106,7 @@
   .area-scene {
     position: relative;
     width: 100%;
-    aspect-ratio: 1672 / 941;
+    aspect-ratio: var(--scene-design-aspect, 1672 / 941);
     overflow: hidden;
     isolation: isolate;
     background: #0a0704;

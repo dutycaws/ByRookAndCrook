@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import type { Json, Database } from '$lib/database.types';
 import { canonicalNpcSheet, validateNpcSheet, type NpcSheet } from '$lib/game/npc-sheet';
 import { getSupabaseConfig } from '$lib/server/config';
+import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { listLocalSceneAssets, type LocalSceneAsset } from './local-assets';
 import {
   authoringProviderAvailability as availabilityFor,
@@ -45,7 +46,8 @@ function sandboxJob(job: QueuedAuthoringJob): job is Extract<AuthoringProviderJo
   return job.kind === 'sandbox' && !!job.sheet && Array.isArray(job.turns) && job.turns.length > 0;
 }
 
-export function authoringProviderAvailability(config: Record<string, string | undefined> = env): AuthoringProviderAvailability { return availabilityFor(config); }
+function runtimeConfig() { return privateRuntimeEnvironment(env); }
+export function authoringProviderAvailability(config: Record<string, string | undefined> = runtimeConfig()): AuthoringProviderAvailability { return availabilityFor(config); }
 async function complete(client: CompletionClient, name: string, args: Record<string, unknown>): Promise<void> {
   const result = await client.rpc(name, args); if (result.error) throw new Error(result.error.message);
 }
@@ -112,14 +114,16 @@ export async function runLocalAuthoringJob(client: CompletionClient, job: Queued
 
 /** Service-role client exists only in this server module and is never bundled. */
 export function localAuthoringCompletionClient(): CompletionClient | null {
-  if (!env.SUPABASE_SERVICE_ROLE_KEY) return null;
-  const { url } = getSupabaseConfig(); return createClient<Database>(url, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as CompletionClient;
+  const config = runtimeConfig();
+  if (!config.SUPABASE_SERVICE_ROLE_KEY) return null;
+  const { url } = getSupabaseConfig(); return createClient<Database>(url, config.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as CompletionClient;
 }
 export async function dispatchAuthoringJob(job: QueuedAuthoringJob): Promise<AuthoringJobOutcome> {
   const client = localAuthoringCompletionClient(); if (!client) return { status: 'failed', errorCode: 'provider_unavailable' };
   if (job.kind === 'scene') return runSceneFixture(client, job, {});
-  if (!authoringProviderAvailability().available) return recordFailure(client, job, 'provider_unavailable');
-  return runLocalAuthoringJob(client, job, { provider: createAuthoringProvider(env), timeoutMs: Number(env.NPC_AUTHORING_DEADLINE_MS) || 30_000 });
+  const config = runtimeConfig();
+  if (!authoringProviderAvailability(config).available) return recordFailure(client, job, 'provider_unavailable');
+  return runLocalAuthoringJob(client, job, { provider: createAuthoringProvider(config), timeoutMs: Number(config.NPC_AUTHORING_DEADLINE_MS) || 30_000 });
 }
 /** Legacy name retained so routes can migrate without a split deployment. */
 export const dispatchLocalAuthoringJob = dispatchAuthoringJob;

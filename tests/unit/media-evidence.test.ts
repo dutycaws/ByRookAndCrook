@@ -49,6 +49,9 @@ describe('media evidence policy', () => {
     expect(requiredOutputsFor('screenshots')).toHaveLength(10);
     expect(requiredOutputsFor('motion-proofs')).toContain('brewery-demo.webm');
     expect(requiredOutputsFor('scene-acceptance')).toContain('acceptance-results.json');
+    expect(requiredOutputsFor('issue-24-scene-acceptance')).toEqual(expect.arrayContaining([
+      'shop-1672x941.png', 'bar-390x844.png', 'shop-parallax.webm', 'bar-selection-parallax.webm', 'issue-24-results.json'
+    ]));
   });
 
   it('rejects a capture output whose hash changed', async () => {

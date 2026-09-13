@@ -11,7 +11,7 @@
 </script>
 
 <section class="workspace-panel history-panel" aria-labelledby="history-heading">
-  <div class="workspace-panel-heading"><span class="workspace-step">05</span><div><p class="eyebrow">Review the work</p><h2 id="history-heading">Status and history</h2><p>Submitting freezes an immutable version for automated checks and reviewer judgment.</p></div></div>
+  <div class="workspace-panel-heading"><span class="workspace-step">07</span><div><p class="eyebrow">Review the work</p><h2 id="history-heading">Status and history</h2><p>Submitting freezes an immutable version for automated checks and reviewer judgment.</p></div></div>
   {#if preflight.length}<div class="workspace-callout warning" role="alert"><strong>Finish these before submitting</strong><ul>{#each preflight as issue}<li><a href={`#${issue.focusId}`}>{issue.sectionLabel}: {issue.message}</a></li>{/each}</ul></div>{/if}
   {#if capability.canSubmit}<form method="POST" action="?/submit" use:enhance={submit()} class="submission-bar"><input type="hidden" name="revision" value={revision} /><div><strong>{preflight.length ? 'Submission is not ready' : `Ready to submit version ${nextVersion}`}</strong><span>{preflight.length ? 'Resolve the listed prerequisites, then submit.' : 'The submitted version cannot be edited.'}</span></div><button class="primary-action" disabled={submitting || preflight.length > 0}>{submitting ? `Submitting version ${nextVersion}…` : `Submit version ${nextVersion}`}</button></form>{:else}<div class="workspace-callout unavailable"><strong>Submission is unavailable</strong><span>{capability.reasons.submit ?? 'This draft cannot be submitted right now.'}</span></div>{/if}
   <div class="version-timeline" aria-live="polite">

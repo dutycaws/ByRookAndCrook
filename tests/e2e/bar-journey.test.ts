@@ -11,19 +11,34 @@ async function signInAndOpenBar(page: import('@playwright/test').Page, player: A
   await expect(page).toHaveURL(/\/bar$/);
 }
 
-test('the Bar uses UUID residents, keeps food and drinks separate, and loads the selected journal', async ({ page }) => {
+test('the Bar puts present residents in the illustrated room and selects them without navigating', async ({ page }) => {
   const player = await createBrewedTavern('bar-uuid-roster');
   try {
     await signInAndOpenBar(page, player);
-    const guestList = page.locator('.guest-switcher');
-    await expect(guestList.getByRole('button', { name: /^Lira Nightwind/ })).toBeVisible();
-    await expect(guestList.getByRole('button', { name: /^Torvin Ashbeard/ })).toBeVisible();
-    await page.getByLabel('Find a guest').fill('Torvin');
-    await page.getByRole('button', { name: 'Find' }).click();
-    await expect(guestList.getByRole('button', { name: /^Torvin Ashbeard/ })).toBeVisible();
-    await guestList.getByRole('button', { name: /^Torvin Ashbeard/ }).click();
-    await expect(page).toHaveURL(/\/bar\?npc=[0-9a-f-]{36}/);
+    const room = page.locator('[data-scene-composition="bar"]');
+    const lira = room.getByRole('button', { name: /Speak with Lira Nightwind/ });
+    const torvin = room.getByRole('button', { name: /Speak with Torvin Ashbeard/ });
+    // The actors are present in SSR markup, but keyboard handlers intentionally
+    // remain inert until the scaled scene has hydrated and aligned its targets.
+    await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
+    await expect(lira).toBeVisible();
+    await expect(torvin).toBeVisible();
+    await expect(lira).toHaveAttribute('aria-pressed', 'true');
+    await lira.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(torvin).toBeFocused();
+    await expect(torvin).toHaveAttribute('tabindex', '0');
+    // Focus is a roving cursor only; it must not change the current guest.
+    await expect(lira).toHaveAttribute('aria-pressed', 'true');
+    await expect(torvin).toHaveAttribute('aria-pressed', 'false');
+    await page.keyboard.press('Space');
+    await expect(page).toHaveURL(/\/bar$/);
     await expect(page.getByRole('heading', { name: 'Torvin Ashbeard', exact: true })).toBeVisible();
+    await page.keyboard.press('ArrowLeft');
+    await expect(lira).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: 'Lira Nightwind', exact: true })).toBeVisible();
+    await torvin.click();
     await expect(page.getByRole('heading', { name: 'Serve food or drink' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Talk with Torvin Ashbeard' })).toBeAttached();
     await expect(page.getByText('Choose your intent', { exact: true })).toBeVisible();
@@ -39,7 +54,7 @@ test('a lost UUID serving response retries the frozen resident and item command 
   page.on('pageerror', (cause) => errors.push(cause.message));
   try {
     await signInAndOpenBar(page, player);
-    await page.locator('.guest-switcher').getByRole('button', { name: /^Torvin Ashbeard/ }).click();
+    await page.locator('[data-scene-composition="bar"]').getByRole('button', { name: /Speak with Torvin Ashbeard/ }).click();
     await page.route((url) => url.pathname === '/bar' && url.search === '?/serve', async (route) => {
       requests.push(route.request().postData() ?? '');
       if (requests.length === 1) {

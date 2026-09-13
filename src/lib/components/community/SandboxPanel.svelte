@@ -10,7 +10,7 @@
 </script>
 
 <section class="workspace-panel sandbox-panel" aria-labelledby="sandbox-heading">
-  <div class="workspace-panel-heading"><span class="workspace-step">04</span><div><p class="eyebrow">Try the voice</p><h2 id="sandbox-heading">Draft-pinned sandbox</h2><p>Private practice dialogue uses this draft only. It cannot change the game world or canonical sheet.</p></div></div>
+  <div class="workspace-panel-heading"><span class="workspace-step">06</span><div><p class="eyebrow">Try the voice</p><h2 id="sandbox-heading">Draft-pinned sandbox</h2><p>Private practice dialogue uses this draft only. It cannot change the game world or canonical sheet.</p></div></div>
   {#if !provider.available}<div class="workspace-callout unavailable" role="status"><strong>Sandbox is unavailable</strong><span>{provider.reason ?? 'The current provider is not configured for authoring.'}</span></div>
   {:else if !capability.canUseSandbox}<div class="workspace-callout unavailable" role="status"><strong>Sandbox is unavailable for this draft</strong><span>{capability.reasons.sandbox ?? 'This draft cannot start a sandbox right now.'}</span></div>
   {:else}
