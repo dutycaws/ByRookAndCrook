@@ -2352,6 +2352,10 @@ export type Database = {
         }
         Returns: Json
       }
+      npc_author_request_retirement: {
+        Args: { p_npc_id: string; p_reason: string }
+        Returns: Json
+      }
       npc_author_request_scene: {
         Args: {
           p_alternative?: number
@@ -2373,14 +2377,23 @@ export type Database = {
         Args: { p_error_code?: string; p_job_id: string; p_reply: string }
         Returns: undefined
       }
-      npc_author_sandbox_start: {
-        Args: {
-          p_expected_revision: number
-          p_message: string
-          p_npc_id: string
-        }
+      npc_author_sandbox_send: {
+        Args: { p_message: string; p_sandbox_id: string }
         Returns: Json
       }
+      npc_author_sandbox_start:
+        | {
+            Args: { p_expected_revision: number; p_npc_id: string }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_expected_revision: number
+              p_message: string
+              p_npc_id: string
+            }
+            Returns: Json
+          }
       npc_author_sandbox_status: {
         Args: { p_sandbox_id: string }
         Returns: Json

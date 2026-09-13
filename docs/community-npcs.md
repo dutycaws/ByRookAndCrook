@@ -27,14 +27,11 @@ flowchart LR
 
 ## Authoring and review
 
-`/authoring/npcs` is available to users with `npc_author`. The editor covers identity, appearance, personality, lore, skills, and a two-to-ten-milestone campaign. Autosave sends the expected draft revision after a debounce. A stale write returns a visible conflict and freezes editing until the creator reloads; two browser tabs never merge silently.
+`/authoring/npcs` is available to users with `npc_author`. The guided editor covers identity, appearance, personality, named relationships, lore, knowledge and disclosure rules, skills, and a two-to-ten-milestone campaign. It keeps stable internal references while creators work with names and structured controls. Autosave sends the expected draft revision after a debounce. A stale write returns a visible conflict and freezes editing until the creator reloads; two browser tabs never merge silently.
 
-Field assistance, scene requests, and sandbox turns reserve quota-backed jobs. The local worker is deterministic:
+Field assistance and sandbox conversations use the configured server-side authoring provider. OpenAI Responses calls use strict structured outputs, the complete draft sheet, and the ordered sandbox transcript. Assistance presents separate Current and Suggested cards and changes the draft only after the creator accepts it. A no-change response is reported as such. Provider absence, invalid output, and timeouts produce explicit recoverable states rather than placeholder prose.
 
-- Assistance proposes one section replacement and never edits the draft until the creator accepts it.
-- Sandbox replies remain private and are invalidated by behavior-changing edits.
-- Scene jobs select only an existing derivative under `.local/media/runtime-derivatives/community-npcs/`. Missing media produces `local_scene_asset_missing`; the worker does not fabricate an image or borrow another feature's artwork.
-- Submission runs the shared sheet validator and records structural failures. Its advisory result explicitly says that the local worker did not run live voice, subjective-quality, or model safety evaluation.
+Sandbox sessions freeze their source revision, persist ordered turns, and survive reloads. Saving or accepting an assistance proposal invalidates the active session while preserving its transcript in history. Scene jobs select only an existing derivative under `.local/media/runtime-derivatives/community-npcs/`; missing media produces `local_scene_asset_missing`, without fabricating an image or borrowing another feature's artwork. Submission runs the shared sheet validator and records structural evaluation evidence. History renders version changes, evaluation results, reviewer decisions, comments, and retirement status in readable panels.
 
 Reviewers use `/admin/npcs`. They see frozen submitted content, structural evaluation evidence, linked comments, report evidence, and appeals. Ownership history prevents a current or former owner from reviewing or moderating an identity. Publishing, requesting changes, rejecting, retiring, pausing, quarantining, and banning are audited server operations.
 
@@ -91,6 +88,7 @@ The community-specific database suites are:
 - `supabase/tests/community_npc_platform.test.sql`
 - `supabase/tests/community_npc_runtime.test.sql`
 - `supabase/tests/community_npc_authoring.test.sql`
+- `supabase/tests/community_npc_authoring_experience.test.sql`
 - `supabase/tests/community_npc_bar_scaling.test.sql`
 - `supabase/tests/community_npc_purge.test.sql`
 - `supabase/tests/community_npc_engagement.test.sql`

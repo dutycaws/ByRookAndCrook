@@ -22,14 +22,14 @@ set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000041';
 select public.npc_update_profile('Workshop Owner','Tests the NPC workshop safely.',false,false,true);
 create temporary table pg_temp.authoring_ids as
   select (public.npc_author_create((select sheet from pg_temp.authoring_sheet))->>'npcId')::uuid npc_id;
-select is((public.npc_author_workspace_detail((select npc_id from pg_temp.authoring_ids))->>'revision'),'0','owner can read their complete workspace detail');
+select is((public.npc_author_workspace_detail((select npc_id from pg_temp.authoring_ids))#>>'{draft,revision}'),'0','owner can read their complete typed workspace detail');
 create temporary table pg_temp.assist as
   select public.npc_author_request_assistance((select npc_id from pg_temp.authoring_ids),0,'identity','Make the voice a little more formal.') value;
 select throws_ok(format('select public.npc_author_request_assistance(%L::uuid,0,%L,%L)',(select npc_id from pg_temp.authoring_ids),'unknown','No'),'PT400',null,'assistance only targets whitelisted sections');
 reset role;
 
 set local request.jwt.claim.role='service_role';
-select public.npc_author_assistance_complete((select (value->>'jobId')::uuid from pg_temp.assist),jsonb_build_object('replacement',(select sheet->'identity' from pg_temp.authoring_sheet)));
+select public.npc_author_assistance_complete((select (value->>'jobId')::uuid from pg_temp.assist),jsonb_build_object('replacement',jsonb_set((select sheet->'identity' from pg_temp.authoring_sheet),'{voice}','"Formal, precise, and measured."'::jsonb)));
 reset request.jwt.claim.role;
 
 set local role authenticated;
@@ -57,7 +57,7 @@ select throws_ok(format('select public.npc_author_select_scene(%L::uuid,2,%L::uu
 create temporary table pg_temp.stale_assist as select public.npc_author_request_assistance((select npc_id from pg_temp.authoring_ids),2,'identity','Make it stale.') value;
 reset role;
 set local request.jwt.claim.role='service_role';
-select public.npc_author_assistance_complete((select (value->>'jobId')::uuid from pg_temp.stale_assist),jsonb_build_object('replacement',(select sheet->'identity' from pg_temp.authoring_sheet)));
+select public.npc_author_assistance_complete((select (value->>'jobId')::uuid from pg_temp.stale_assist),jsonb_build_object('replacement',jsonb_set((select sheet->'identity' from pg_temp.authoring_sheet),'{title}','"Road Warden"'::jsonb)));
 reset request.jwt.claim.role;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
@@ -84,7 +84,7 @@ reset request.jwt.claim.role;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000041';
-select is((public.npc_author_sandbox_status((select (value->>'sandboxId')::uuid from pg_temp.sandbox))#>>'{state,turns,0,reply}'),'The old road is quiet, but I still watch it.','sandbox output remains isolated in sandbox state');
+select is((public.npc_author_sandbox_status((select (value->>'sandboxId')::uuid from pg_temp.sandbox))#>>'{turns,1,content}'),'The old road is quiet, but I still watch it.','sandbox output remains isolated in its ordered transcript');
 reset role;
 
 set local role authenticated;

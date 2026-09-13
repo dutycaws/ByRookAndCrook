@@ -1,12 +1,60 @@
 <script lang="ts">
   import type { PageProps } from './$types';
+  import type { AuthoringWorkspaceDetail } from '$lib/game/authoring-workspace';
   import NpcSheetEditor from '$lib/components/community/NpcSheetEditor.svelte';
+  import AssistancePanel from '$lib/components/community/AssistancePanel.svelte';
+  import ScenePanel from '$lib/components/community/ScenePanel.svelte';
+  import SandboxPanel from '$lib/components/community/SandboxPanel.svelte';
+  import HistoryPanel from '$lib/components/community/HistoryPanel.svelte';
+  import RetirementPanel from '$lib/components/community/RetirementPanel.svelte';
+
   let { data, form }: PageProps = $props();
-  let detail: any = $derived(data.detail as any);
-  let sandboxJobs: any[] = $derived((detail.jobs as any[]).filter((job: any) => job.kind === 'sandbox'));
+  let detail = $derived(data.detail as AuthoringWorkspaceDetail);
+  const lifecycleLabel = $derived(detail.draft.lifecycle.replaceAll('_', ' '));
 </script>
-<main class="page-shell community-page"><a href="/authoring/npcs">← Creator studio</a><header><p class="eyebrow">Draft workspace</p><h1>{detail.sheet.identity.name}</h1><p>Revision {detail.revision} · {detail.state}</p></header>
-<NpcSheetEditor sheet={detail.sheet} revision={detail.revision} editable={detail.state === 'open'} message={form?.message} conflict={form?.conflict} />
-<section class="community-grid two"><article class="community-card"><h2>Assistance</h2><p>Requests are narrowly scoped to one section. A queued job never changes your draft.</p><form method="POST" action="?/assist"><input type="hidden" name="revision" value={detail.revision} /><label>Section <select name="section"><option>identity</option><option>appearance</option><option>personality</option><option>lore</option><option>skills</option><option>campaign</option></select></label><label>Instruction <textarea name="instruction" minlength="1" maxlength="2000" required></textarea></label><button>Request assistance</button></form>{#each detail.assistance as event}<div class="community-row"><small>{event.sectionPath} · {event.disposition}</small>{#if event.proposal}<details><summary>View proposed replacement</summary><pre>{JSON.stringify(event.proposal, null, 2)}</pre></details>{#if event.disposition === 'proposed'}<form method="POST" action="?/disposition"><input type="hidden" name="eventId" value={event.id}/><input type="hidden" name="revision" value={detail.revision}/><button name="accept" value="true">Apply proposal</button><button name="accept" value="false">Discard proposal</button></form>{/if}{/if}</div>{/each}</article>
-<article class="community-card"><h2>Scene candidates</h2><p>Local workers read ignored source assets and add storage keys. This page never manufactures art.</p><form method="POST" action="?/scene"><input type="hidden" name="revision" value={detail.revision}/><label>Scene prompt <textarea name="prompt" minlength="10" maxlength="2000" required></textarea></label><label>Alternative <input name="alternative" type="number" min="1" max="4" value="1" /></label><button>Queue scene</button></form>{#each detail.assets as asset}<form method="POST" action="?/selectScene" class="community-row"><input type="hidden" name="revision" value={detail.revision}/><input type="hidden" name="assetId" value={asset.id}/><strong>{asset.storageKey}</strong><p>{asset.altText}</p>{#if asset.previewUrl}<img class="community-scene-preview" src={asset.previewUrl} alt={asset.altText} />{:else}<p role="status">Preview unavailable: run <code>npm run fixtures:users:local</code> after placing an approved derivative in the ignored local media folder.</p>{/if}<button disabled={detail.selectedSceneAssetId === asset.id}>{detail.selectedSceneAssetId === asset.id ? 'Selected' : 'Select scene'}</button></form>{/each}<h3>Generation jobs</h3>{#each detail.jobs as job}<p class="community-row"><strong>{job.kind}</strong><span>{job.status}{job.errorCode ? ` · ${job.errorCode}` : ''}</span><small>{job.completedAt ? `Completed ${job.completedAt}` : 'Awaiting the local worker'}</small></p>{/each}</article></section>
-<section class="community-grid two"><article class="community-card"><h2>Sandbox</h2><p>Sandbox conversations are isolated and are invalidated after a draft change.</p><form method="POST" action="?/sandbox"><input type="hidden" name="revision" value={detail.revision}/><textarea name="message" minlength="1" maxlength="2000" required placeholder="Try a keeper message…"></textarea><button>Queue sandbox turn</button></form>{#each sandboxJobs as job}<p class="community-row"><strong>Sandbox {job.status}</strong><span>{job.result?.reply ?? (job.errorCode ? job.errorCode : 'Awaiting the local worker')}</span></p>{/each}</article><article class="community-card"><h2>Review and history</h2><form method="POST" action="?/submit"><input type="hidden" name="revision" value={detail.revision}/><p>Submitting creates an immutable version for reviewer and evaluation checks.</p><button class="primary-action">Submit immutable version</button></form><pre>{JSON.stringify(detail.versions, null, 2)}</pre>{#each detail.comments as comment}<form method="POST" action="?/resolveComment" class="community-row"><p>{comment.sectionPath}: {comment.body}</p><input type="hidden" name="commentId" value={comment.id}/>{#if !comment.resolvedAt}<button>Resolve comment</button>{/if}</form>{/each}<form method="POST" action="?/retire"><label>Retirement rationale <textarea name="reason" minlength="3" required></textarea></label><button>Request retirement</button></form></article></section></main>
+
+<main class="page-shell community-page authoring-workspace">
+  <a class="workspace-backlink" href="/authoring/npcs">← Creator studio</a>
+  <header class="workspace-masthead">
+    <div>
+      <p class="eyebrow">Community NPC · author workspace</p>
+      <h1>{detail.draft.sheet.identity.name || 'Untitled companion'}</h1>
+      <p>{detail.draft.sheet.identity.title || 'A companion in progress'} · revision {detail.draft.revision}</p>
+    </div>
+    <div class="draft-state"><span class="status-pill">{lifecycleLabel}</span><small>{detail.draft.editable ? 'Changes save automatically while you work.' : 'This draft is now read-only.'}</small></div>
+  </header>
+
+  {#if form?.message}
+    <div class:community-error={form.conflict} class:community-success={!form.conflict} class="community-notice" role={form.conflict ? 'alert' : 'status'} aria-live="polite">{form.message}</div>
+  {/if}
+
+  <nav class="workspace-stepper" aria-label="Authoring steps">
+    <a href="#draft-editor"><span>01</span> Shape the companion</a>
+    <a href="#assistance-heading"><span>02</span> Refine a section</a>
+    <a href="#scene-heading"><span>03</span> Choose a scene</a>
+    <a href="#sandbox-heading"><span>04</span> Try the voice</a>
+    <a href="#history-heading"><span>05</span> Submit for review</a>
+  </nav>
+
+  <section class="workspace-intro" aria-label="How this workspace works">
+    <div><p class="eyebrow">A calm way to author</p><h2>Build a person players will remember.</h2><p>Describe who they are, give them a place in the world, and test their voice before review. Every meaningful change is saved as a protected draft revision.</p></div>
+    <ol><li><strong>Shape</strong><span>Write the authored truth.</span></li><li><strong>Test</strong><span>Try optional assistance and a private conversation.</span></li><li><strong>Submit</strong><span>Freeze a version when it is ready for review.</span></li></ol>
+  </section>
+
+  <section id="draft-editor" class="workspace-editor-region" aria-label="NPC draft editor">
+    <div class="workspace-region-heading"><span class="workspace-step">01</span><div><p class="eyebrow">Shape the companion</p><h2>Author the draft</h2><p>The details below are the canonical source for this companion. Clear writing gives scenes, dialogue, and consequences a shared foundation.</p></div></div>
+    <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))} />
+  </section>
+
+  <div class="workspace-columns">
+    <AssistancePanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.assistance} assistance={detail.assistance} quota={detail.quota.assistanceDaily} />
+    <ScenePanel revision={detail.draft.revision} scenes={detail.scenes} capability={detail.capabilities} quota={detail.quota.sceneDaily} />
+  </div>
+
+  <SandboxPanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.sandbox} sandbox={detail.sandbox} quota={detail.quota.sandboxDaily} />
+
+  <div class="workspace-columns review-columns">
+    <HistoryPanel revision={detail.draft.revision} versions={detail.versions} preflight={detail.preflight} capability={detail.capabilities} />
+    <RetirementPanel capability={detail.capabilities} retirement={detail.retirement} />
+  </div>
+</main>
