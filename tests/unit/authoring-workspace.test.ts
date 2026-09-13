@@ -35,7 +35,8 @@ describe('authoring workspace view model', () => {
     expect(detail.sandbox.preserved).toHaveLength(1);
     expect(detail.sandbox.preserved[0]).toMatchObject({ draftRevision: 3, active: false });
     expect(detail.capabilities.reasons.submit).toBe('Choose a scene before submitting.');
-    expect(detail.preflight.some((issue) => issue.path === 'scene')).toBe(true);
+    expect(detail.preflight.some((issue) => issue.path === 'setting')).toBe(true);
+    expect(detail.preflight.some((issue) => issue.path === 'portrait')).toBe(true);
   });
 
   it('turns section proposals into a readable comparison without exposing raw JSON to components', () => {
@@ -61,5 +62,34 @@ describe('authoring workspace view model', () => {
     expect(normalizeAuthoringError({ code: 'PT422', message: 'Select a scene first' }, 'Failed')).toMatchObject({ category: 'missing_prerequisite', status: 'failure' });
     expect(providerFailure('provider_no_change')).toMatchObject({ category: 'provider_no_change' });
     expect(providerFailure('provider_unavailable')).toMatchObject({ category: 'provider_unavailable', status: 'unavailable' });
+  });
+
+  it('keeps portrait and curated-setting metadata separate and browser safe', () => {
+    const sheet = createNpcSheet('Tormund');
+    const detail = decodeAuthoringWorkspace({
+      npcId: 'npc-id', draft: { id: 'draft-id', revision: 7, lifecycle: 'open', editable: true, sheet },
+      capabilities: {}, eligibleNpcs: [], assistance: [], sandbox: { active: null, preserved: [] }, versions: [], retirement: null,
+      settings: {
+        selectedAssetId: 'setting-1', available: [{ id: 'setting-1', key: 'private/library/hearth.webp', label: 'Hearth-side booth', description: 'A warm booth.', altText: 'A booth beside a hearth.' }]
+      },
+      portrait: {
+        providerAvailable: true, styleLabel: 'Community character look', styleVersion: 'community-npc-portrait-sprite-v1', visualInputHash: 'visual-7',
+        selectedAssetId: 'portrait-asset-1', remainingCredits: 8,
+        candidates: [{ id: 'portrait-1', assetId: 'portrait-asset-1', ordinal: 1, state: 'selected', previewToken: 'preview-token', altText: 'Tormund full-body portrait', dimensions: { width: 1024, height: 1536 }, alphaValid: true, visualInputHash: 'visual-7', failureCode: null }],
+        activeBatch: { jobId: 'batch-1', status: 'running', requestedAlternatives: 2, completedCount: 1, failedCount: 1, errorCode: null }
+      }
+    }, { available: true, reason: null }, (key) => `/setting-preview/${key}`);
+
+    expect(detail.settings).toMatchObject({ available: true, selectedSettingId: 'setting-1' });
+    expect(detail.settings.settings[0]).toEqual({
+      id: 'setting-1', name: 'Hearth-side booth', description: 'A warm booth.', altText: 'A booth beside a hearth.', previewUrl: '/setting-preview/private/library/hearth.webp', selected: true
+    });
+    expect(detail.portrait).toMatchObject({ selectedCandidateId: 'portrait-1', creditsRemaining: 8, visualInputHash: 'visual-7' });
+    expect(detail.portrait.candidates[0]).toMatchObject({ id: 'portrait-1', assetId: 'portrait-asset-1', state: 'selected', width: 1024, height: 1536, hasAlpha: true });
+    expect(detail.portrait.candidates[0].previewUrl).toBeNull();
+    expect(detail.portrait.candidates[0]).not.toHaveProperty('storageKey');
+    expect(detail.portrait.activeBatch).toMatchObject({ id: 'batch-1', status: 'generating', requested: 2 });
+    expect(detail.preflight.map((issue) => issue.path)).not.toContain('portrait');
+    expect(detail.preflight.map((issue) => issue.path)).not.toContain('setting');
   });
 });

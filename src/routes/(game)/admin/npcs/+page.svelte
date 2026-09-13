@@ -157,6 +157,14 @@
           </article>
         {/each}
       </div>
+      <h2>Permanent NPC removal</h2>
+      <form class="community-card" method="POST" action="?/quarantine">
+        <p>Purge removes the NPC from saves and permanently deletes its private portrait master and runtime sprite. Governance-safe hashes and audit reasons remain.</p>
+        <label>NPC ID <input name="npcId" required pattern="[0-9a-fA-F-]{36}" autocomplete="off" /></label>
+        <label>Audit reason <textarea name="reason" minlength="3" required></textarea></label>
+        <label>Type PURGE to confirm <input name="confirmation" required pattern="PURGE" autocomplete="off" /></label>
+        <button name="purge" value="true">Permanently purge NPC</button>
+      </form>
       <h2>Audit trail</h2>
       <pre class="community-card">{describeJson(data.audit)}</pre>
     </section>

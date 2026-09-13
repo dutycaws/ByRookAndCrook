@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NpcSheet } from '$lib/game/npc-sheet';
-import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
+import { localScenePublicUrl, localSettingPublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { authoringProviderAvailability, runAuthoringJob, runLocalAuthoringJob, runLocalNpcEvaluation, type CompletionClient } from '$lib/server/community-npc-jobs/runner';
 import { createAuthoringProvider, type AuthoringProvider } from '$lib/server/community-npc-jobs/provider';
 
@@ -91,5 +91,8 @@ describe('community NPC authoring provider jobs', () => {
     expect(localScenePublicUrl('../secrets.png', 'http://127.0.0.1:57321')).toBeNull();
     expect(localScenePublicUrl('shop/v1/unknown.webp', 'http://127.0.0.1:57321')).toBeNull();
     expect(localScenePublicUrl('community-npcs/v1/unknown.webp', 'https://example.com')).toBeNull();
+    expect(localSettingPublicUrl('unknown-setting', 'http://127.0.0.1:57321')).toBeNull();
+    expect(localSettingPublicUrl('community-settings/lantern-lit-tavern-table.webp', 'http://127.0.0.1:57321')).toBeNull();
+    expect(localSettingPublicUrl('../lantern-lit-tavern-table', 'http://127.0.0.1:57321')).toBeNull();
   });
 });

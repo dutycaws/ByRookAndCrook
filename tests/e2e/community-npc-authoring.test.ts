@@ -86,6 +86,76 @@ async function sendSandboxFixture(player: Awaited<ReturnType<typeof createAuthor
   if (completed.error) throw completed.error;
 }
 
+async function prepareValidArtwork(player: Awaited<ReturnType<typeof createAuthor>>, npcId: string, revision = 0) {
+  const settingId = 'c0370000-0000-4000-8000-000000000001';
+  const provider = await player.admin.rpc('npc_author_set_portrait_provider_status', {
+    p_available: true,
+    p_provider: 'openai',
+    p_model: 'deterministic-e2e',
+    p_expires_in_seconds: 300
+  });
+  if (provider.error) throw new Error(`provider status: ${provider.error.message}`);
+  const registered = await player.admin.rpc('npc_author_register_setting_asset', {
+    p_setting_id: settingId,
+    p_storage_key: 'community-settings/lantern-lit-tavern-table.webp',
+    p_mime_type: 'image/webp',
+    p_width: 1600,
+    p_height: 900,
+    p_sha256: 'a'.repeat(64)
+  });
+  if (registered.error) throw new Error(`setting registration: ${registered.error.message}`);
+  const setting = await player.client.rpc('npc_author_select_setting', {
+    p_npc_id: npcId,
+    p_expected_revision: revision,
+    p_setting_id: settingId
+  });
+  if (setting.error) throw new Error(`setting selection: ${setting.error.message}`);
+  const settingRevision = Number((setting.data as { revision: number }).revision);
+  const requested = await player.client.rpc('npc_author_request_portrait', {
+    p_npc_id: npcId,
+    p_expected_revision: settingRevision,
+    p_controls: {},
+    p_alternatives: 1
+  });
+  if (requested.error) throw new Error(`portrait request: ${requested.error.message}`);
+  const receipt = requested.data as { jobId: string; visualInputHash: string; draftRevision: number };
+  const mediaId = crypto.randomUUID();
+  const completed = await player.admin.rpc('npc_author_portrait_complete', {
+    p_job_id: receipt.jobId,
+    p_candidates: [{
+      ordinal: 1,
+      storageKey: `v1/${mediaId}/sprite.webp`,
+      masterStorageKey: `v1/${mediaId}/master.png`,
+      masterSha256: 'd'.repeat(64),
+      referenceSetHash: 'e'.repeat(64),
+      requestId: `e2e-${mediaId}`,
+      altText: 'A full-body courier in a warm tavern pose.',
+      mimeType: 'image/webp',
+      width: 1024,
+      height: 1536,
+      byteSize: 120_000,
+      sha256: '1'.repeat(64),
+      alphaValid: true,
+      visualInputHash: receipt.visualInputHash,
+      provider: 'deterministic',
+      model: 'fixture',
+      promptHash: 'b'.repeat(64),
+      styleVersion: 'community-npc-portrait-sprite-v1',
+      referenceSetVersion: 'brac-character-look-v1'
+    }] as unknown as Json
+  });
+  if (completed.error) throw new Error(`portrait completion: ${completed.error.message}`);
+  const candidate = (completed.data as { candidates: Array<{ assetId?: string }> }).candidates[0];
+  if (!candidate?.assetId) throw new Error('Portrait fixture did not return an asset id.');
+  const selected = await player.client.rpc('npc_author_select_portrait', {
+    p_npc_id: npcId,
+    p_expected_revision: receipt.draftRevision,
+    p_asset_id: candidate.assetId
+  });
+  if (selected.error) throw new Error(`portrait selection: ${selected.error.message}`);
+  return Number((selected.data as { revision: number }).revision);
+}
+
 test('guided authoring saves a readable world and story arc across reloads', async ({ page }) => {
   const player = await createAuthor();
   const name = `Mara Quill ${crypto.randomUUID().slice(0, 6)}`;
@@ -156,16 +226,17 @@ test('submission history and a governed retirement request survive reload', asyn
   const player = await createAuthor();
   try {
     const npcId = await createDraft(player, `Reviewable Courier ${crypto.randomUUID().slice(0, 6)}`);
-    const scene = await player.client.rpc('npc_author_add_scene', {
-      p_npc_id: npcId,
-      p_storage_key: 'community-npcs/authoring-fixture.webp',
-      p_alt_text: 'A lantern-lit courier table prepared for authoring review.',
-      p_generation: { provider: 'e2e-fixture' } as unknown as Json
-    });
-    if (scene.error) throw scene.error;
+    await prepareValidArtwork(player, npcId);
 
     await signIn(page, player);
     await page.goto(`/authoring/npcs/${npcId}`);
+    await expect(page.getByRole('heading', { name: 'Portrait sprite' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'A place to meet' })).toBeVisible();
+    await expect(page.getByText('Lantern-lit tavern table', { exact: true })).toBeVisible();
+    await expect(page.locator('.setting-preview img').first()).toBeVisible();
+    await expect(page.locator('.portrait-preview.checkerboard')).toBeVisible();
+    await expect(page.getByText('Transparency verified')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.getByRole('button', { name: 'Submit version 1' }).click();
     await expect(page.locator('main > .community-notice')).toContainText('Version 1 submitted');
     await expect(page.getByText('Version 1', { exact: true })).toBeVisible();

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NpcSheet } from '../src/lib/game/npc-sheet.js';
@@ -19,6 +19,13 @@ export type LocalCommunityFixtureUsers = {
 
 const FIXTURE_NPC_NAME = 'Willow Vellum';
 const COMMUNITY_NPC_LOCAL_DIRECTORY = '.local/media/runtime-derivatives/community-npcs';
+const COMMUNITY_NPC_SETTING_MASTER = '.local/media/source-masters/community-npcs/settings/CozyTavernBackground.png';
+const COMMUNITY_NPC_SETTINGS_DIRECTORY = `${COMMUNITY_NPC_LOCAL_DIRECTORY}/settings`;
+const COMMUNITY_NPC_SETTING_VARIANTS = [
+  { id: 'c0370000-0000-4000-8000-000000000001', filename: 'lantern-lit-tavern-table.webp', crop: '900x506+760+300' },
+  { id: 'c0370000-0000-4000-8000-000000000002', filename: 'hearth-side-booth.webp', crop: '950x534+0+160' },
+  { id: 'c0370000-0000-4000-8000-000000000003', filename: 'quiet-window-table.webp', crop: '1000x562+250+80' }
+] as const;
 // The shared local fixture bucket deliberately admits only WebP derivatives.
 const COMMUNITY_NPC_EXTENSIONS = new Set(['.webp']);
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024;
@@ -33,6 +40,22 @@ function sha256(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+/**
+ * The setting library is derived only from the ignored, user-supplied source
+ * master.  Nothing is synthesized or committed by this helper.
+ */
+export function deriveLocalCommunityNpcSettingVariants(projectRoot = process.cwd()): string[] {
+  const source = resolve(projectRoot, COMMUNITY_NPC_SETTING_MASTER);
+  if (!existsSync(source)) return [];
+  const outputDirectory = resolve(projectRoot, COMMUNITY_NPC_SETTINGS_DIRECTORY);
+  mkdirSync(outputDirectory, { recursive: true });
+  for (const variant of COMMUNITY_NPC_SETTING_VARIANTS) {
+    const output = resolve(outputDirectory, variant.filename);
+    execFileSync('convert', [source, '-crop', variant.crop, '+repage', '-resize', '1600x900!', '-strip', '-quality', '86', output]);
+  }
+  return COMMUNITY_NPC_SETTING_VARIANTS.map((variant) => `settings/${variant.filename}`);
+}
+
 function isContained(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${sep}`);
 }
@@ -41,6 +64,7 @@ function isContained(root: string, candidate: string): boolean {
 export function communityNpcStorageKey(localFilename: string): string | null {
   const normalized = localFilename.replaceAll('\\', '/').replace(/^\/+/, '');
   if (!normalized || normalized.split('/').some((segment) => !segment || segment === '.' || segment === '..')) return null;
+  if (normalized.startsWith('settings/') && normalized.split('/').length === 2) return `community-settings/${normalized.slice('settings/'.length)}`;
   return `community-npcs/${normalized}`;
 }
 
@@ -75,6 +99,7 @@ export function listLocalCommunityNpcSceneAssets(projectRoot = process.cwd()): L
 /** Uploads only dedicated community-NPC runtime derivatives to local Storage. */
 export async function seedLocalCommunityNpcRuntimeAssets(storage: LocalAssetStorage, projectRoot = process.cwd()): Promise<LocalCommunityNpcSceneAsset[]> {
   await ensureLocalShopRuntimeAssetBucket(storage);
+  deriveLocalCommunityNpcSettingVariants(projectRoot);
   const root = resolve(projectRoot, COMMUNITY_NPC_LOCAL_DIRECTORY);
   const bucket = storage.from(LOCAL_SHOP_RUNTIME_ASSET_BUCKET);
   const assets = listLocalCommunityNpcSceneAssets(projectRoot);
@@ -87,6 +112,17 @@ export async function seedLocalCommunityNpcRuntimeAssets(storage: LocalAssetStor
     if (sha256(Buffer.from(await downloaded.data.arrayBuffer())) !== asset.sha256) throw new Error(`Local Community NPC runtime asset read-back hash mismatch for ${asset.storageKey}`);
   }
   return assets;
+}
+
+/** Service-only registration pins the actual uploaded hash; no placeholder hash becomes selectable. */
+export async function registerLocalCommunityNpcSettingLibrary(service: RpcClient, assets: readonly LocalCommunityNpcSceneAsset[]): Promise<void> {
+  for (const variant of COMMUNITY_NPC_SETTING_VARIANTS) {
+    const asset = assets.find((candidate) => candidate.localFilename === `settings/${variant.filename}`);
+    if (!asset) continue;
+    await callVoid(service, 'npc_author_register_setting_asset', {
+      p_setting_id: variant.id, p_storage_key: asset.storageKey, p_mime_type: 'image/webp', p_width: 1600, p_height: 900, p_sha256: asset.sha256
+    });
+  }
 }
 
 function requireData<T>(result: { data: T | null; error: { message: string } | null }, operation: string): T {
@@ -169,7 +205,7 @@ export async function seedLocalCommunityNpcFixture(
   publishableKey: string,
   users: LocalCommunityFixtureUsers,
   scene: LocalCommunityNpcSceneAsset | null
-): Promise<{ state: 'published' | 'scene-unavailable'; npcId?: string; versionId?: string }> {
+): Promise<{ state: 'published' | 'draft' | 'scene-unavailable'; npcId?: string; versionId?: string }> {
   await callVoid(service, 'npc_bootstrap_admin', { p_user: users.administrator.id });
   const admin = await signedInClient(apiUrl, publishableKey, users.administrator.email, users.administrator.password);
   const reviewer = await signedInClient(apiUrl, publishableKey, users.reviewer.email, users.reviewer.password);
@@ -177,7 +213,9 @@ export async function seedLocalCommunityNpcFixture(
   await call(admin, 'npc_update_profile', { p_display_name: 'Pilot Creator', p_bio: 'Local community-NPC fixture creator.', p_mature: false, p_attest_adult: false, p_creator_terms: true });
   await call(reviewer, 'npc_update_profile', { p_display_name: 'Pilot Reviewer', p_bio: 'Local community-NPC fixture reviewer.', p_mature: false, p_attest_adult: false, p_creator_terms: false });
   await callVoid(admin, 'npc_admin_set_capability', { p_user: users.administrator.id, p_capability: 'npc_author', p_enabled: true, p_reason: 'Local fixture author access' });
+  await callVoid(admin, 'npc_admin_set_capability', { p_user: users.administrator.id, p_capability: 'npc_reviewer', p_enabled: true, p_reason: 'Local first-party review access' });
   await callVoid(admin, 'npc_admin_set_capability', { p_user: users.reviewer.id, p_capability: 'npc_reviewer', p_enabled: true, p_reason: 'Local fixture reviewer access' });
+  await callVoid(service, 'npc_local_assign_first_party_author', { p_owner_id: users.administrator.id });
 
   const existing = await call<{ npcs?: Array<{ name?: string; npcId?: string }> }>(admin, 'npc_public_creator', { p_normalized_name: 'pilot creator' });
   const published = existing?.npcs?.find((npc) => npc.name === FIXTURE_NPC_NAME);
@@ -187,18 +225,22 @@ export async function seedLocalCommunityNpcFixture(
     return { state: 'scene-unavailable' };
   }
 
+  const workspace = await call<Array<{ npcId?: string; sheet?: { identity?: { name?: string } }; draftRevision?: number }>>(admin, 'npc_author_workspace');
+  const existingDraft = workspace.find((row) => row.sheet?.identity?.name === FIXTURE_NPC_NAME);
+  if (existingDraft?.npcId) return { state: 'draft', npcId: existingDraft.npcId };
+
+  const setting = COMMUNITY_NPC_SETTING_VARIANTS.find((candidate) => scene.localFilename === `settings/${candidate.filename}`);
+  if (!setting) return { state: 'scene-unavailable' };
   const created = await call<{ npcId: string; revision: number }>(admin, 'npc_author_create', { p_sheet: createFixtureNpcSheet() });
-  const selected = await call<{ revision: number }>(admin, 'npc_author_add_scene', {
+  await call(admin, 'npc_author_select_setting', {
     p_npc_id: created.npcId,
-    p_storage_key: scene.storageKey,
-    p_alt_text: 'A warmly lit local fixture scene for Willow Vellum, the archive cartographer.',
-    p_generation: { fixture: 'local-community-npc', localFilename: scene.localFilename, sha256: scene.sha256 }
+    p_expected_revision: created.revision,
+    p_setting_id: setting.id
   });
-  const submission = await call<{ versionId: string }>(admin, 'npc_author_submit', { p_npc_id: created.npcId, p_expected_revision: selected.revision });
-  await callVoid(service, 'npc_evaluation_complete', { p_version: submission.versionId, p_result: { hardBlocks: [], prohibited: false, fixture: true }, p_error_code: null });
-  await call(reviewer, 'npc_reviewer_decide', { p_version_id: submission.versionId, p_decision: 'approve', p_notes: 'Local fixture approval.', p_rating: 'standard' });
-  await call(reviewer, 'npc_reviewer_publish', { p_version_id: submission.versionId });
-  return { state: 'published', npcId: created.npcId, versionId: submission.versionId };
+  // Portrait generation stays an explicit author action because it may incur a
+  // provider charge. The local fixture leaves this draft visibly blocked until
+  // a real validated portrait is generated and selected.
+  return { state: 'draft', npcId: created.npcId };
 }
 
 /** Scale data is explicitly opt-in and is inserted only into the disposable local database. */

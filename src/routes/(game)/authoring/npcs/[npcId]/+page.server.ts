@@ -18,13 +18,16 @@ import {
   dispatchLocalNpcEvaluation
 } from '$lib/server/community-npc-jobs/runner';
 import type { SandboxTurn } from '$lib/server/community-npc-jobs/provider';
-import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
+import { localScenePublicUrl, localSettingPublicUrl } from '$lib/server/community-npc-jobs/local-assets';
+import { portraitProviderAvailability, resolvePortraitPreview, syncPortraitProviderStatus } from '$lib/server/community-npc-jobs/portrait-service';
+import type { PortraitControls } from '$lib/server/community-npc-portraits';
 import { communityContext, requireCapability } from '$lib/server/community-npc-workspace';
 import { getSupabaseConfig } from '$lib/server/config';
 import type { Actions, PageServerLoad } from './$types';
 
 type RecordValue = Record<string, unknown>;
 type RpcError = { code?: string; message?: string } | null;
+type UntypedRpcResult = { data: Json; error: RpcError };
 
 function record(value: unknown): RecordValue {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {};
@@ -43,6 +46,11 @@ function identifier(value: unknown, name: string): string {
   return typeof candidate === 'string' ? candidate : '';
 }
 
+/** New additive RPCs may arrive before generated database types in local dev. */
+function authoringRpc(locals: App.Locals, name: string, args: Record<string, unknown>): Promise<UntypedRpcResult> {
+  return (locals.supabase.rpc as unknown as (rpcName: string, rpcArgs: Record<string, unknown>) => Promise<UntypedRpcResult>)(name, args);
+}
+
 function providerState(): AuthoringProviderState {
   const state = authoringProviderAvailability();
   if (state.available) return { available: true, reason: null };
@@ -54,19 +62,51 @@ function providerState(): AuthoringProviderState {
   return { available: false, reason };
 }
 
+function portraitState(): AuthoringProviderState {
+  const state = portraitProviderAvailability();
+  if (state.available) return { available: true, reason: null };
+  const reason = state.reason === 'missing_image_api_key'
+    ? 'Add NPC_IMAGE_API_KEY or OPENAI_API_KEY to the server environment to create portraits.'
+    : state.reason === 'local_not_implemented'
+      ? 'The local image provider is not implemented yet.'
+      : state.reason === 'missing_private_references'
+        ? 'The approved private style-reference set is unavailable, so portrait creation is paused.'
+      : 'The configured image provider is not supported.';
+  return { available: false, reason };
+}
+
 async function rawDetail(locals: App.Locals, npcId: string): Promise<Json> {
   const result = await locals.supabase.rpc('npc_author_workspace_detail', { p_npc_id: npcId });
   if (result.error) throw new Error(result.error.message);
   return result.data;
 }
 
-function workspaceFrom(raw: Json): AuthoringWorkspaceDetail {
+async function workspaceFrom(locals: App.Locals, raw: Json): Promise<AuthoringWorkspaceDetail> {
   const { url } = getSupabaseConfig();
-  return decodeAuthoringWorkspace(raw, providerState(), (storageKey) => localScenePublicUrl(storageKey, url));
+  const detail = decodeAuthoringWorkspace(raw, providerState(), (assetKey) =>
+    localScenePublicUrl(assetKey, url) ?? localSettingPublicUrl(assetKey, url)
+  );
+  const availablePortraitProvider = portraitState();
+  // Database availability is advisory; the server config is the final guard
+  // before credit reservation and is what the author sees.
+  detail.provider.portrait = availablePortraitProvider;
+  detail.portrait.available = availablePortraitProvider.available;
+  detail.portrait.reason = availablePortraitProvider.reason;
+  const rawPortrait = record(record(raw).portrait);
+  const portraitRows = Array.isArray(rawPortrait.candidates) ? rawPortrait.candidates : [];
+  const previewByCandidate = new Map<string, string | null>();
+  await Promise.all(portraitRows.map(async (entry) => {
+    const row = record(entry);
+    const candidateId = typeof row.id === 'string' ? row.id : null;
+    const token = typeof row.previewToken === 'string' ? row.previewToken : null;
+    if (candidateId) previewByCandidate.set(candidateId, token ? await resolvePortraitPreview(locals.supabase as unknown as { rpc(name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: { message: string } | null }> }, token) : null);
+  }));
+  for (const candidate of detail.portrait.candidates) candidate.previewUrl = previewByCandidate.get(candidate.id) ?? null;
+  return detail;
 }
 
 async function workspace(locals: App.Locals, npcId: string): Promise<AuthoringWorkspaceDetail> {
-  return workspaceFrom(await rawDetail(locals, npcId));
+  return workspaceFrom(locals, await rawDetail(locals, npcId));
 }
 
 function success(action: AuthoringActionKind, message: string, extra: Partial<AuthoringActionResult> = {}): AuthoringActionResult {
@@ -77,7 +117,7 @@ function rpcFailure(action: AuthoringActionKind, error: RpcError, fallback: stri
   return fail(status, { action, ...normalizeAuthoringError(error, fallback) } satisfies AuthoringActionResult);
 }
 
-function unavailable(action: 'assist' | 'sandbox', reason: string | null) {
+function unavailable(action: 'assist' | 'sandbox' | 'portrait', reason: string | null) {
   return fail(503, {
     action,
     status: 'unavailable',
@@ -86,7 +126,7 @@ function unavailable(action: 'assist' | 'sandbox', reason: string | null) {
   } satisfies AuthoringActionResult);
 }
 
-function providerFailed(action: 'assist' | 'sandbox', errorCode: string | undefined) {
+function providerFailed(action: 'assist' | 'sandbox' | 'portrait', errorCode: string | undefined) {
   return fail(errorCode?.includes('unavailable') ? 503 : 502, {
     action,
     ...providerFailure(errorCode)
@@ -98,6 +138,29 @@ function parseSection(value: FormDataEntryValue | null): AuthoringSection | null
   return ['identity', 'appearance', 'personality', 'lore', 'skills', 'campaign'].includes(candidate)
     ? candidate as AuthoringSection
     : null;
+}
+
+const portraitPoses = new Set(['automatic', 'relaxed', 'confident', 'guarded', 'working']);
+const portraitExpressions = new Set(['from_sheet', 'warm', 'wary', 'determined', 'thoughtful', 'stern']);
+const portraitConditions = new Set(['from_sheet', 'well_kept', 'patched', 'road_worn']);
+
+/** This is deliberately a small, closed authoring surface. The provider owns the locked style. */
+type PortraitRequestControls = PortraitControls & { alternatives: number; optionalItem: string | null };
+
+function portraitControls(data: FormData): PortraitRequestControls | null {
+  const pose = text(data.get('pose'));
+  const expression = text(data.get('expression'));
+  const clothingCondition = text(data.get('clothingCondition'));
+  const alternatives = numeric(data.get('count'));
+  const item = text(data.get('item'));
+  const note = text(data.get('note'));
+  if (!portraitPoses.has(pose) || !portraitExpressions.has(expression) || !portraitConditions.has(clothingCondition)) return null;
+  if (!Number.isInteger(alternatives) || alternatives < 1 || alternatives > 4 || item.length > 120 || note.length > 240) return null;
+  return {
+    pose: pose as PortraitRequestControls['pose'], expression: expression as PortraitRequestControls['expression'],
+    clothingCondition: clothingCondition as PortraitRequestControls['clothingCondition'], alternatives,
+    optionalItem: item || null, compositionNote: note || null
+  };
 }
 
 function sandboxContext(value: unknown): { sheet: NpcSheet; turns: SandboxTurn[] } | null {
@@ -191,39 +254,71 @@ export const actions: Actions = {
     return success('assist', accepted ? 'Suggestion applied to the draft.' : 'Suggestion discarded.', { revision });
   },
 
-  scene: async ({ locals, params, request }) => {
+  portrait: async ({ locals, params, request }) => {
     requireCapability(await communityContext(locals.supabase), 'npc_author');
     const data = await request.formData();
-    const result = await locals.supabase.rpc('npc_author_request_scene', {
+    const current = await workspace(locals, params.npcId);
+    // Keep the database's short availability lease aligned with server-only
+    // configuration and private references before it reserves any credits.
+    const synced = await syncPortraitProviderStatus();
+    if (!synced.available) return unavailable('portrait', portraitState().reason);
+    const controls = portraitControls(data);
+    if (!controls) return fail(400, {
+      action: 'portrait', status: 'failure', category: 'invalid_data',
+      message: 'Choose valid portrait controls and between one and four alternatives.'
+    } satisfies AuthoringActionResult);
+    // Portrait generation is wired to the bounded server-only service below.
+    // No prompt, reference identifier, storage key, or provider credential is
+    // accepted from this form or returned to the browser.
+    const result = await authoringRpc(locals, 'npc_author_request_portrait', {
       p_npc_id: params.npcId,
       p_expected_revision: numeric(data.get('revision')),
-      p_prompt: text(data.get('prompt')),
-      p_alternative: numeric(data.get('alternative')) || 1
+      p_controls: {
+        pose: controls.pose, expression: controls.expression, clothingCondition: controls.clothingCondition,
+        optionalItem: controls.optionalItem, compositionNote: controls.compositionNote
+      } as Json,
+      p_alternatives: controls.alternatives
     });
-    if (result.error) return rpcFailure('scene', result.error, 'The local scene lookup could not start.', result.error.code === 'PT409' ? 409 : 400);
+    if (result.error) return rpcFailure('portrait', result.error, 'The portrait request could not start.', result.error.code === 'PT409' ? 409 : 400);
     const jobId = identifier(result.data, 'jobId');
-    if (!jobId) return rpcFailure('scene', null, 'The scene lookup did not create a job.', 500);
-    const outcome = await dispatchAuthoringJob({ jobId, npcId: params.npcId, kind: 'scene', instruction: text(data.get('prompt')) });
-    if (outcome.status === 'failed') return fail(422, {
-      action: 'scene', status: 'failure', category: 'missing_prerequisite',
-      message: outcome.errorCode === 'local_scene_asset_missing'
-        ? 'No approved local scene derivative is available. Add one to the ignored media folder and run the local fixture command.'
-        : 'The local scene lookup could not complete.'
-    } satisfies AuthoringActionResult);
-    return success('scene', 'A local scene candidate is ready for review.');
+    const visualInputHash = identifier(result.data, 'visualInputHash');
+    if (!jobId || !visualInputHash) return rpcFailure('portrait', null, 'The portrait request did not create a protected job.', 500);
+    const { dispatchPortraitJob } = await import('$lib/server/community-npc-jobs/portrait-service');
+    const outcome = await dispatchPortraitJob({ jobId, npcId: params.npcId, controls, alternatives: controls.alternatives, sheet: current.draft.sheet, visualInputHash });
+    if (outcome.status === 'failed') return providerFailed('portrait', outcome.errorCode);
+    return success('portrait', 'Portrait alternatives are ready for review.');
   },
 
-  selectScene: async ({ locals, params, request }) => {
+  selectPortrait: async ({ locals, params, request }) => {
     requireCapability(await communityContext(locals.supabase), 'npc_author');
     const data = await request.formData();
-    const result = await locals.supabase.rpc('npc_author_select_scene', {
+    const current = await workspace(locals, params.npcId);
+    const candidate = current.portrait.candidates.find((entry) => entry.id === text(data.get('candidateId')));
+    if (!candidate?.assetId) return fail(400, {
+      action: 'portrait', status: 'failure', category: 'invalid_data',
+      message: 'Choose a ready portrait alternative before selecting it.'
+    } satisfies AuthoringActionResult);
+    const result = await authoringRpc(locals, 'npc_author_select_portrait', {
       p_npc_id: params.npcId,
       p_expected_revision: numeric(data.get('revision')),
-      p_asset_id: text(data.get('assetId'))
+      p_asset_id: candidate.assetId
     });
-    if (result.error) return rpcFailure('scene', result.error, 'The scene could not be selected.', result.error.code === 'PT409' ? 409 : 400);
+    if (result.error) return rpcFailure('portrait', result.error, 'The portrait could not be selected.', result.error.code === 'PT409' ? 409 : 400);
     const revision = Number(record(result.data).revision);
-    return success('scene', 'Scene selected.', { revision });
+    return success('portrait', 'Portrait selected for these visual details.', { revision });
+  },
+
+  selectSetting: async ({ locals, params, request }) => {
+    requireCapability(await communityContext(locals.supabase), 'npc_author');
+    const data = await request.formData();
+    const result = await authoringRpc(locals, 'npc_author_select_setting', {
+      p_npc_id: params.npcId,
+      p_expected_revision: numeric(data.get('revision')),
+      p_setting_id: text(data.get('settingId'))
+    });
+    if (result.error) return rpcFailure('setting', result.error, 'The setting could not be selected.', result.error.code === 'PT409' ? 409 : 400);
+    const revision = Number(record(result.data).revision);
+    return success('setting', 'Setting selected.', { revision });
   },
 
   sandbox: async ({ locals, params, request }) => {

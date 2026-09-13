@@ -31,9 +31,13 @@ flowchart LR
 
 Field assistance and sandbox conversations use the configured server-side authoring provider. OpenAI Responses calls use strict structured outputs, the complete draft sheet, and the ordered sandbox transcript. Assistance presents separate Current and Suggested cards and changes the draft only after the creator accepts it. A no-change response is reported as such. Provider absence, invalid output, and timeouts produce explicit recoverable states rather than placeholder prose.
 
-Sandbox sessions freeze their source revision, persist ordered turns, and survive reloads. Saving or accepting an assistance proposal invalidates the active session while preserving its transcript in history. Scene jobs select only an existing derivative under `.local/media/runtime-derivatives/community-npcs/`; missing media produces `local_scene_asset_missing`, without fabricating an image or borrowing another feature's artwork. Submission runs the shared sheet validator and records structural evaluation evidence. History renders version changes, evaluation results, reviewer decisions, comments, and retirement status in readable panels.
+Sandbox sessions freeze their source revision, persist ordered turns, and survive reloads. Saving or accepting an assistance proposal invalidates the active session while preserving its transcript in history.
 
-Reviewers use `/admin/npcs`. They see frozen submitted content, structural evaluation evidence, linked comments, report evidence, and appeals. Ownership history prevents a current or former owner from reviewing or moderating an identity. Publishing, requesting changes, rejecting, retiring, pausing, quarantining, and banning are audited server operations.
+Artwork authoring has two independent requirements. **Create their character artwork** uses the locked `community-npc-portrait-sprite-v1` style and bounded pose, expression, clothing-condition, authored-item, and composition controls. The server projects only visual sheet fields, supplies the private `brac-character-look-v1` references, validates transparent `1024 × 1536` PNG output, and stores an optimized alpha WebP candidate. The creator must explicitly select a candidate whose visual-input hash still matches the draft. Editing visual fields invalidates that selection; lore and campaign edits preserve it. **Choose their setting** selects one of three immutable, environment-only library entries. It replaces prompt-based scene discovery and continues to pin the chosen asset through `selected_scene_asset_id`.
+
+Provider outages, rejected images, malformed or opaque output, storage failures, and partially successful batches remain visible as real states. They never produce fixture portraits or placeholder successes. Submission requires both a current validated portrait and a verified curated setting, then runs the shared sheet validator and records structural evaluation evidence. History renders version changes, evaluation results, both pinned assets, reviewer decisions, comments, and retirement status in readable panels.
+
+Reviewers use `/admin/npcs`. They see frozen submitted content, structural evaluation evidence, linked comments, report evidence, and appeals. Ownership history prevents a current or former owner from reviewing or moderating a community identity. The local seed administrator may review its own first-party Lira and Torvin successor versions so one pilot account can exercise the complete prototype workflow; this exception does not apply to community-authored identities. Publishing, requesting changes, rejecting, retiring, pausing, quarantining, and banning are audited server operations.
 
 The prototype uses capability checks in database functions and SvelteKit server actions. Browser clients have no direct access to private authoring, narrative, evaluation, report, or audit tables.
 
@@ -57,13 +61,25 @@ The service-only daily rollup rewrites one UTC date idempotently into `npc_daily
 
 ## Local media and fixtures
 
-Put approved community scene derivatives in:
+All portrait source references and generated image bytes stay outside Git. Install the seven approved style references under:
 
 ```text
-.local/media/runtime-derivatives/community-npcs/
+.local/media/source-masters/community-npcs/style-references/brac-character-look-v1/
 ```
 
-Supported local derivatives are WebP, JPEG, and AVIF. The directory is ignored by Git. Do not add source PNG, TIFF, PSD, XCF, or KRA files to the repository.
+Install the approved tavern source under:
+
+```text
+.local/media/source-masters/community-npcs/settings/CozyTavernBackground.png
+```
+
+The fixture derives the three `1600 × 900` setting WebPs under:
+
+```text
+.local/media/runtime-derivatives/community-npcs/settings/
+```
+
+These directories are ignored by Git. The private references are loaded only by server code and are never included in browser data. The three setting derivatives are uploaded to local Supabase Storage, read back, hash-verified, and registered as the shared setting library. Do not add the source PNGs, generated portrait masters, runtime WebPs, TIFF, PSD, XCF, or KRA files to the repository.
 
 Run:
 
@@ -71,7 +87,9 @@ Run:
 npm run fixtures:users:local
 ```
 
-The fixture command uploads each community derivative to the local Supabase Storage bucket under the `community-npcs/` namespace, verifies the uploaded bytes, provisions independent administrator/author and reviewer users, and exercises the author-to-publication path when a dedicated community asset exists. With no eligible asset, it reports that publication was skipped rather than inventing media.
+The fixture command provisions the two pilot users, uploads and registers the setting library, and reports missing local media without inventing it. It assigns Lira Nightwind and Torvin Ashbeard to `keeper.one@example.test` and creates editable successor drafts copied from their current published versions. Their published versions remain unchanged. Keeper one is the local administrator and can approve changes to those first-party identities; keeper two remains available for independent-review testing.
+
+Portrait generation uses `NPC_IMAGE_API_KEY` when configured, otherwise the existing server-only `OPENAI_API_KEY`. `NPC_IMAGE_PROVIDER`, `NPC_IMAGE_MODEL`, and `NPC_IMAGE_DEADLINE_MS` control the adapter. Normal fixtures and automated tests do not make billable image requests.
 
 For explicit scale testing against the disposable local database:
 
@@ -89,6 +107,7 @@ The community-specific database suites are:
 - `supabase/tests/community_npc_runtime.test.sql`
 - `supabase/tests/community_npc_authoring.test.sql`
 - `supabase/tests/community_npc_authoring_experience.test.sql`
+- `supabase/tests/community_npc_portrait_assets.test.sql`
 - `supabase/tests/community_npc_bar_scaling.test.sql`
 - `supabase/tests/community_npc_purge.test.sql`
 - `supabase/tests/community_npc_engagement.test.sql`

@@ -10,7 +10,7 @@ export const AUTHORING_SECTION_LABELS = {
 } as const;
 
 export type AuthoringSection = keyof typeof AUTHORING_SECTION_LABELS;
-export type AuthoringActionKind = 'save' | 'assist' | 'sandbox' | 'scene' | 'submit' | 'retire' | 'comment';
+export type AuthoringActionKind = 'save' | 'assist' | 'sandbox' | 'portrait' | 'setting' | 'submit' | 'retire' | 'comment';
 export type AuthoringActionStatus = 'pending' | 'success' | 'failure' | 'unavailable' | 'stale';
 export type AuthoringErrorCategory =
   | 'authentication'
@@ -72,6 +72,62 @@ export interface AuthoringSceneCandidate {
   createdAt: string | null;
   selected: boolean;
   previewUrl: string | null;
+}
+
+/** A browser-safe description of one generated character image. */
+export interface AuthoringPortraitCandidate {
+  id: string;
+  /** Safe immutable media identity used only by the server selection action. */
+  assetId: string | null;
+  ordinal: number;
+  state: 'generating' | 'ready' | 'failed' | 'stale' | 'selected' | 'superseded';
+  previewUrl: string | null;
+  altText: string;
+  width: number | null;
+  height: number | null;
+  hasAlpha: boolean | null;
+  mimeType: string | null;
+  failureReason: string | null;
+  styleVersion: string | null;
+  visualInputHash: string | null;
+  createdAt: string | null;
+}
+
+export interface AuthoringPortraitBatch {
+  id: string;
+  status: 'idle' | 'generating' | 'partial' | 'ready' | 'failed';
+  requested: number;
+  completed: number;
+  failed: number;
+  errorCode: string | null;
+}
+
+export interface AuthoringPortraitWorkspace {
+  available: boolean;
+  reason: string | null;
+  styleLabel: string;
+  styleVersion: string;
+  visualInputHash: string | null;
+  selectedCandidateId: string | null;
+  candidates: AuthoringPortraitCandidate[];
+  activeBatch: AuthoringPortraitBatch | null;
+  creditsRemaining: number | null;
+}
+
+export interface AuthoringCuratedSetting {
+  id: string;
+  name: string;
+  description: string;
+  altText: string;
+  previewUrl: string | null;
+  selected: boolean;
+}
+
+export interface AuthoringSettingsWorkspace {
+  available: boolean;
+  reason: string | null;
+  selectedSettingId: string | null;
+  settings: AuthoringCuratedSetting[];
 }
 
 export interface AssistanceComparisonRow {
@@ -171,12 +227,16 @@ export interface AuthoringWorkspaceDetail {
   provider: {
     assistance: AuthoringProviderState;
     sandbox: AuthoringProviderState;
+    portrait: AuthoringProviderState;
   };
   eligibleNpcs: AuthoringNpcOption[];
   scenes: {
     selectedAssetId: string | null;
     candidates: AuthoringSceneCandidate[];
   };
+  /** Curated setting library. `scenes` remains a compatibility projection. */
+  settings: AuthoringSettingsWorkspace;
+  portrait: AuthoringPortraitWorkspace;
   assistance: AuthoringAssistance[];
   sandbox: AuthoringSandboxWorkspace;
   versions: AuthoringVersionHistory[];
@@ -311,7 +371,11 @@ function issueSection(issue: NpcSheetIssue): AuthoringSection {
   return section(first);
 }
 
-export function authoringPreflight(sheet: NpcSheet, selectedSceneAssetId: string | null): AuthoringPreflightIssue[] {
+export function authoringPreflight(
+  sheet: NpcSheet,
+  selectedSettingId: string | null,
+  selectedPortraitId: string | null
+): AuthoringPreflightIssue[] {
   const issues: AuthoringPreflightIssue[] = validateNpcSheet(sheet).map((entry) => {
     const selected = issueSection(entry);
     return {
@@ -322,9 +386,13 @@ export function authoringPreflight(sheet: NpcSheet, selectedSceneAssetId: string
       focusId: `field-${entry.path.replaceAll('.', '-')}`
     };
   });
-  if (!selectedSceneAssetId) issues.push({
-    path: 'scene', section: 'appearance', sectionLabel: 'Scene',
-    message: 'Choose a scene before submitting.', focusId: 'scene-candidates'
+  if (!selectedSettingId) issues.push({
+    path: 'setting', section: 'appearance', sectionLabel: 'Setting',
+    message: 'Choose a curated setting before submitting.', focusId: 'setting-library'
+  });
+  if (!selectedPortraitId) issues.push({
+    path: 'portrait', section: 'appearance', sectionLabel: 'Portrait',
+    message: 'Choose a current transparent portrait before submitting.', focusId: 'portrait-artwork'
   });
   return issues;
 }
@@ -357,9 +425,103 @@ export function decodeAuthoringWorkspace(
       retirement: nullableString(capabilityReasons.retirement ?? capabilitiesValue.retirementReason) ?? undefined
     }
   };
+  const settingsValue = record(root.settings);
   const scenesValue = record(root.scenes);
-  const selectedAssetId = nullableString(scenesValue.selectedAssetId ?? root.selectedSceneAssetId);
-  const sceneRows = array(scenesValue.candidates ?? root.assets);
+  const selectedAssetId = nullableString(settingsValue.selectedAssetId ?? settingsValue.selected ?? scenesValue.selectedAssetId ?? root.selectedSceneAssetId);
+  const selectedSettingLibraryId = nullableString(record(settingsValue.selected).id) ?? selectedAssetId;
+  const sceneRows = array(settingsValue.available ?? settingsValue.settings ?? scenesValue.candidates ?? root.assets);
+  const settingsAvailable = boolean(
+    settingsValue.libraryAvailable ?? settingsValue.available,
+    sceneRows.length > 0
+  );
+  const settingsReason = nullableString(settingsValue.reason ?? settingsValue.errorCode)
+    ?? (settingsAvailable ? null : 'The setting library could not be loaded, so submission is temporarily blocked.');
+  const settings: AuthoringSettingsWorkspace = {
+    available: settingsAvailable,
+    reason: settingsReason,
+    selectedSettingId: selectedSettingLibraryId,
+    settings: sceneRows.map((entry): AuthoringCuratedSetting => {
+      const row = record(entry);
+      const storageKey = string(row.storageKey ?? row.key);
+      const id = string(row.id);
+      return {
+        id,
+        name: string(row.name ?? row.label ?? row.altText, 'Community setting'),
+        description: string(row.description, 'An approved environment for this companion.'),
+        altText: string(row.altText ?? row.label, 'Community setting preview'),
+        previewUrl: nullableString(row.previewUrl) ?? previewUrl(storageKey),
+        selected: id === selectedSettingLibraryId
+      };
+    }).filter((entry) => entry.id)
+  };
+  const portraitValue = record(root.portrait);
+  const selectedPortraitAssetId = nullableString(portraitValue.selectedAssetId ?? record(portraitValue.selected).assetId);
+  const styleVersion = string(portraitValue.styleVersion, 'community-npc-portrait-sprite-v1');
+  const portraitAvailable = boolean(portraitValue.providerAvailable, provider.available);
+  const portraitReason = nullableString(portraitValue.providerReason)
+    ?? (portraitAvailable ? null : provider.reason ?? 'The portrait provider is unavailable.');
+  const validCandidateStates = new Set<AuthoringPortraitCandidate['state']>(['generating', 'ready', 'failed', 'stale', 'selected', 'superseded']);
+  const portrait: AuthoringPortraitWorkspace = {
+    available: portraitAvailable,
+    reason: portraitReason,
+    styleLabel: string(portraitValue.styleLabel, 'Community character look'),
+    styleVersion,
+    visualInputHash: nullableString(portraitValue.visualInputHash),
+    selectedCandidateId: null,
+    candidates: array(portraitValue.candidates).map((entry): AuthoringPortraitCandidate => {
+      const row = record(entry);
+      const dimensions = record(row.dimensions);
+      const candidateState = string(row.state, 'failed') as AuthoringPortraitCandidate['state'];
+      const id = string(row.id);
+      return {
+        id,
+        assetId: nullableString(row.assetId),
+        ordinal: number(row.ordinal, 0),
+        state: validCandidateStates.has(candidateState) ? candidateState : 'failed',
+        // Opaque preview grants are resolved server-side before this DTO is
+        // returned. A token is never a browser URL or storage key.
+        previewUrl: nullableString(row.previewUrl),
+        altText: string(row.altText, `Portrait alternative ${number(row.ordinal, 0) || 1}`),
+        width: typeof dimensions.width === 'number' ? dimensions.width : typeof row.width === 'number' ? row.width : null,
+        height: typeof dimensions.height === 'number' ? dimensions.height : typeof row.height === 'number' ? row.height : null,
+        hasAlpha: typeof row.alphaValid === 'boolean' ? row.alphaValid : typeof row.hasAlpha === 'boolean' ? row.hasAlpha : null,
+        mimeType: nullableString(row.mimeType),
+        failureReason: nullableString(row.failureCode ?? row.failureReason),
+        styleVersion: nullableString(row.styleVersion) ?? styleVersion,
+        visualInputHash: nullableString(row.visualInputHash),
+        createdAt: nullableString(row.createdAt)
+      };
+    }).filter((entry) => entry.id),
+    activeBatch: (() => {
+      const batch = record(portraitValue.activeBatch);
+      const id = nullableString(batch.id ?? batch.jobId);
+      if (!id) return null;
+      const persistedStatus = string(batch.status, 'failed');
+      const status = (persistedStatus === 'queued' || persistedStatus === 'running' ? 'generating' : persistedStatus) as AuthoringPortraitBatch['status'];
+      return {
+        id,
+        status: ['idle', 'generating', 'partial', 'ready', 'failed'].includes(status) ? status : 'failed',
+        requested: number(batch.requested ?? batch.requestedCount ?? batch.requestedAlternatives),
+        completed: number(batch.completed ?? batch.completedCount),
+        failed: number(batch.failed ?? batch.failedCount),
+        errorCode: nullableString(batch.errorCode)
+      };
+    })(),
+    creditsRemaining: typeof portraitValue.remainingCredits === 'number' ? portraitValue.remainingCredits : null
+  };
+  // The database is authoritative, but keep the browser contract defensive:
+  // an image is only submit-ready when it is explicitly selected, alpha-valid,
+  // and matches the visual inputs that are presently on the draft.
+  const selectedPortrait = portrait.candidates.find((candidate) => candidate.assetId === selectedPortraitAssetId)
+    ?? portrait.candidates.find((candidate) => candidate.id === string(record(portraitValue.selected).id));
+  const selectedPortraitIsCurrent = Boolean(
+    selectedPortrait
+      && selectedPortrait.state === 'selected'
+      && selectedPortrait.assetId !== null
+      && selectedPortrait.hasAlpha === true
+      && selectedPortrait.visualInputHash === portrait.visualInputHash
+  );
+  if (selectedPortraitIsCurrent) portrait.selectedCandidateId = selectedPortrait?.id ?? null;
   const assistance = array(root.assistance).map((entry): AuthoringAssistance => {
     const row = record(entry);
     const selected = section(row.sectionPath);
@@ -408,17 +570,19 @@ export function decodeAuthoringWorkspace(
       sheet, fieldPaths: array(draftValue.fieldPaths ?? root.fieldPaths).map((item) => string(item)).filter(Boolean)
     },
     capabilities,
-    provider: { assistance: provider, sandbox: provider },
+    provider: { assistance: provider, sandbox: provider, portrait: { available: portraitAvailable, reason: portraitReason } },
     eligibleNpcs: array(root.eligibleNpcs).map((entry) => {
       const row = record(entry); return { npcId: string(row.npcId), name: string(row.name), title: string(row.title) };
     }).filter((entry) => entry.npcId && entry.name),
     scenes: {
       selectedAssetId,
       candidates: sceneRows.map((entry): AuthoringSceneCandidate => {
-        const row = record(entry); const storageKey = string(row.storageKey);
-        return { id: string(row.id), storageKey, altText: string(row.altText), createdAt: nullableString(row.createdAt), selected: string(row.id) === selectedAssetId, previewUrl: previewUrl(storageKey) };
+        const row = record(entry); const storageKey = string(row.storageKey ?? row.key);
+        return { id: string(row.id), storageKey, altText: string(row.altText ?? row.label), createdAt: nullableString(row.createdAt), selected: string(row.id) === selectedAssetId, previewUrl: nullableString(row.previewUrl) ?? previewUrl(storageKey) };
       })
     },
+    settings,
+    portrait,
     assistance,
     sandbox,
     versions,
@@ -427,7 +591,7 @@ export function decodeAuthoringWorkspace(
       reason: string(retirementValue.reason), createdAt: nullableString(retirementValue.createdAt),
       decidedAt: nullableString(retirementValue.decidedAt), decisionReason: nullableString(retirementValue.decisionReason)
     } : null,
-    preflight: authoringPreflight(sheet, selectedAssetId),
+    preflight: authoringPreflight(sheet, selectedAssetId, selectedPortraitIsCurrent ? selectedPortraitAssetId : null),
     quota: {
       assistanceDaily: typeof quota.assistanceDaily === 'number' ? quota.assistanceDaily : null,
       sceneDaily: typeof quota.sceneDaily === 'number' ? quota.sceneDaily : null,
@@ -444,7 +608,7 @@ export function normalizeAuthoringError(error: { code?: string; message?: string
   if (code === 'PT403') return { category: 'permission', message: 'Your creator access does not allow this action.', status: 'failure' };
   if (code === 'PT409' || lower.includes('revision') || lower.includes('older draft')) return { category: 'stale_revision', message: 'This draft changed elsewhere. Refresh before continuing.', status: 'stale', conflict: true };
   if (code === 'PT429' || lower.includes('quota')) return { category: 'quota_exhausted', message: 'The daily authoring limit has been reached. Try again tomorrow.', status: 'failure' };
-  if (lower.includes('scene')) return { category: 'missing_prerequisite', message, status: 'failure' };
+  if (lower.includes('scene') || lower.includes('setting') || lower.includes('portrait')) return { category: 'missing_prerequisite', message, status: 'failure' };
   if (code === 'PT400' || code === 'PT422') return { category: 'invalid_data', message, status: 'failure' };
   return { category: 'unexpected', message: fallback, status: 'failure' };
 }
@@ -453,6 +617,9 @@ export function providerFailure(errorCode: string | undefined): Pick<AuthoringAc
   if (errorCode === 'provider_no_change') return { category: 'provider_no_change', message: 'No useful change was proposed. Try a more specific instruction.', status: 'failure' };
   if (errorCode === 'provider_timeout') return { category: 'provider_timeout', message: 'The authoring assistant took too long to respond. Try again.', status: 'failure' };
   if (errorCode === 'provider_malformed') return { category: 'provider_malformed', message: 'The authoring assistant returned an unusable suggestion. Nothing was changed.', status: 'failure' };
+  if (errorCode === 'provider_refused') return { category: 'provider_malformed', message: 'The image provider refused this portrait request. No substitute image was used.', status: 'failure' };
+  if (errorCode === 'invalid_output') return { category: 'provider_malformed', message: 'The generated image did not meet the transparent portrait requirements. No candidate was selected.', status: 'failure' };
+  if (errorCode === 'storage_failed') return { category: 'unexpected', message: 'The generated portrait could not be stored safely. No candidate was selected.', status: 'failure' };
   if (errorCode?.includes('unavailable') || errorCode?.includes('unconfigured') || errorCode === 'local_provider_not_implemented') return { category: 'provider_unavailable', message: 'The authoring assistant is unavailable with the current provider configuration.', status: 'unavailable' };
   return { category: 'unexpected', message: 'The authoring assistant could not complete this request. Nothing was changed.', status: 'failure' };
 }

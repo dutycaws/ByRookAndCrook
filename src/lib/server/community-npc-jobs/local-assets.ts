@@ -5,6 +5,11 @@ import { LOCAL_SHOP_RUNTIME_ASSET_BUCKET, LOCAL_SHOP_RUNTIME_ASSET_DIRECTORY } f
 const localRoot = resolve(LOCAL_SHOP_RUNTIME_ASSET_DIRECTORY);
 const communityNpcRoot = resolve(localRoot, 'community-npcs');
 const supportedExtensions = new Set(['.webp', '.jpg', '.jpeg', '.avif']);
+const curatedSettingStorageKeys = new Map([
+  ['lantern-lit-tavern-table', 'community-settings/lantern-lit-tavern-table.webp'],
+  ['hearth-side-booth', 'community-settings/hearth-side-booth.webp'],
+  ['quiet-window-table', 'community-settings/quiet-window-table.webp']
+]);
 
 export type LocalSceneAsset = {
   /** Immutable object key uploaded by the local fixture command. */
@@ -45,6 +50,26 @@ export function localScenePublicUrl(storageKey: string, supabaseUrl: string | nu
   if (!storageKey.startsWith('community-npcs/')) return null;
   const filename = storageKey.slice('community-npcs/'.length);
   if (!filename || !validRelativePath(filename) || !listLocalSceneAssets().some((asset) => asset.storageKey === storageKey)) return null;
+  if (!supabaseUrl) return null;
+  try {
+    const base = new URL(supabaseUrl);
+    if (!['http:', 'https:'].includes(base.protocol) || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.port !== '57321') return null;
+    return new URL(`/storage/v1/object/public/${LOCAL_SHOP_RUNTIME_ASSET_BUCKET}/${storageKey}`, base).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves only the three project-owned setting-library entries. The database
+ * returns their stable public keys; arbitrary storage paths never cross this
+ * boundary. A preview is exposed only when its ignored local derivative exists.
+ */
+export function localSettingPublicUrl(settingKey: string, supabaseUrl: string | null | undefined): string | null {
+  const storageKey = curatedSettingStorageKeys.get(settingKey);
+  if (!storageKey) return null;
+  const localStorageKey = `community-npcs/settings/${storageKey.slice('community-settings/'.length)}`;
+  if (!listLocalSceneAssets().some((asset) => asset.storageKey === localStorageKey)) return null;
   if (!supabaseUrl) return null;
   try {
     const base = new URL(supabaseUrl);

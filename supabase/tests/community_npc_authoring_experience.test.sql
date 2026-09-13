@@ -17,7 +17,7 @@ set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000071';
 select public.npc_update_profile('Experience Owner','Tests typed authoring contracts safely.',false,false,true);
 create temporary table pg_temp.ids as select (public.npc_author_create((select sheet from pg_temp.sheet))->>'npcId')::uuid npc_id;
 select ok((public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'draft'->>'editable')::boolean,'empty lifecycle exposes an editable typed draft');
-select is(public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'capabilities'->>'submitReason','Choose a scene before submitting','workspace explains a missing submission prerequisite');
+select is(public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'capabilities'->>'submitReason','Choose a setting before submitting','workspace explains a missing submission prerequisite');
 select ok(jsonb_typeof(public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'eligibleNpcs')='array','workspace exposes eligible NPC references without IDs in editor fields');
 
 create temporary table pg_temp.assistance as select public.npc_author_request_assistance((select npc_id from pg_temp.ids),0,'identity','Make the voice considerably more formal.') value;
@@ -58,8 +58,26 @@ select is((public.npc_author_sandbox_status((select (value->>'sandboxId')::uuid 
 select ok(not (public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'assistance'->0->>'actionable')::boolean,'a proposal from a saved-over revision is visibly out of date');
 select throws_ok(format('select public.npc_author_assistance_disposition(%L::uuid,2,true)',(select (value->>'assistanceEventId')::uuid from pg_temp.stale_assistance)),'PT409',null,'stale assistance cannot overwrite a newer draft');
 
-select public.npc_author_add_scene((select npc_id from pg_temp.ids),'runtime-derivatives/npcs/experience-scout.webp','A scout with a lantern in a warm tavern scene.','{}'::jsonb);
-create temporary table pg_temp.submit as select public.npc_author_submit((select npc_id from pg_temp.ids),3) value;
+reset role;
+set local request.jwt.claim.role='service_role';
+select public.npc_author_set_portrait_provider_status(true,'openai','deterministic-fixture');
+select public.npc_author_register_setting_asset('c0370000-0000-4000-8000-000000000001','community-settings/lantern-lit-tavern-table.webp','image/webp',1600,900,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+reset request.jwt.claim.role;
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000071';
+select public.npc_author_select_setting((select npc_id from pg_temp.ids),2,'c0370000-0000-4000-8000-000000000001');
+create temporary table pg_temp.portrait_request as select public.npc_author_request_portrait((select npc_id from pg_temp.ids),3,'{}'::jsonb,1) value;
+reset role;
+set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.portrait_complete as select public.npc_author_portrait_complete((select (value->>'jobId')::uuid from pg_temp.portrait_request),jsonb_build_array(jsonb_build_object('ordinal',1,'storageKey','community-portraits/experience-scout.webp','masterStorageKey','source-masters/portraits/experience-scout.png','masterSha256','dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd','referenceSetHash','eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee','requestId','experience-portrait','altText','A full-body scout in a warm tavern pose.','mimeType','image/webp','width',1024,'height',1536,'byteSize',120000,'sha256','1111111111111111111111111111111111111111111111111111111111111111','alphaValid',true,'visualInputHash',(select value->>'visualInputHash' from pg_temp.portrait_request),'provider','deterministic','model','fixture','promptHash','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','styleVersion','community-npc-portrait-sprite-v1','referenceSetVersion','brac-character-look-v1'))) value;
+grant select on pg_temp.portrait_complete to authenticated;
+reset request.jwt.claim.role;
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000071';
+select public.npc_author_select_portrait((select npc_id from pg_temp.ids),3,(select (value#>>'{candidates,0,assetId}')::uuid from pg_temp.portrait_complete));
+create temporary table pg_temp.submit as select public.npc_author_submit((select npc_id from pg_temp.ids),4) value;
 select is((public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'versions'->0->>'state'),'submitted','immutable submission is visible in typed version history');
 select is((public.npc_author_workspace_detail((select npc_id from pg_temp.ids))->'capabilities'->>'editReason'),'Draft is read-only after submission','submitted lifecycle gives an author-readable edit reason');
 select throws_ok(format('update private.npc_versions set sheet=%L::jsonb where id=%L::uuid','{}',(select value->>'versionId' from pg_temp.submit)),null,null,'submitted version content remains immutable');

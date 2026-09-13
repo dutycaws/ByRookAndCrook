@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { NpcPlanStep, NpcSheet } from '$lib/game/npc-sheet';
+  import type { Snippet } from 'svelte';
   import { DIFFICULTY_LEVELS, DISCLOSURE_LEVELS, fromGuidedNpcSheet, newGuidedEntity, newGuidedFact, newGuidedMilestone, removeGuidedEntity, removeGuidedNpcReference, toGuidedNpcSheet, type GuidedMilestone, type GuidedNpcSheet } from '$lib/game/npc-sheet-editor';
   import { enhance } from '$app/forms';
   import type { SubmitFunction } from '@sveltejs/kit';
   import { onMount } from 'svelte';
 
   type RelatedNpc = { id: string; name: string };
-  let { sheet, revision, editable = true, conflict = false, message = '', relatedNpcs = [] }: { sheet: NpcSheet; revision: number; editable?: boolean; conflict?: boolean; message?: string; relatedNpcs?: RelatedNpc[]; } = $props();
+  let { sheet, revision, editable = true, conflict = false, message = '', relatedNpcs = [], children }: { sheet: NpcSheet; revision: number; editable?: boolean; conflict?: boolean; message?: string; relatedNpcs?: RelatedNpc[]; children?: Snippet; } = $props();
   let formElement: HTMLFormElement;
   let status = $state('Saved'); let frozen = $state(false); let hydrated = $state(false); let worldOpen = $state(false); let storyOpen = $state(true); let entityError = $state(''); let debounce: ReturnType<typeof setTimeout> | undefined;
   function initialEditor(): GuidedNpcSheet { return toGuidedNpcSheet(sheet); }
@@ -16,7 +17,7 @@
   const statusTone = () => conflict || frozen || status.includes('failed') || status.includes('Conflict') ? 'danger' : status === 'Saving…' ? 'working' : 'ready';
   $effect(() => { if (!editable) status = 'Read-only'; if (conflict) { frozen = true; status = 'Conflict — refresh before editing'; } });
   onMount(() => { hydrated = true; });
-  function schedule() { if (!hydrated || !editable || frozen) return; status = 'Saving…'; if (debounce) clearTimeout(debounce); debounce = setTimeout(() => formElement.requestSubmit(), 750); }
+  function schedule(event?: Event) { if (event?.target instanceof HTMLElement && event.target.closest('.portrait-panel')) return; if (!hydrated || !editable || frozen) return; status = 'Saving…'; if (debounce) clearTimeout(debounce); debounce = setTimeout(() => formElement.requestSubmit(), 750); }
   const autosave: SubmitFunction = () => async ({ result, update }) => { if (result.type === 'failure') { await update({ reset: false, invalidateAll: false }); const data = result.data as { conflict?: boolean; message?: string } | undefined; if (data?.conflict) { frozen = true; status = 'Conflict — refresh before editing'; } else status = data?.message ?? 'Save failed'; return; } await update({ reset: false, invalidateAll: true }); status = 'Saved'; };
   const lines = (value: string) => value.split('\n').map((entry) => entry.trim()).filter(Boolean);
   function updateLines(key: keyof GuidedNpcSheet['personality'], event: Event) { editor.personality[key] = lines((event.currentTarget as HTMLTextAreaElement).value); }
@@ -38,6 +39,7 @@
   <fieldset disabled={!hydrated || !editable || frozen}>
     <section class="editor-section identity-section"><div class="editor-section-heading"><span>01</span><div><h2>Identity</h2><p>The public introduction and the boundaries of their voice.</p></div></div><div class="editor-fields two-column"><label>Name <input name="name" bind:value={editor.identity.name} required /></label><label>Title <input name="title" bind:value={editor.identity.title} required /></label></div><div class="editor-fields"><label>Short description <textarea name="shortDescription" bind:value={editor.identity.shortDescription} required></textarea></label><label>Voice and speech rules <textarea name="voice" bind:value={editor.identity.voice} required></textarea></label><label>Audience <select name="rating" bind:value={editor.rating}><option value="standard">Standard</option><option value="mature">Mature</option></select></label></div></section>
     <section class="editor-section"><div class="editor-section-heading"><span>02</span><div><h2>Appearance</h2><p>Concrete details give art and dialogue a shared visual anchor.</p></div></div><div class="editor-fields two-column"><label>Physical appearance <textarea name="physicalAppearance" bind:value={editor.appearance.physicalAppearance} required></textarea></label><label>Attire <textarea name="attire" bind:value={editor.appearance.attire} required></textarea></label><label>Notable features <textarea name="notableFeatures" bind:value={editor.appearance.notableFeatures} required></textarea></label><label>Default mood <textarea name="mood" bind:value={editor.appearance.mood} required></textarea></label></div></section>
+    {@render children?.()}
     <section class="editor-section"><div class="editor-section-heading"><span>03</span><div><h2>Personality</h2><p>One item per line. These are firm constraints on how they act.</p></div></div><div class="editor-fields two-column">{#each Object.entries(editor.personality) as [name, entries]}<label>{name}<textarea name={name} value={entries.join('\n')} oninput={(event) => updateLines(name as keyof GuidedNpcSheet['personality'], event)} required></textarea></label>{/each}</div></section>
 
     <section class="editor-section guided-section"><button class="section-toggle" type="button" onclick={() => worldOpen = !worldOpen} aria-expanded={worldOpen}><span class="section-number">04</span><span><strong>Their world and what they reveal</strong><small>Places, people, connections, and what this character is ready to share.</small></span><span class="toggle-mark">{worldOpen ? '−' : '+'}</span></button>

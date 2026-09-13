@@ -94,10 +94,26 @@ select throws_ok(format('select public.npc_author_workspace_detail(%L::uuid)',(s
 reset role;
 
 -- Submit a clean successor and make its reviewer detail/comment boundary observable.
+reset role;
+set local request.jwt.claim.role='service_role';
+select public.npc_author_set_portrait_provider_status(true,'openai','deterministic-fixture');
+select public.npc_author_register_setting_asset('c0370000-0000-4000-8000-000000000001','community-settings/lantern-lit-tavern-table.webp','image/webp',1600,900,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+reset request.jwt.claim.role;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000041';
-create temporary table pg_temp.submission as select public.npc_author_submit((select npc_id from pg_temp.authoring_ids),4) value;
+select public.npc_author_select_setting((select npc_id from pg_temp.authoring_ids),4,'c0370000-0000-4000-8000-000000000001');
+create temporary table pg_temp.portrait_request as select public.npc_author_request_portrait((select npc_id from pg_temp.authoring_ids),5,'{}'::jsonb,1) value;
+reset role;
+set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.portrait_complete as select public.npc_author_portrait_complete((select (value->>'jobId')::uuid from pg_temp.portrait_request),jsonb_build_array(jsonb_build_object('ordinal',1,'storageKey','community-portraits/workshop-scout.webp','masterStorageKey','source-masters/portraits/workshop-scout.png','masterSha256','dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd','referenceSetHash','eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee','requestId','workshop-portrait','altText','A full-body workshop scout in a warm tavern pose.','mimeType','image/webp','width',1024,'height',1536,'byteSize',120000,'sha256','1111111111111111111111111111111111111111111111111111111111111111','alphaValid',true,'visualInputHash',(select value->>'visualInputHash' from pg_temp.portrait_request),'provider','deterministic','model','fixture','promptHash','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','styleVersion','community-npc-portrait-sprite-v1','referenceSetVersion','brac-character-look-v1'))) value;
+grant select on pg_temp.portrait_complete to authenticated;
+reset request.jwt.claim.role;
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000041';
+select public.npc_author_select_portrait((select npc_id from pg_temp.authoring_ids),5,(select (value#>>'{candidates,0,assetId}')::uuid from pg_temp.portrait_complete));
+create temporary table pg_temp.submission as select public.npc_author_submit((select npc_id from pg_temp.authoring_ids),6) value;
 reset role;
 update private.npc_evaluations set status='completed',result='{"hardBlocks":[],"prohibited":false}'::jsonb where version_id=(select (value->>'versionId')::uuid from pg_temp.submission);
 set local role authenticated;

@@ -2343,12 +2343,46 @@ export type Database = {
         Returns: Json
       }
       npc_author_create: { Args: { p_sheet: Json }; Returns: Json }
+      npc_author_list_settings: { Args: never; Returns: Json }
+      npc_author_portrait_complete: {
+        Args: { p_candidates: Json; p_error_code?: string; p_job_id: string }
+        Returns: Json
+      }
+      npc_author_portrait_preview_authorization: {
+        Args: { p_token: string }
+        Returns: Json
+      }
+      npc_author_portrait_preview_target: {
+        Args: { p_asset_id: string }
+        Returns: Json
+      }
+      npc_author_portrait_status: { Args: { p_job_id: string }; Returns: Json }
+      npc_author_register_setting_asset: {
+        Args: {
+          p_height: number
+          p_mime_type: string
+          p_setting_id: string
+          p_sha256: string
+          p_storage_key: string
+          p_width: number
+        }
+        Returns: Json
+      }
       npc_author_request_assistance: {
         Args: {
           p_expected_revision: number
           p_instruction: string
           p_npc_id: string
           p_section_path: string
+        }
+        Returns: Json
+      }
+      npc_author_request_portrait: {
+        Args: {
+          p_alternatives?: number
+          p_controls: Json
+          p_expected_revision: number
+          p_npc_id: string
         }
         Returns: Json
       }
@@ -2407,6 +2441,14 @@ export type Database = {
         Returns: Json
       }
       npc_author_scene_status: { Args: { p_job_id: string }; Returns: Json }
+      npc_author_select_portrait: {
+        Args: {
+          p_asset_id: string
+          p_expected_revision: number
+          p_npc_id: string
+        }
+        Returns: Json
+      }
       npc_author_select_scene: {
         Args: {
           p_asset_id: string
@@ -2414,6 +2456,24 @@ export type Database = {
           p_npc_id: string
         }
         Returns: Json
+      }
+      npc_author_select_setting: {
+        Args: {
+          p_expected_revision: number
+          p_npc_id: string
+          p_setting_id: string
+        }
+        Returns: Json
+      }
+      npc_author_set_portrait_provider_status: {
+        Args: {
+          p_available: boolean
+          p_expires_in_seconds?: number
+          p_failure_code?: string
+          p_model: string
+          p_provider: string
+        }
+        Returns: undefined
       }
       npc_author_submit: {
         Args: { p_expected_revision: number; p_npc_id: string }
@@ -2476,7 +2536,16 @@ export type Database = {
       npc_inbox: { Args: { p_limit?: number }; Returns: Json }
       npc_inbox_mark_read: { Args: { p_ids: string[] }; Returns: number }
       npc_journals: { Args: { p_instance_ids: string[] }; Returns: Json }
+      npc_local_assign_first_party_author: {
+        Args: { p_owner_id: string }
+        Returns: Json
+      }
       npc_my_capabilities: { Args: never; Returns: Json }
+      npc_portrait_deletion_complete: {
+        Args: { p_asset_id: string; p_claim_token: string }
+        Returns: undefined
+      }
+      npc_portrait_next_deletion_target: { Args: never; Returns: Json }
       npc_profile_me: { Args: never; Returns: Json }
       npc_public_creator: { Args: { p_normalized_name: string }; Returns: Json }
       npc_public_creator_npcs: {

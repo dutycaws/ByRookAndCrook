@@ -3,7 +3,9 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { assertLocalSupabaseUrl, seedLocalShopRuntimeAssets } from './local-shop-runtime-assets.js';
+import { ensurePrivatePortraitBuckets } from '../src/lib/server/community-npc-portraits/index.js';
 import {
+  registerLocalCommunityNpcSettingLibrary,
   seedLocalCommunityNpcFixture,
   seedLocalCommunityNpcRuntimeAssets,
   seedOptionalLocalCommunityNpcScale
@@ -79,8 +81,10 @@ async function main() {
   }
 
   const assets = await seedLocalShopRuntimeAssets(admin.storage);
+  await ensurePrivatePortraitBuckets(admin.storage);
   console.info(`Verified ${assets.length} local Shop runtime asset(s) in local Supabase Storage.`);
   const communitySceneAssets = await seedLocalCommunityNpcRuntimeAssets(admin.storage);
+  await registerLocalCommunityNpcSettingLibrary(admin, communitySceneAssets);
   console.info(`Verified ${communitySceneAssets.length} dedicated local Community NPC runtime scene asset(s) in local Supabase Storage.`);
   const first = DEFAULT_USERS[0];
   const second = DEFAULT_USERS[1];
@@ -95,8 +99,10 @@ async function main() {
     communitySceneAssets[0] ?? null
   );
   console.info(fixture.state === 'published'
-    ? `Verified local community-NPC author→review→publish fixture${fixture.npcId ? ` (${fixture.npcId})` : ''}.`
-    : 'Community-NPC publishing fixture skipped because optional local media is unavailable.');
+    ? `Verified local published community-NPC fixture${fixture.npcId ? ` (${fixture.npcId})` : ''}.`
+    : fixture.state === 'draft'
+      ? `Verified local community-NPC authoring draft${fixture.npcId ? ` (${fixture.npcId})` : ''}; portrait generation remains an explicit author action.`
+      : 'Community-NPC authoring fixture skipped because the curated setting media is unavailable.');
 
   if (process.env.FIXTURE_NPC_SCALE === '1') {
     const creator = await createClient(apiUrl.toString(), status.PUBLISHABLE_KEY ?? required('PUBLIC_SUPABASE_PUBLISHABLE_KEY'), { auth: { autoRefreshToken: false, persistSession: false } }).auth.signInWithPassword(first);

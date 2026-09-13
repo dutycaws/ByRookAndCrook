@@ -21,7 +21,7 @@ The JavaScript package versions and npm version are pinned in `package.json` and
 
 Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
 
-Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. This command does not make a billable provider request to validate the key.
+Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2`, and 60 seconds. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
 
 Then use the normal human-testing command from the repository root:
 
@@ -52,7 +52,11 @@ DO_NOT_TRACK=1 supabase stop --project-id by-rook-and-crook
 
 ## Local pilot accounts
 
-`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads ignored runtime derivatives from `.local/media/runtime-derivatives/` into the local-only `prototype-runtime-media` Supabase Storage bucket. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The first pilot is bootstrapped as the local Community NPC administrator and author; the second is the independent reviewer. The fixture exercises the real author → scene selection → submission → evaluation → review → publication path for **Willow Vellum** only when a dedicated scene derivative is present under `.local/media/runtime-derivatives/community-npcs/`. Those files are stored only under `community-npcs/...` object keys; Shop and item art are never used as NPC scenes. Re-running the command verifies the already-published fixture instead of making another one.
+`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads ignored runtime derivatives from `.local/media/runtime-derivatives/` into local Supabase Storage. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The first pilot is bootstrapped as the local Community NPC administrator and author; the second is the independent reviewer.
+
+For artwork authoring, place the approved private style references in `.local/media/source-masters/community-npcs/style-references/brac-character-look-v1/` and `CozyTavernBackground.png` in `.local/media/source-masters/community-npcs/settings/`. The fixture derives three environment-only `1600 × 900` WebPs from that setting source, uploads them under `community-settings/`, verifies their hashes, and registers the shared setting library. Reference files, source PNGs, and generated portraits remain in ignored local directories and private local Storage; browser DTOs receive only safe metadata and short-lived authorized previews.
+
+The fixture also assigns the existing Lira Nightwind and Torvin Ashbeard identities to `keeper.one@example.test` and idempotently creates open successor drafts copied from their published versions. It never edits those published versions. Keeper one may edit, submit, review, and approve its own first-party successor versions for local user testing, while the usual no-self-review rule remains in force for community identities. Keeper two remains available to exercise independent review. The existing Willow Vellum fixture continues to exercise the full author-to-publication path when its optional dedicated scene derivative exists.
 
 Generated image bytes stay outside Git. A fresh checkout without optional dedicated Community NPC runtime derivatives still renders functional text and reviewed static fallbacks; in that situation the fixture truthfully reports that it skipped the optional scene-backed publication path. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
 
