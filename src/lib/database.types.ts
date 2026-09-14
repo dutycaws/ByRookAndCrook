@@ -2777,15 +2777,26 @@ export type Database = {
         }
         Returns: Json
       }
-      start_bake: {
-        Args: {
-          p_action_id: string
-          p_expected_revision: number
-          p_ingredient_batch_id: string
-          p_save_id: string
-        }
-        Returns: Json
-      }
+      start_bake:
+        | {
+            Args: {
+              p_action_id: string
+              p_expected_revision: number
+              p_ingredient_batch_id: string
+              p_save_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_action_id: string
+              p_expected_revision: number
+              p_ingredient_batch_id: string
+              p_recipe_key: string
+              p_save_id: string
+            }
+            Returns: Json
+          }
       start_brew: {
         Args: {
           p_action_id: string
@@ -2797,6 +2808,40 @@ export type Database = {
       }
       world_demote_low_relevance_deep_npc: {
         Args: { p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_developer_inspector: { Args: { p_save_id: string }; Returns: Json }
+      world_developer_requeue_runtime_art_job: {
+        Args: {
+          p_actor_id: string
+          p_job_id: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_developer_requeue_settlement_job: {
+        Args: {
+          p_actor_id: string
+          p_job_id: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_developer_set_runtime_art_appearance: {
+        Args: {
+          p_actor_id: string
+          p_appearance_version: string
+          p_entity_id: string
+          p_public_appearance: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_generated_gameplay_availability: {
+        Args: { p_save_id: string }
         Returns: Json
       }
       world_irreversible_warning_status: {
@@ -3000,12 +3045,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3029,11 +3074,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3054,11 +3099,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3079,11 +3124,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -3096,11 +3141,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
