@@ -24,10 +24,10 @@ function serviceClient(config = runtimeConfig()): SettlementWorkerClient | null 
 }
 function clip(value: string, limit: number): string { return value.replace(/\s+/g, ' ').trim().slice(0, limit); }
 function errorCode(cause: unknown): string { return cause instanceof SettlementProviderError ? cause.code : 'worker_failed'; }
-type SafeFallbackReason = 'validation_rejected' | 'provider_unavailable' | 'provider_malformed' | 'provider_failed' | 'budget' | 'worker_failed';
+type SafeFallbackReason = 'validation_rejected' | 'provider_unavailable' | 'provider_timeout' | 'provider_malformed' | 'provider_failed' | 'budget' | 'worker_failed';
 function socialFallbackReason(cause: unknown): SafeFallbackReason {
   const code=errorCode(cause);
-  return ['provider_unavailable','provider_malformed','provider_failed','budget','worker_failed'].includes(code)
+  return ['provider_unavailable','provider_timeout','provider_malformed','provider_failed','budget','worker_failed'].includes(code)
     ? code as SafeFallbackReason : 'worker_failed';
 }
 function isLeaseError(error: { message: string } | null): boolean { return !!error && /stale settlement fence|attempt is not active|lease/i.test(error.message); }

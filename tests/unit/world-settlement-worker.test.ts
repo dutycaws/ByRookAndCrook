@@ -163,6 +163,11 @@ describe('world settlement worker', () => {
     expect(unavailable.calls.map((entry)=>entry.name)).not.toContain('world_settlement_commit_social_encounter');
     expect(unavailableEvents).toEqual(expect.arrayContaining([expect.objectContaining({stage:'social_encounter_fallback',status:'completed',errorCode:'provider_unavailable'})]));
     expect(JSON.stringify(unavailableEvents)).not.toContain('Do not mention the smoke');
+
+    const timedOut=client(); const timeoutEvents:unknown[]=[]; const timeoutProvider=fixtureProvider({social_encounter_proposer:new SettlementProviderError('provider_timeout','private upstream timeout detail')});
+    expect(await runSettlementClaim(timedOut.api,socialClaim(),{provider:timeoutProvider,heartbeatMs:99_999,observability:(event)=>{timeoutEvents.push(event);}})).toEqual({status:'completed',kind:'skipped'});
+    expect(timeoutEvents).toEqual(expect.arrayContaining([expect.objectContaining({stage:'social_encounter_fallback',status:'completed',errorCode:'provider_timeout'})]));
+    expect(JSON.stringify(timeoutEvents)).not.toContain('private upstream timeout detail');
   });
   it('treats a malformed canon receipt as unknown rather than retrying or applying a fallback', async () => {
     const mock=client({world_settlement_commit_canon:{status:'completed',rulesVersion:'world-canon-event-v1'}}); const provider=fixtureProvider({canon_proposer:canonEvent,canon_critic:{outcome:'accept',rationale:'frozen',instructions:[]}});
