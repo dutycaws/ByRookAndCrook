@@ -8,7 +8,9 @@ import {
   type AuthoringActionResult,
   type AuthoringProviderState,
   type AuthoringSection,
-  type AuthoringWorkspaceDetail
+  type AuthoringWorkspaceDetail,
+  type AuthoringPortraitCandidate,
+  type AuthoringPortraitBatch
 } from '$lib/game/authoring-workspace';
 import { npcSheetFromAuthoringForm } from '$lib/game/npc-sheet-editor';
 import type { NpcSheet } from '$lib/game/npc-sheet';
@@ -19,8 +21,15 @@ import {
 } from '$lib/server/community-npc-jobs/runner';
 import type { SandboxTurn } from '$lib/server/community-npc-jobs/provider';
 import { localScenePublicUrl, localSettingPublicUrl } from '$lib/server/community-npc-jobs/local-assets';
-import { portraitProviderAvailability, resolvePortraitPreview, syncPortraitProviderStatus } from '$lib/server/community-npc-jobs/portrait-service';
+import { drainPortraitDeletionQueue, portraitProviderAvailability, readyPortraitStorageService, resolvePortraitPreview, syncPortraitProviderStatus, wakePortraitGenerationWorker } from '$lib/server/community-npc-jobs/portrait-service';
 import type { PortraitControls } from '$lib/server/community-npc-portraits';
+import {
+  compensateExpressionSpriteUpload,
+  expressionSpriteUploadMetadata,
+  prepareExpressionSpriteUpload,
+  storeExpressionSpriteUpload,
+  type ExpressionSpriteSlot
+} from '$lib/server/community-npc-portraits/upload';
 import { communityContext, requireCapability } from '$lib/server/community-npc-workspace';
 import { getSupabaseConfig } from '$lib/server/config';
 import type { Actions, PageServerLoad } from './$types';
@@ -106,7 +115,125 @@ async function workspaceFrom(locals: App.Locals, raw: Json): Promise<AuthoringWo
 }
 
 async function workspace(locals: App.Locals, npcId: string): Promise<AuthoringWorkspaceDetail> {
-  return workspaceFrom(locals, await rawDetail(locals, npcId));
+  const detail = await workspaceFrom(locals, await rawDetail(locals, npcId));
+  // The historic detail RPC is Neutral-only. Overlay the dedicated slot-aware
+  // portrait workspace on every full page load so reloads cannot silently
+  // collapse an author’s optional expressions back to the legacy state.
+  _applyExpressionSpriteWorkspace(detail, await expressionSpriteWorkspace(locals, npcId));
+  return detail;
+}
+
+export function _applyExpressionSpriteWorkspace(detail: AuthoringWorkspaceDetail, snapshot: Record<string, unknown>): void {
+  const candidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : [];
+  detail.portrait.candidates = candidates.map((entry): AuthoringPortraitCandidate | null => {
+    const candidate = record(entry);
+    const id = typeof candidate.id === 'string' ? candidate.id : null;
+    if (!id) return null;
+    const state = ['generating', 'ready', 'failed', 'stale', 'selected', 'superseded'].includes(String(candidate.state))
+      ? candidate.state as AuthoringPortraitCandidate['state'] : 'failed';
+    const slot = ['neutral', 'happy', 'sad', 'angry', 'engaged', 'leaving'].includes(String(candidate.slot))
+      ? candidate.slot as AuthoringPortraitCandidate['slot'] : 'neutral';
+    return {
+      id, assetId: typeof candidate.assetId === 'string' ? candidate.assetId : null,
+      ordinal: Number.isFinite(Number(candidate.ordinal)) ? Number(candidate.ordinal) : 0,
+      slot, source: candidate.source === 'author_upload' ? 'author_upload' : 'ai_generated', state,
+      previewUrl: typeof candidate.previewUrl === 'string' ? candidate.previewUrl : null,
+      altText: typeof candidate.altText === 'string' ? candidate.altText : 'Expression sprite candidate.',
+      width: Number.isFinite(Number(candidate.width)) ? Number(candidate.width) : null,
+      height: Number.isFinite(Number(candidate.height)) ? Number(candidate.height) : null,
+      hasAlpha: typeof candidate.hasAlpha === 'boolean' ? candidate.hasAlpha : null,
+      mimeType: typeof candidate.mimeType === 'string' ? candidate.mimeType : null,
+      failureReason: typeof candidate.failureReason === 'string' ? candidate.failureReason : null,
+      styleVersion: detail.portrait.styleVersion, visualInputHash: null, createdAt: null,
+      staleNeutralAnchor: candidate.staleNeutralAnchor === true, neutralAnchorHash: null
+    };
+  }).filter((candidate): candidate is AuthoringPortraitCandidate => candidate !== null);
+  const selected = slotCandidateIds(record(snapshot.selectedCandidateIds));
+  const resolved = slotCandidateIds(record(snapshot.resolvedCandidateIds));
+  detail.portrait.selectedCandidateIds = selected as AuthoringWorkspaceDetail['portrait']['selectedCandidateIds'];
+  detail.portrait.resolvedCandidateIds = resolved as AuthoringWorkspaceDetail['portrait']['resolvedCandidateIds'];
+  detail.portrait.selectedCandidateId = selected.neutral ?? null;
+  detail.portrait.creditsRemaining = typeof snapshot.remainingCredits === 'number' ? snapshot.remainingCredits : null;
+  const batch = record(snapshot.activeBatch);
+  detail.portrait.activeBatch = typeof batch.id === 'string' ? {
+    id: batch.id, status: ['idle', 'generating', 'partial', 'ready', 'failed'].includes(String(batch.status))
+      ? batch.status as AuthoringPortraitBatch['status'] : 'failed',
+    requested: Number(batch.requested) || 0, completed: Number(batch.completed) || 0,
+    failed: Number(batch.failed) || 0, errorCode: typeof batch.errorCode === 'string' ? batch.errorCode : null
+  } : null;
+}
+
+/**
+ * Loads only the portrait domain after a portrait mutation. This deliberately
+ * avoids the general workspace detail so enhanced forms keep unsaved text,
+ * tentative inputs, focus, and scroll position intact.
+ */
+async function expressionSpriteWorkspace(locals: App.Locals, npcId: string): Promise<Record<string, unknown>> {
+  const result = await authoringRpc(locals, 'npc_author_expression_sprite_workspace', { p_npc_id: npcId });
+  if (result.error) throw new Error(result.error.message);
+  const raw = record(result.data);
+  const rawCandidates = Array.isArray(raw.candidates) ? raw.candidates : [];
+  const candidates = await Promise.all(rawCandidates.map(async (entry) => {
+    const candidate = record(entry);
+    const candidateId = typeof candidate.candidateId === 'string' ? candidate.candidateId : typeof candidate.id === 'string' ? candidate.id : null;
+    const token = typeof candidate.previewToken === 'string' ? candidate.previewToken : null;
+    const previewUrl = token ? await resolvePortraitPreview(locals.supabase as unknown as { rpc(name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: { message: string } | null }> }, token) : null;
+    if (!candidateId) return null;
+    return {
+      id: candidateId,
+      assetId: typeof candidate.assetId === 'string' ? candidate.assetId : null,
+      ordinal: Number.isFinite(Number(candidate.ordinal)) ? Number(candidate.ordinal) : 0,
+      slot: typeof candidate.slot === 'string' ? candidate.slot : 'neutral',
+      source: candidate.source === 'author_upload' ? 'author_upload' : 'ai_generated',
+      state: typeof candidate.state === 'string' ? candidate.state : 'failed',
+      previewUrl,
+      altText: typeof candidate.altText === 'string' ? candidate.altText : 'Expression sprite candidate.',
+      width: Number.isFinite(Number(candidate.width)) ? Number(candidate.width) : null,
+      height: Number.isFinite(Number(candidate.height)) ? Number(candidate.height) : null,
+      hasAlpha: typeof candidate.hasAlpha === 'boolean' ? candidate.hasAlpha : typeof candidate.alphaValid === 'boolean' ? candidate.alphaValid : null,
+      mimeType: typeof candidate.mimeType === 'string' ? candidate.mimeType : null,
+      failureReason: typeof candidate.failureCode === 'string' ? candidate.failureCode : null,
+      staleNeutralAnchor: candidate.staleNeutralAnchor === true
+    };
+  }));
+  const active = safePortraitJob(record(raw.activeJob));
+  return {
+    revision: Number.isFinite(Number(raw.revision)) ? Number(raw.revision) : null,
+    editable: raw.editable === true,
+    selectedCandidateIds: slotCandidateIds(record(raw.selectedBySlot)),
+    resolvedCandidateIds: slotCandidateIds(record(raw.resolvedBySlot)),
+    candidates: candidates.filter(Boolean),
+    activeBatch: active ? {
+      id: active.jobId, status: ['queued', 'running'].includes(active.status) ? 'generating' : active.status, requested: active.alternatives.length,
+      completed: active.alternatives.filter((alternative) => alternative.status === 'ready').length,
+      failed: active.alternatives.filter((alternative) => ['failed', 'ambiguous', 'cancelled'].includes(alternative.status)).length,
+      errorCode: null
+    } : null,
+    provider: record(raw.provider),
+    remainingCredits: Number.isFinite(Number(raw.remainingCredits)) ? Number(raw.remainingCredits) : null
+  };
+}
+
+function slotCandidateIds(slots: RecordValue): Record<string, string> {
+  return Object.fromEntries(Object.entries(slots).flatMap(([slot, entry]) => {
+    const row = record(entry);
+    const candidateId = typeof entry === 'string' ? entry
+      : typeof row.candidateId === 'string' ? row.candidateId
+      : typeof row.id === 'string' ? row.id
+      : typeof row.assetId === 'string' ? row.assetId : null;
+    return candidateId ? [[slot, candidateId]] : [];
+  }));
+}
+
+function safePortraitJob(value: RecordValue): { jobId: string; status: string; alternatives: Array<{ ordinal: number; status: string }> } | null {
+  const jobId = typeof value.jobId === 'string' ? value.jobId : null;
+  const status = typeof value.status === 'string' ? value.status : null;
+  if (!jobId || !status) return null;
+  const alternatives = (Array.isArray(value.alternatives) ? value.alternatives : []).flatMap((entry) => {
+    const item = record(entry); const ordinal = Number(item.ordinal); const attemptStatus = typeof item.status === 'string' ? item.status : null;
+    return Number.isInteger(ordinal) && ordinal > 0 && attemptStatus ? [{ ordinal, status: attemptStatus }] : [];
+  });
+  return { jobId, status, alternatives };
 }
 
 function success(action: AuthoringActionKind, message: string, extra: Partial<AuthoringActionResult> = {}): AuthoringActionResult {
@@ -257,7 +384,6 @@ export const actions: Actions = {
   portrait: async ({ locals, params, request }) => {
     requireCapability(await communityContext(locals.supabase), 'npc_author');
     const data = await request.formData();
-    const current = await workspace(locals, params.npcId);
     // Keep the database's short availability lease aligned with server-only
     // configuration and private references before it reserves any credits.
     const synced = await syncPortraitProviderStatus();
@@ -277,35 +403,102 @@ export const actions: Actions = {
         pose: controls.pose, expression: controls.expression, clothingCondition: controls.clothingCondition,
         optionalItem: controls.optionalItem, compositionNote: controls.compositionNote
       } as Json,
-      p_alternatives: controls.alternatives
+      p_alternatives: controls.alternatives,
+      p_slot: text(data.get('slot')) || 'neutral'
     });
     if (result.error) return rpcFailure('portrait', result.error, 'The portrait request could not start.', result.error.code === 'PT409' ? 409 : 400);
     const jobId = identifier(result.data, 'jobId');
     const visualInputHash = identifier(result.data, 'visualInputHash');
     if (!jobId || !visualInputHash) return rpcFailure('portrait', null, 'The portrait request did not create a protected job.', 500);
-    const { dispatchPortraitJob } = await import('$lib/server/community-npc-jobs/portrait-service');
-    const outcome = await dispatchPortraitJob({ jobId, npcId: params.npcId, controls, alternatives: controls.alternatives, sheet: current.draft.sheet, visualInputHash });
-    if (outcome.status === 'failed') return providerFailed('portrait', outcome.errorCode);
-    return success('portrait', 'Portrait alternatives are ready for review.');
+    // Reservation and all ordinal attempts are durable before this return. The
+    // service-only worker performs provider work later; waiting here would
+    // erase author edits if an image provider is slow or unavailable.
+    wakePortraitGenerationWorker();
+    return success('portrait', 'Portrait alternatives are queued for review.', {
+      jobId, spriteWorkspace: await expressionSpriteWorkspace(locals, params.npcId)
+    });
+  },
+
+  uploadSprite: async ({ locals, params, request }) => {
+    requireCapability(await communityContext(locals.supabase), 'npc_author');
+    const data = await request.formData();
+    const slot = text(data.get('slot')) as ExpressionSpriteSlot;
+    const revision = numeric(data.get('revision'));
+    const file = data.get('sprite');
+    if (data.getAll('slot').length !== 1 || data.getAll('sprite').length !== 1
+      || !['neutral', 'happy', 'sad', 'angry', 'engaged', 'leaving'].includes(slot)
+      || !(file instanceof File) || !file.size) {
+      return fail(400, { action: 'portrait', status: 'failure', category: 'invalid_data', message: 'Choose one expression slot and one PNG file.' } satisfies AuthoringActionResult);
+    }
+    // Candidate registration is intentionally service-only. Prove the browser
+    // session owns this editable workspace and reject an already stale form
+    // before any private object is made. The registration RPC repeats this
+    // check under its lock as the authoritative concurrency boundary.
+    const current = await workspace(locals, params.npcId);
+    if (current.draft.revision !== revision) return fail(409, {
+      action: 'portrait', status: 'stale', category: 'stale_revision', conflict: true,
+      message: 'This draft changed before the sprite upload began. Refresh its sprite panel and try again.'
+    } satisfies AuthoringActionResult);
+    let prepared;
+    try {
+      prepared = await prepareExpressionSpriteUpload(Buffer.from(await file.arrayBuffer()), slot);
+    } catch (cause) {
+      return fail(400, { action: 'portrait', status: 'failure', category: 'invalid_data', message: cause instanceof Error ? cause.message : 'The PNG could not be prepared.' } satisfies AuthoringActionResult);
+    }
+    const { registerUploadedPortraitCandidate } = await import('$lib/server/community-npc-jobs/portrait-service');
+    let stored;
+    try {
+      const storage = await readyPortraitStorageService();
+      stored = await storeExpressionSpriteUpload(storage, prepared);
+      const registered = await registerUploadedPortraitCandidate({
+        npcId: params.npcId, expectedRevision: revision, slot, metadata: expressionSpriteUploadMetadata(slot, stored)
+      });
+      if (registered.error) {
+        await compensateExpressionSpriteUpload(storage, stored);
+        return rpcFailure('portrait', registered.error, 'The uploaded sprite could not be recorded.', registered.error.code === 'PT409' ? 409 : 400);
+      }
+      return success('portrait', `${slot[0].toUpperCase()}${slot.slice(1)} sprite uploaded for review.`, {
+        revision: Number(record(registered.data).revision), spriteWorkspace: await expressionSpriteWorkspace(locals, params.npcId)
+      });
+    } catch (cause) {
+      if (stored) await compensateExpressionSpriteUpload(await readyPortraitStorageService(), stored);
+      return fail(502, { action: 'portrait', status: 'failure', category: 'unexpected', message: cause instanceof Error ? cause.message : 'The sprite could not be stored.' } satisfies AuthoringActionResult);
+    }
   },
 
   selectPortrait: async ({ locals, params, request }) => {
     requireCapability(await communityContext(locals.supabase), 'npc_author');
     const data = await request.formData();
-    const current = await workspace(locals, params.npcId);
-    const candidate = current.portrait.candidates.find((entry) => entry.id === text(data.get('candidateId')));
-    if (!candidate?.assetId) return fail(400, {
-      action: 'portrait', status: 'failure', category: 'invalid_data',
-      message: 'Choose a ready portrait alternative before selecting it.'
-    } satisfies AuthoringActionResult);
     const result = await authoringRpc(locals, 'npc_author_select_portrait', {
       p_npc_id: params.npcId,
       p_expected_revision: numeric(data.get('revision')),
-      p_asset_id: candidate.assetId
+      p_slot: text(data.get('slot')) || 'neutral',
+      p_candidate_id: text(data.get('candidateId')),
+      p_confirm_stale: data.get('confirmStale') === 'true'
     });
     if (result.error) return rpcFailure('portrait', result.error, 'The portrait could not be selected.', result.error.code === 'PT409' ? 409 : 400);
     const revision = Number(record(result.data).revision);
-    return success('portrait', 'Portrait selected for these visual details.', { revision });
+    return success('portrait', 'Portrait selected for these visual details.', {
+      revision, spriteWorkspace: await expressionSpriteWorkspace(locals, params.npcId)
+    });
+  },
+
+  discardPortrait: async ({ locals, params, request }) => {
+    requireCapability(await communityContext(locals.supabase), 'npc_author');
+    const data = await request.formData();
+    const result = await authoringRpc(locals, 'npc_author_discard_portrait_candidate', {
+      p_npc_id: params.npcId,
+      p_expected_revision: numeric(data.get('revision')),
+      p_candidate_id: text(data.get('candidateId'))
+    });
+    if (result.error) return rpcFailure('portrait', result.error, 'The sprite candidate could not be discarded.', result.error.code === 'PT409' ? 409 : 400);
+    // The database already queued a durable deletion target. Give the local
+    // service worker an immediate pass, while retaining that target for retry
+    // if object storage is briefly unavailable.
+    void drainPortraitDeletionQueue().catch(() => {});
+    return success('portrait', 'Sprite candidate discarded.', {
+      revision: Number(record(result.data).revision), spriteWorkspace: await expressionSpriteWorkspace(locals, params.npcId)
+    });
   },
 
   selectSetting: async ({ locals, params, request }) => {

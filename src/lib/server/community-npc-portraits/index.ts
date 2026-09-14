@@ -194,13 +194,13 @@ export function validatePortraitPng(bytes: Buffer): ValidatedPortraitPng {
 }
 
 export type OptimizedPortrait = ValidatedPortraitPng & { runtimeBytes: Buffer; runtimeSha256: string; runtimeMimeType: 'image/webp' };
-export async function optimisePortraitWebp(png: Buffer): Promise<OptimizedPortrait> {
+export async function optimisePortraitWebp(png: Buffer, maxBytes = PORTRAIT_RUNTIME_MAX_BYTES): Promise<OptimizedPortrait> {
   const source = validatePortraitPng(png);
   try {
     let converted: Buffer | null = null;
     for (const quality of [100, 92, 84, 76]) {
       const candidate = await sharp(png).webp({ quality, alphaQuality: 100 }).toBuffer();
-      if (candidate.length <= PORTRAIT_RUNTIME_MAX_BYTES) { converted = candidate; break; }
+      if (candidate.length <= maxBytes) { converted = candidate; break; }
     }
     if (!converted) throw new PortraitProviderError('invalid_output', 'The portrait cannot be optimized below the runtime size limit.');
     const metadata = await sharp(converted).metadata();
@@ -226,6 +226,27 @@ export async function ensurePrivatePortraitBuckets(storage: PrivatePortraitBucke
   }
 }
 export type StoredPortrait = { masterKey: string; runtimeKey: string; masterSha256: string; runtimeSha256: string };
+/**
+ * Best-effort compensation for objects that were written before a later
+ * database operation failed. Callers deliberately receive a boolean rather
+ * than a storage exception so they can retain the original failure as the
+ * actionable one and queue a later governance purge when necessary.
+ */
+export async function cleanupStoredPrivatePortrait(
+  storage: PrivatePortraitStorage,
+  target: Pick<StoredPortrait, 'masterKey' | 'runtimeKey'>
+): Promise<boolean> {
+  const operations = [
+    storage.from(PRIVATE_PORTRAIT_BUCKET).remove([target.runtimeKey]),
+    storage.from(PRIVATE_PORTRAIT_MASTER_BUCKET).remove([target.masterKey])
+  ];
+  try {
+    const results = await Promise.all(operations);
+    return results.every((result) => !result.error);
+  } catch {
+    return false;
+  }
+}
 export async function storePrivatePortrait(storage: PrivatePortraitStorage, portrait: OptimizedPortrait, masterPng: Buffer, id = randomUUID()): Promise<StoredPortrait> {
   const masterKey = `v1/${id}/master.png`; const runtimeKey = `v1/${id}/sprite.webp`;
   try {
@@ -235,7 +256,10 @@ export async function storePrivatePortrait(storage: PrivatePortraitStorage, port
     const [masterRead, runtimeRead] = await Promise.all([master.download(masterKey), runtime.download(runtimeKey)]);
     if (masterRead.error || runtimeRead.error || !masterRead.data || !runtimeRead.data || hash(Buffer.from(await masterRead.data.arrayBuffer())) !== portrait.sha256 || hash(Buffer.from(await runtimeRead.data.arrayBuffer())) !== portrait.runtimeSha256) throw new Error('private portrait storage read-back hash mismatch');
     return { masterKey, runtimeKey, masterSha256: portrait.sha256, runtimeSha256: portrait.runtimeSha256 };
-  } catch (cause) { throw new PortraitProviderError('storage_failed', cause instanceof Error ? cause.message : 'Private portrait storage failed.'); }
+  } catch (cause) {
+    await cleanupStoredPrivatePortrait(storage, { masterKey, runtimeKey });
+    throw new PortraitProviderError('storage_failed', cause instanceof Error ? cause.message : 'Private portrait storage failed.');
+  }
 }
 
 /** Call only after the database has authorized the requesting author or reviewer. */
@@ -279,3 +303,22 @@ export async function purgePrivatePortrait(
 export function deterministicPortraitProvider(bytes: Buffer): PortraitProvider {
   return { async generate(request) { return { bytes: Buffer.from(bytes), provider: 'deterministic-test', model: 'deterministic-test', requestId: `test-${request.alternativeOrdinal}` }; } };
 }
+
+// Upload preparation shares the same private buckets and canonical derivative
+// contract as generated portraits, while keeping request parsing in its own
+// server-only module.
+export {
+  EXPRESSION_SPRITE_MAX_DIMENSION,
+  EXPRESSION_SPRITE_MIN_DIMENSION,
+  EXPRESSION_SPRITE_RUNTIME_MAX_BYTES,
+  EXPRESSION_SPRITE_SLOTS,
+  EXPRESSION_SPRITE_TRANSPARENT_PERIMETER,
+  EXPRESSION_SPRITE_UPLOAD_MAX_BYTES,
+  compensateExpressionSpriteUpload,
+  expressionSpriteUploadMetadata,
+  prepareExpressionSpriteUpload,
+  storeExpressionSpriteUpload,
+  type ExpressionSpriteSlot,
+  type PreparedExpressionSpriteUpload,
+  type StoredExpressionSpriteUpload
+} from './upload.js';

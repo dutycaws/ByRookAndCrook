@@ -2343,9 +2343,25 @@ export type Database = {
         Returns: Json
       }
       npc_author_create: { Args: { p_sheet: Json }; Returns: Json }
+      npc_author_discard_portrait_candidate: {
+        Args: {
+          p_candidate_id: string
+          p_expected_revision: number
+          p_npc_id: string
+        }
+        Returns: Json
+      }
+      npc_author_expression_sprite_workspace: {
+        Args: { p_npc_id: string }
+        Returns: Json
+      }
       npc_author_list_settings: { Args: never; Returns: Json }
       npc_author_portrait_complete: {
         Args: { p_candidates: Json; p_error_code?: string; p_job_id: string }
+        Returns: Json
+      }
+      npc_author_portrait_event_status: {
+        Args: { p_job_id: string }
         Returns: Json
       }
       npc_author_portrait_preview_authorization: {
@@ -2368,6 +2384,15 @@ export type Database = {
         }
         Returns: Json
       }
+      npc_author_register_uploaded_portrait: {
+        Args: {
+          p_expected_revision: number
+          p_metadata: Json
+          p_npc_id: string
+          p_slot: string
+        }
+        Returns: Json
+      }
       npc_author_request_assistance: {
         Args: {
           p_expected_revision: number
@@ -2377,15 +2402,26 @@ export type Database = {
         }
         Returns: Json
       }
-      npc_author_request_portrait: {
-        Args: {
-          p_alternatives?: number
-          p_controls: Json
-          p_expected_revision: number
-          p_npc_id: string
-        }
-        Returns: Json
-      }
+      npc_author_request_portrait:
+        | {
+            Args: {
+              p_alternatives?: number
+              p_controls: Json
+              p_expected_revision: number
+              p_npc_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_alternatives: number
+              p_controls: Json
+              p_expected_revision: number
+              p_npc_id: string
+              p_slot: string
+            }
+            Returns: Json
+          }
       npc_author_request_retirement: {
         Args: { p_npc_id: string; p_reason: string }
         Returns: Json
@@ -2441,14 +2477,25 @@ export type Database = {
         Returns: Json
       }
       npc_author_scene_status: { Args: { p_job_id: string }; Returns: Json }
-      npc_author_select_portrait: {
-        Args: {
-          p_asset_id: string
-          p_expected_revision: number
-          p_npc_id: string
-        }
-        Returns: Json
-      }
+      npc_author_select_portrait:
+        | {
+            Args: {
+              p_asset_id: string
+              p_expected_revision: number
+              p_npc_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_candidate_id: string
+              p_confirm_stale?: boolean
+              p_expected_revision: number
+              p_npc_id: string
+              p_slot: string
+            }
+            Returns: Json
+          }
       npc_author_select_scene: {
         Args: {
           p_asset_id: string
@@ -2541,8 +2588,26 @@ export type Database = {
         Returns: Json
       }
       npc_my_capabilities: { Args: never; Returns: Json }
+      npc_portrait_claim_generation_attempt: { Args: never; Returns: Json }
+      npc_portrait_complete_generation_attempt: {
+        Args: {
+          p_attempt_id: string
+          p_error_code?: string
+          p_lease_token: string
+          p_result: Json
+        }
+        Returns: Json
+      }
       npc_portrait_deletion_complete: {
         Args: { p_asset_id: string; p_claim_token: string }
+        Returns: undefined
+      }
+      npc_portrait_heartbeat_generation_attempt: {
+        Args: { p_attempt_id: string; p_lease_token: string }
+        Returns: undefined
+      }
+      npc_portrait_mark_generation_dispatched: {
+        Args: { p_attempt_id: string; p_lease_token: string }
         Returns: undefined
       }
       npc_portrait_next_deletion_target: { Args: never; Returns: Json }

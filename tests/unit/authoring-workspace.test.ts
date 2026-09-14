@@ -3,6 +3,24 @@ import { decodeAuthoringWorkspace, normalizeAuthoringError, providerFailure } fr
 import { createNpcSheet } from '../../src/lib/game/community-npc-ui';
 
 describe('authoring workspace view model', () => {
+  it('keeps expression selections as an authoritative slot map and preserves candidate provenance', () => {
+    const sheet = createNpcSheet('Tormund');
+    const detail = decodeAuthoringWorkspace({
+      npcId: 'npc-id', draft: { id: 'draft-id', revision: 2, lifecycle: 'open', editable: true, sheet }, capabilities: {}, scenes: { selectedAssetId: null, candidates: [] }, assistance: [], versions: [], retirement: null, eligibleNpcs: [], sandbox: {},
+      portrait: {
+        providerAvailable: true, selectedSlots: { neutral: { candidateId: 'neutral-candidate' }, happy: { candidateId: 'happy-candidate' } }, resolvedSlots: { neutral: { candidateId: 'neutral-candidate' }, sad: { candidateId: 'neutral-candidate' } },
+        candidates: [
+          { id: 'neutral-candidate', assetId: 'neutral-asset', ordinal: 1, state: 'selected', slot: 'neutral', source: 'author_upload', alphaValid: true, visualInputHash: null },
+          { id: 'happy-candidate', assetId: 'happy-asset', ordinal: 1, state: 'ready', slot: 'happy', source: 'ai_generated', staleNeutralAnchor: true, alphaValid: true, visualInputHash: null }
+        ]
+      }
+    }, { available: true, reason: null });
+    expect(detail.portrait.selectedCandidateIds).toEqual({ neutral: 'neutral-candidate', happy: 'happy-candidate' });
+    expect(detail.portrait.resolvedCandidateIds.sad).toBe('neutral-candidate');
+    expect(detail.portrait.candidates[0]).toMatchObject({ slot: 'neutral', source: 'author_upload' });
+    expect(detail.portrait.candidates[1]).toMatchObject({ slot: 'happy', source: 'ai_generated', staleNeutralAnchor: true });
+  });
+
   it('decodes the active and preserved revision-pinned sandbox transcripts', () => {
     const sheet = createNpcSheet('Tormund');
     const detail = decodeAuthoringWorkspace({

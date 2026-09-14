@@ -33,7 +33,7 @@ Field assistance and sandbox conversations use the configured server-side author
 
 Sandbox sessions freeze their source revision, persist ordered turns, and survive reloads. Saving or accepting an assistance proposal invalidates the active session while preserving its transcript in history.
 
-Artwork authoring has two independent requirements. **Create their character artwork** uses the locked `community-npc-portrait-sprite-v1` style and bounded pose, expression, clothing-condition, authored-item, and composition controls. The server projects only visual sheet fields, supplies the private `brac-character-look-v1` references, validates transparent `1024 × 1536` PNG output, and stores an optimized alpha WebP candidate. The creator must explicitly select a candidate whose visual-input hash still matches the draft. Editing visual fields invalidates that selection; lore and campaign edits preserve it. **Choose their setting** selects one of three immutable, environment-only library entries. It replaces prompt-based scene discovery and continues to pin the chosen asset through `selected_scene_asset_id`.
+Artwork authoring has two independent requirements. **Character sprites** has one required Neutral slot and optional Happy, Sad, Angry, Engaged, and Leaving slots. An optional runtime slot falls back to the selected Neutral asset; it never invents a replacement image. For one slot at a time, an author may upload one transparent PNG or request one to four locked-style AI alternatives. Both routes create candidates that require explicit selection and travel through the same review, versioning, moderation, and deletion lifecycle. The server validates decoded PNG pixels, contains accepted uploads in a transparent `1024 × 1536` canvas with an eight-pixel perimeter, stores a private PNG master and alpha-preserving WebP derivative, and never gives a browser a storage credential or object key. Selecting a new Neutral atomically clears optional selections. Candidates made against the former Neutral remain visible as stale until the author explicitly confirms them against the new anchor. Editing visual fields invalidates sprite selections; lore and campaign edits preserve them. **Choose their setting** selects one of three immutable, environment-only library entries. It replaces prompt-based scene discovery and continues to pin the chosen asset through `selected_scene_asset_id`.
 
 Provider outages, rejected images, malformed or opaque output, storage failures, and partially successful batches remain visible as real states. They never produce fixture portraits or placeholder successes. Submission requires both a current validated portrait and a verified curated setting, then runs the shared sheet validator and records structural evaluation evidence. History renders version changes, evaluation results, both pinned assets, reviewer decisions, comments, and retirement status in readable panels.
 
@@ -61,11 +61,19 @@ The service-only daily rollup rewrites one UTC date idempotently into `npc_daily
 
 ## Local media and fixtures
 
-All portrait source references and generated image bytes stay outside Git. Install the seven approved style references under:
+All portrait source references, manual expression-sprite masters, and generated image bytes stay outside Git. Install the seven approved style references under:
 
 ```text
 .local/media/source-masters/community-npcs/style-references/brac-character-look-v1/
 ```
+
+If a developer wants reusable local manual-upload inputs, place them under their NPC and expression slot:
+
+```text
+.local/media/source-masters/community-npcs/expression-sprites/<npc-id>/<neutral|happy|sad|angry|engaged|leaving>.png
+```
+
+This is an optional convenience directory, not a seed requirement. The Creator Studio is the only supported way to promote one of these bytes into a private candidate: choose the matching slot, upload exactly one PNG, inspect the normalized candidate, and select it explicitly. The fixture command never discovers or uploads these source masters on an author’s behalf, because doing so would bypass the author, ownership, and Neutral-anchor checks.
 
 Install the approved tavern source under:
 
@@ -79,7 +87,9 @@ The fixture derives the three `1600 × 900` setting WebPs under:
 .local/media/runtime-derivatives/community-npcs/settings/
 ```
 
-These directories are ignored by Git. The private references are loaded only by server code and are never included in browser data. The three setting derivatives are uploaded to local Supabase Storage, read back, hash-verified, and registered as the shared setting library. Do not add the source PNGs, generated portrait masters, runtime WebPs, TIFF, PSD, XCF, or KRA files to the repository.
+These directories are ignored by Git. The private references are loaded only by server code and are never included in browser data. The three setting derivatives are uploaded to local Supabase Storage, read back, hash-verified, and registered as the shared setting library. Expression uploads store their PNG master in the private `community-npc-portrait-masters` bucket and their WebP runtime derivative in the private `community-npc-portraits` bucket. `npm run fixtures:users:local` creates and verifies both buckets even when no source art exists, so a fresh checkout has a functional Creator Studio with clear empty-state guidance.
+
+Do not add source PNGs, generated portrait masters, runtime WebPs, TIFF, PSD, XCF, or KRA files to the repository. The fixture only creates records and Storage configuration from disposable local state; it never fabricates a portrait, uploads a manual source, or calls a billable image provider.
 
 Run:
 
@@ -89,7 +99,9 @@ npm run fixtures:users:local
 
 The fixture command provisions the two pilot users, uploads and registers the setting library, and reports missing local media without inventing it. It assigns Lira Nightwind and Torvin Ashbeard to `keeper.one@example.test` and creates editable successor drafts copied from their current published versions. Their published versions remain unchanged. Keeper one is the local administrator and can approve changes to those first-party identities; keeper two remains available for independent-review testing.
 
-Portrait generation uses `NPC_IMAGE_API_KEY` when configured, otherwise the existing server-only `OPENAI_API_KEY`. `NPC_IMAGE_PROVIDER`, `NPC_IMAGE_MODEL`, and `NPC_IMAGE_DEADLINE_MS` control the adapter. Normal fixtures and automated tests do not make billable image requests.
+Portrait generation uses `NPC_IMAGE_API_KEY` when configured, otherwise the existing server-only `OPENAI_API_KEY`. `NPC_IMAGE_PROVIDER`, `NPC_IMAGE_MODEL`, and `NPC_IMAGE_DEADLINE_MS` control the adapter. Neutral must be selected before an optional expression can be uploaded, generated, or selected. AI optional-expression alternatives are anchored to the selected Neutral asset; a later Neutral change clears their selections and requires an explicit stale-anchor confirmation before reuse. Normal fixtures and automated tests do not make billable image requests.
+
+Candidate previews are short-lived, authorization-checked URLs. An author can discard only an unselected, unpinned candidate in an editable draft. Submitted versions freeze the complete selected slot map, provenance, anchors, and Neutral fallback resolution. Quarantine, takedown, retirement, and purge retain governance-safe hashes and audit records while removing the private master and runtime derivative through the existing deletion worker.
 
 For explicit scale testing against the disposable local database:
 

@@ -2,6 +2,12 @@ import { createServerClient } from '@supabase/ssr';
 import type { Handle } from '@sveltejs/kit';
 import { getSupabaseConfig } from '$lib/server/config';
 import type { Database } from '$lib/database.types';
+import { startPortraitGenerationWorker } from '$lib/server/community-npc-jobs/portrait-service';
+
+// This idempotent bootstrap is intentionally outside the request path. It
+// lets adapter-node recover queued, undispatched portrait ordinals after a
+// restart while the service-role worker fencing remains database-authoritative.
+startPortraitGenerationWorker();
 
 export const handle: Handle = async ({ event, resolve }) => {
   const { url, publishableKey } = getSupabaseConfig();

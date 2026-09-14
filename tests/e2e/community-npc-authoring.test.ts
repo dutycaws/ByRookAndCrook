@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import sharp from 'sharp';
 import { createTestPlayer } from '../helpers/local-supabase';
 import { createNpcSheet } from '../../src/lib/game/community-npc-ui';
 import type { Json } from '../../src/lib/database.types';
@@ -156,6 +157,53 @@ async function prepareValidArtwork(player: Awaited<ReturnType<typeof createAutho
   return Number((selected.data as { revision: number }).revision);
 }
 
+async function prepareSetting(player: Awaited<ReturnType<typeof createAuthor>>, npcId: string, revision = 0) {
+  const settingId = 'c0370000-0000-4000-8000-000000000001';
+  const registered = await player.admin.rpc('npc_author_register_setting_asset', {
+    p_setting_id: settingId,
+    p_storage_key: 'community-settings/lantern-lit-tavern-table.webp',
+    p_mime_type: 'image/webp',
+    p_width: 1600,
+    p_height: 900,
+    p_sha256: 'a'.repeat(64)
+  });
+  if (registered.error) throw new Error(`setting registration: ${registered.error.message}`);
+  const selected = await player.client.rpc('npc_author_select_setting', {
+    p_npc_id: npcId,
+    p_expected_revision: revision,
+    p_setting_id: settingId
+  });
+  if (selected.error) throw new Error(`setting selection: ${selected.error.message}`);
+  return Number((selected.data as { revision: number }).revision);
+}
+
+async function transparentSpritePng(fill: string) {
+  return sharp(Buffer.from(`<svg width="512" height="512" xmlns="http://www.w3.org/2000/svg"><circle cx="256" cy="256" r="172" fill="${fill}"/><circle cx="202" cy="220" r="16" fill="#1b120d"/><circle cx="310" cy="220" r="16" fill="#1b120d"/><path d="M170 320 Q256 390 342 320" fill="none" stroke="#1b120d" stroke-width="22" stroke-linecap="round"/></svg>`)).png().toBuffer();
+}
+
+async function uploadSprite(page: Page, slot: 'neutral' | 'happy', png: Buffer) {
+  const panel = page.locator('#portrait-artwork');
+  await panel.getByRole('tab', { name: new RegExp(`^${slot[0].toUpperCase()}${slot.slice(1)}`) }).click();
+  const candidates = panel.locator('input[name="candidateId"]');
+  const previousCandidateCount = await candidates.count();
+  await panel.getByLabel('PNG sprite').setInputFiles({ name: `${slot}.png`, mimeType: 'image/png', buffer: png });
+  await panel.getByRole('button', { name: `Upload ${slot[0].toUpperCase()}${slot.slice(1)}` }).click();
+  await expect(panel.locator('.portrait-live-status')).toContainText('sprite uploaded for review');
+  await expect(candidates).toHaveCount(previousCandidateCount + 1);
+  await panel.locator('label.portrait-candidate').last().click();
+  await expect(candidates.last()).toBeChecked();
+}
+
+async function expressionWorkspace(player: Awaited<ReturnType<typeof createAuthor>>, npcId: string) {
+  const result = await player.client.rpc('npc_author_expression_sprite_workspace', { p_npc_id: npcId });
+  if (result.error) throw result.error;
+  return result.data as unknown as {
+    selectedBySlot: Record<string, { candidateId: string; assetId: string }>;
+    resolvedBySlot: Record<string, { candidateId?: string; assetId: string; fallbackFrom?: string }>;
+    candidates: Array<{ id: string; slot: string; staleNeutralAnchor: boolean }>;
+  };
+}
+
 test('guided authoring saves a readable world and story arc across reloads', async ({ page }) => {
   const player = await createAuthor();
   const name = `Mara Quill ${crypto.randomUUID().slice(0, 6)}`;
@@ -230,7 +278,7 @@ test('submission history and a governed retirement request survive reload', asyn
 
     await signIn(page, player);
     await page.goto(`/authoring/npcs/${npcId}`);
-    await expect(page.getByRole('heading', { name: 'Portrait sprite' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Character sprites' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'A place to meet' })).toBeVisible();
     await expect(page.getByText('Lantern-lit tavern table', { exact: true })).toBeVisible();
     await expect(page.locator('.setting-preview img').first()).toBeVisible();
@@ -247,6 +295,67 @@ test('submission history and a governed retirement request survive reload', asyn
     await expect(page.getByText('Pending review', { exact: true })).toBeVisible();
     await expect(page.getByText('This prototype courier is being replaced by a more focused community character.')).toBeVisible();
     await expect(page.getByText('Version 1', { exact: true })).toBeVisible();
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('expression sprites keep Neutral authoritative while optional slots fall back, persist, and require stale reconfirmation', async ({ page }) => {
+  const player = await createAuthor();
+  try {
+    const npcId = await createDraft(player, `Sprite Courier ${crypto.randomUUID().slice(0, 6)}`);
+    await prepareSetting(player, npcId);
+    const neutralOne = await transparentSpritePng('#795548');
+    const neutralTwo = await transparentSpritePng('#546e7a');
+    const happy = await transparentSpritePng('#ff9800');
+
+    await signIn(page, player);
+    await page.goto(`/authoring/npcs/${npcId}`);
+    const panel = page.locator('#portrait-artwork');
+    await expect(panel.getByRole('tablist', { name: 'Expression sprite slots' }).getByRole('tab')).toHaveCount(6);
+    await expect(panel.getByRole('tab', { name: /^Happy/ })).toHaveAttribute('aria-disabled', 'true');
+
+    await uploadSprite(page, 'neutral', neutralOne);
+    await expect(panel.getByRole('button', { name: 'Select Neutral' })).toBeEnabled();
+    await panel.getByRole('button', { name: 'Select Neutral' }).click();
+    await page.reload();
+    await expect(panel.getByRole('tab', { name: /^Neutral selected/ })).toBeVisible();
+    await expect(panel.locator('.portrait-candidate.selected')).toHaveCount(1);
+    await expect(page.locator('.authoring-scene-preview .scene-portrait')).toBeVisible();
+
+    await uploadSprite(page, 'happy', happy);
+    await panel.getByRole('button', { name: 'Select Happy' }).click();
+    await page.reload();
+    await expect(panel.getByRole('tab', { name: /^Happy selected/ })).toBeVisible();
+    const afterHappy = await expressionWorkspace(player, npcId);
+    expect(afterHappy.selectedBySlot.happy.assetId).toBeTruthy();
+    expect(afterHappy.resolvedBySlot.sad.assetId).toBe(afterHappy.selectedBySlot.neutral.assetId);
+    expect(afterHappy.resolvedBySlot.sad.fallbackFrom).toBe('neutral');
+    await expect(page.locator('.authoring-scene-preview .scene-portrait')).toBeVisible();
+
+    await uploadSprite(page, 'neutral', neutralTwo);
+    await expect(panel.getByLabel('I understand changing Neutral clears optional selections.')).toBeVisible();
+    await panel.getByLabel('I understand changing Neutral clears optional selections.').check();
+    await panel.getByRole('button', { name: 'Select Neutral' }).click();
+    await page.reload();
+    await expect(panel.getByRole('tab', { name: /^Happy selected/ })).toHaveCount(0);
+    await panel.getByRole('tab', { name: /^Happy/ }).click();
+    const staleCandidate = panel.locator('label.portrait-candidate.stale');
+    await expect(staleCandidate).toHaveCount(1);
+    await staleCandidate.click();
+    await expect(staleCandidate.locator('input[name="candidateId"]')).toBeChecked();
+    await expect(panel.getByRole('button', { name: 'Select Happy' })).toBeDisabled();
+    await panel.getByLabel('I reviewed this sprite against the current Neutral anchor.').check();
+    await panel.getByRole('button', { name: 'Select Happy' }).click();
+    await page.reload();
+
+    const finalWorkspace = await expressionWorkspace(player, npcId);
+    expect(finalWorkspace.selectedBySlot.neutral.assetId).not.toBe(afterHappy.selectedBySlot.neutral.assetId);
+    expect(finalWorkspace.selectedBySlot.happy.assetId).toBe(afterHappy.selectedBySlot.happy.assetId);
+    expect(finalWorkspace.resolvedBySlot.leaving.assetId).toBe(finalWorkspace.selectedBySlot.neutral.assetId);
+    expect(finalWorkspace.resolvedBySlot.leaving.fallbackFrom).toBe('neutral');
+    await expect(panel.getByRole('tab', { name: /^Happy selected/ })).toBeVisible();
+    await expect(page.locator('.authoring-scene-preview .scene-portrait')).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }

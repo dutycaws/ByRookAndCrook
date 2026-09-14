@@ -15,7 +15,9 @@
   const lifecycleLabel = $derived(detail.draft.lifecycle.replaceAll('_', ' '));
   const portrait = $derived(detail.portrait as AuthoringPortraitWorkspace);
   const settings = $derived(detail.settings as AuthoringSettingsWorkspace);
-  const selectedPortrait = $derived(portrait.candidates.find((candidate) => candidate.id === portrait.selectedCandidateId) ?? null);
+  // The authoring scene intentionally uses Neutral only. Optional expressions
+  // are runtime variants and must not make the creator preview ambiguous.
+  const selectedPortrait = $derived(portrait.candidates.find((candidate) => candidate.id === (portrait.selectedCandidateIds.neutral ?? portrait.selectedCandidateId)) ?? null);
   const selectedSetting = $derived(settings.settings.find((setting) => setting.id === settings.selectedSettingId) ?? null);
   const portraitSummary = $derived([
     { label: 'Title and role', values: [detail.draft.sheet.identity.title, detail.draft.sheet.identity.shortDescription].filter(Boolean) },
@@ -63,7 +65,7 @@
   <section id="draft-editor" class="workspace-editor-region" aria-label="NPC draft editor">
     <div class="workspace-region-heading"><span class="workspace-step">01</span><div><p class="eyebrow">Shape the companion</p><h2>Author the draft</h2><p>The details below are the canonical source for this companion. Clear writing gives scenes, dialogue, and consequences a shared foundation.</p></div></div>
     <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))}>
-      <PortraitPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {portrait} visualSummary={portraitSummary} itemOptions={portraitItemOptions} />
+      <PortraitPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {portrait} npcId={detail.npcId} visualSummary={portraitSummary} itemOptions={portraitItemOptions} />
     </NpcSheetEditor>
   </section>
 

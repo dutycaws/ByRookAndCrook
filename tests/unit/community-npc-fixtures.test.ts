@@ -6,6 +6,14 @@ import { describe, expect, it } from 'vitest';
 import { deriveLocalCommunityNpcSettingVariants, listLocalCommunityNpcSceneAssets } from '../../scripts/community-npc-fixtures.js';
 
 describe('community NPC setting fixtures', () => {
+  it('has a graceful empty-media path for fresh checkouts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'brac-empty-setting-fixture-'));
+    try {
+      expect(await deriveLocalCommunityNpcSettingVariants(root)).toEqual([]);
+      expect(listLocalCommunityNpcSceneAssets(root)).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('derives exactly three deterministic 16:9 WebP setting variants from the ignored background master', async () => {
     const root = await mkdtemp(join(tmpdir(), 'brac-setting-fixture-'));
     const source = join(root, '.local/media/source-masters/community-npcs/settings/CozyTavernBackground.png');

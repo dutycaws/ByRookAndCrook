@@ -84,6 +84,7 @@ async function main() {
   const assets = await seedLocalShopRuntimeAssets(admin.storage);
   const sceneAssets = await seedLocalSceneRuntimeAssets(admin.storage);
   await ensurePrivatePortraitBuckets(admin.storage);
+  console.info('Verified private Community NPC expression-sprite master and runtime buckets.');
   console.info(`Verified ${assets.length} local Shop runtime asset(s) in local Supabase Storage.`);
   console.info(`Verified ${sceneAssets.length} local layered-scene runtime asset(s) in local Supabase Storage.`);
   const communitySceneAssets = await seedLocalCommunityNpcRuntimeAssets(admin.storage);

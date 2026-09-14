@@ -18,7 +18,17 @@
   $effect(() => { if (!editable) status = 'Read-only'; if (conflict) { frozen = true; status = 'Conflict — refresh before editing'; } });
   onMount(() => { hydrated = true; });
   function schedule(event?: Event) { if (event?.target instanceof HTMLElement && event.target.closest('.portrait-panel')) return; if (!hydrated || !editable || frozen) return; status = 'Saving…'; if (debounce) clearTimeout(debounce); debounce = setTimeout(() => formElement.requestSubmit(), 750); }
-  const autosave: SubmitFunction = () => async ({ result, update }) => { if (result.type === 'failure') { await update({ reset: false, invalidateAll: false }); const data = result.data as { conflict?: boolean; message?: string } | undefined; if (data?.conflict) { frozen = true; status = 'Conflict — refresh before editing'; } else status = data?.message ?? 'Save failed'; return; } await update({ reset: false, invalidateAll: true }); status = 'Saved'; };
+  const autosave: SubmitFunction = ({ submitter }) => async ({ result, update }) => {
+    const portraitAction = submitter instanceof HTMLElement && Boolean(submitter.dataset.portraitAction);
+    if (portraitAction) {
+      // Sprite work has its own narrow client store. Replacing page data here
+      // would reset the editor, caret, scroll position and a tentative choice.
+      const data = result.type === 'success' || result.type === 'failure' ? result.data : undefined;
+      formElement.dispatchEvent(new CustomEvent('portrait-action-result', { detail: data }));
+      await update({ reset: false, invalidateAll: false });
+      return;
+    }
+    if (result.type === 'failure') { await update({ reset: false, invalidateAll: false }); const data = result.data as { conflict?: boolean; message?: string } | undefined; if (data?.conflict) { frozen = true; status = 'Conflict — refresh before editing'; } else status = data?.message ?? 'Save failed'; return; } await update({ reset: false, invalidateAll: true }); status = 'Saved'; };
   const lines = (value: string) => value.split('\n').map((entry) => entry.trim()).filter(Boolean);
   function updateLines(key: keyof GuidedNpcSheet['personality'], event: Event) { editor.personality[key] = lines((event.currentTarget as HTMLTextAreaElement).value); }
   function move<T>(items: T[], index: number, by: number) { const target = index + by; if (target < 0 || target >= items.length) return; [items[index], items[target]] = [items[target], items[index]]; }
@@ -32,7 +42,7 @@
 
 {#if message}<p class="community-notice" class:community-error={conflict} role={conflict ? 'alert' : 'status'}>{message}</p>{/if}
 {#if !editable}<p class="community-notice npc-editor-readonly" role="status">This submitted version is read-only. A reviewer decision can open a new revision.</p>{/if}
-<form bind:this={formElement} method="POST" action="?/save" class:has-conflict={conflict || frozen} class="npc-editor" use:enhance={autosave} oninput={schedule}>
+<form bind:this={formElement} method="POST" enctype="multipart/form-data" action="?/save" class:has-conflict={conflict || frozen} class="npc-editor" use:enhance={autosave} oninput={schedule}>
   <input type="hidden" name="revision" value={revision} />
   <input type="hidden" name="entities" value={JSON.stringify(canonical.lore.entities)} /><input type="hidden" name="facts" value={JSON.stringify(canonical.lore.facts)} /><input type="hidden" name="relationships" value={JSON.stringify(canonical.lore.relationships)} /><input type="hidden" name="npcReferences" value={JSON.stringify(canonical.lore.npcReferences)} /><input type="hidden" name="milestones" value={JSON.stringify(canonical.campaign.milestones)} />
   <div class="npc-editor-toolbar" aria-label="Draft save status"><div><span class="eyebrow">Draft revision {revision}</span><p class="autosave-status {statusTone()}" aria-live="polite">{status}</p></div>{#if editable && !frozen}<p class="autosave-helper">Changes save after a short pause.</p>{/if}</div>

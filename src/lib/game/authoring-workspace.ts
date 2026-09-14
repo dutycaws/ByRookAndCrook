@@ -34,6 +34,10 @@ export interface AuthoringActionResult {
   versionNumber?: number;
   focusTarget?: string;
   conflict?: boolean;
+  /** A durable queued portrait batch. The client refreshes only sprite state. */
+  jobId?: string;
+  /** Narrow portrait state; clients merge this without invalidating the editor. */
+  spriteWorkspace?: Record<string, unknown>;
 }
 
 export interface AuthoringProviderState {
@@ -91,7 +95,15 @@ export interface AuthoringPortraitCandidate {
   styleVersion: string | null;
   visualInputHash: string | null;
   createdAt: string | null;
+  /** Expressions are independently authored; absent optional slots fall back to Neutral. */
+  slot: AuthoringExpressionSlot;
+  source: 'author_upload' | 'ai_generated';
+  staleNeutralAnchor: boolean;
+  neutralAnchorHash: string | null;
 }
+
+export const AUTHORING_EXPRESSION_SLOTS = ['neutral', 'happy', 'sad', 'angry', 'engaged', 'leaving'] as const;
+export type AuthoringExpressionSlot = typeof AUTHORING_EXPRESSION_SLOTS[number];
 
 export interface AuthoringPortraitBatch {
   id: string;
@@ -112,6 +124,9 @@ export interface AuthoringPortraitWorkspace {
   candidates: AuthoringPortraitCandidate[];
   activeBatch: AuthoringPortraitBatch | null;
   creditsRemaining: number | null;
+  /** Explicit selection, keyed by slot. The old scalar remains Neutral compatibility. */
+  selectedCandidateIds: Partial<Record<AuthoringExpressionSlot, string>>;
+  resolvedCandidateIds: Partial<Record<AuthoringExpressionSlot, string>>;
 }
 
 export interface AuthoringCuratedSetting {
@@ -456,6 +471,10 @@ export function decodeAuthoringWorkspace(
   };
   const portraitValue = record(root.portrait);
   const selectedPortraitAssetId = nullableString(portraitValue.selectedAssetId ?? record(portraitValue.selected).assetId);
+  const selectedSlotsValue = record(portraitValue.selectedSlots ?? portraitValue.selectedBySlot);
+  const resolvedSlotsValue = record(portraitValue.resolvedSlots ?? portraitValue.resolvedBySlot);
+  const slot = (value: unknown): AuthoringExpressionSlot => AUTHORING_EXPRESSION_SLOTS.includes(value as AuthoringExpressionSlot)
+    ? value as AuthoringExpressionSlot : 'neutral';
   const styleVersion = string(portraitValue.styleVersion, 'community-npc-portrait-sprite-v1');
   const portraitAvailable = boolean(portraitValue.providerAvailable, provider.available);
   const portraitReason = nullableString(portraitValue.providerReason)
@@ -489,7 +508,11 @@ export function decodeAuthoringWorkspace(
         failureReason: nullableString(row.failureCode ?? row.failureReason),
         styleVersion: nullableString(row.styleVersion) ?? styleVersion,
         visualInputHash: nullableString(row.visualInputHash),
-        createdAt: nullableString(row.createdAt)
+        createdAt: nullableString(row.createdAt),
+        slot: slot(row.slot),
+        source: row.source === 'author_upload' ? 'author_upload' : 'ai_generated',
+        staleNeutralAnchor: boolean(row.staleNeutralAnchor),
+        neutralAnchorHash: nullableString(row.neutralAnchorHash)
       };
     }).filter((entry) => entry.id),
     activeBatch: (() => {
@@ -507,12 +530,23 @@ export function decodeAuthoringWorkspace(
         errorCode: nullableString(batch.errorCode)
       };
     })(),
-    creditsRemaining: typeof portraitValue.remainingCredits === 'number' ? portraitValue.remainingCredits : null
+    creditsRemaining: typeof portraitValue.remainingCredits === 'number' ? portraitValue.remainingCredits : null,
+    selectedCandidateIds: {},
+    resolvedCandidateIds: {}
   };
+  for (const expressionSlot of AUTHORING_EXPRESSION_SLOTS) {
+    const selected = record(selectedSlotsValue[expressionSlot]);
+    const resolved = record(resolvedSlotsValue[expressionSlot]);
+    const selectedId = nullableString(selected.candidateId ?? selected.id ?? selected.assetId ?? selectedSlotsValue[expressionSlot]);
+    const resolvedId = nullableString(resolved.candidateId ?? resolved.id ?? resolved.assetId ?? resolvedSlotsValue[expressionSlot]);
+    if (selectedId) portrait.selectedCandidateIds[expressionSlot] = selectedId;
+    if (resolvedId) portrait.resolvedCandidateIds[expressionSlot] = resolvedId;
+  }
   // The database is authoritative, but keep the browser contract defensive:
   // an image is only submit-ready when it is explicitly selected, alpha-valid,
   // and matches the visual inputs that are presently on the draft.
-  const selectedPortrait = portrait.candidates.find((candidate) => candidate.assetId === selectedPortraitAssetId)
+  const selectedPortrait = portrait.candidates.find((candidate) => candidate.id === portrait.selectedCandidateIds.neutral)
+    ?? portrait.candidates.find((candidate) => candidate.assetId === selectedPortraitAssetId)
     ?? portrait.candidates.find((candidate) => candidate.id === string(record(portraitValue.selected).id));
   const selectedPortraitIsCurrent = Boolean(
     selectedPortrait
@@ -521,7 +555,10 @@ export function decodeAuthoringWorkspace(
       && selectedPortrait.hasAlpha === true
       && selectedPortrait.visualInputHash === portrait.visualInputHash
   );
-  if (selectedPortraitIsCurrent) portrait.selectedCandidateId = selectedPortrait?.id ?? null;
+  if (selectedPortraitIsCurrent) {
+    portrait.selectedCandidateId = selectedPortrait?.id ?? null;
+    if (selectedPortrait?.id) portrait.selectedCandidateIds.neutral = selectedPortrait.id;
+  }
   const assistance = array(root.assistance).map((entry): AuthoringAssistance => {
     const row = record(entry);
     const selected = section(row.sectionPath);
