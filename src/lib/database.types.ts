@@ -2744,6 +2744,16 @@ export type Database = {
         Returns: Json
       }
       project_garden_day: { Args: never; Returns: Json }
+      purchase_generated_supply: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_item_key: string
+          p_quantity: number
+          p_save_id: string
+        }
+        Returns: Json
+      }
       score_bake: {
         Args: {
           p_action_id: string
@@ -2806,6 +2816,16 @@ export type Database = {
         }
         Returns: Json
       }
+      use_generated_supply: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_item_key: string
+          p_quest_id: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
       world_demote_low_relevance_deep_npc: {
         Args: { p_reason?: string; p_save_id: string }
         Returns: Json
@@ -2844,6 +2864,10 @@ export type Database = {
         Args: { p_save_id: string }
         Returns: Json
       }
+      world_generated_shop_projection: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
       world_irreversible_warning_status: {
         Args: { p_save_id: string }
         Returns: Json
@@ -2855,6 +2879,10 @@ export type Database = {
           p_save_id: string
           p_target_entity_id: string
         }
+        Returns: Json
+      }
+      world_promote_canonical_npc: {
+        Args: { p_entity_id: string; p_save_id: string }
         Returns: Json
       }
       world_promote_supporting_actor: {
