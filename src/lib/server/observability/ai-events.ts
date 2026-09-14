@@ -20,15 +20,22 @@ export const WORLD_SETTLEMENT_AI_STAGES = [
   'canon_validate', 'canon_commit', 'news_aggregate', 'news_commit', 'safe_fallback',
   'social_encounter_proposer', 'social_encounter_critic', 'social_encounter_repair',
   'social_encounter_final_critic', 'social_encounter_validate', 'social_encounter_commit',
-  'social_encounter_fallback'
+  'social_encounter_fallback',
+  'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair',
+  'procedural_world_final_critic', 'procedural_world_validate', 'procedural_world_commit',
+  'procedural_world_fallback'
 ] as const;
+
+export type DialogueAiStage = (typeof DIALOGUE_AI_STAGES)[number];
+export type WorldSettlementAiStage = (typeof WORLD_SETTLEMENT_AI_STAGES)[number];
+export type AiStage = DialogueAiStage | WorldSettlementAiStage;
 
 export type AiObservabilityEvent = Readonly<{
   version: typeof AI_OBSERVABILITY_VERSION;
   occurredAt: string;
   correlationId: string;
   workflow: AiWorkflow;
-  stage: string;
+  stage: AiStage;
   status: AiEventStatus;
   attempt: number;
   durationMs?: number;
@@ -41,6 +48,8 @@ export type AiObservabilityEvent = Readonly<{
 export type AiObservabilityInput = Readonly<{
   correlationId: string;
   workflow: AiWorkflow;
+  // Dynamic orchestrators choose from their own bounded stage sets. The
+  // runtime allowlist below remains the authority before an event is formed.
   stage: string;
   status: AiEventStatus;
   attempt: number;
@@ -62,6 +71,13 @@ const permittedErrors = new Set([
   'worker_failed', 'claim_malformed', 'lease_unavailable', 'lease_lost', 'commit_unknown',
   'validation_rejected', 'commit_rejected', 'commit_conflict',
   'context_budget', 'budget', 'structure', 'consistency', 'state_changed', 'internal_error'
+]);
+const providerStages = new Set<string>([
+  ...DIALOGUE_AI_STAGES,
+  'proposer', 'critic', 'repair', 'final_critic', 'digest',
+  'canon_proposer', 'canon_critic', 'canon_repair', 'canon_final_critic',
+  'social_encounter_proposer', 'social_encounter_critic', 'social_encounter_repair', 'social_encounter_final_critic',
+  'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair', 'procedural_world_final_critic'
 ]);
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {
@@ -98,6 +114,13 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
   if (input.durationMs !== undefined && !finiteInteger(input.durationMs, 0, 24 * 60 * 60 * 1_000)) return null;
   if (input.model !== undefined && !modelName.test(input.model)) return null;
   if (input.tokenUsage !== undefined && !tokenUsage(input.tokenUsage)) return null;
+  // Model identity and usage belong solely to a completed provider invocation.
+  // This prevents checkpoint reuse and database commit events from looking like
+  // billable model calls in dashboards.
+  const hasProviderMetrics = input.model !== undefined || input.tokenUsage !== undefined;
+  if (hasProviderMetrics && (input.status !== 'completed' || !providerStages.has(input.stage)
+    || input.model === undefined || input.tokenUsage === undefined)) return null;
+  if (input.status === 'reused' && (input.durationMs !== undefined || hasProviderMetrics)) return null;
 
   let occurredAt: string;
   try {
@@ -110,7 +133,7 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
     occurredAt,
     correlationId: input.correlationId,
     workflow: input.workflow,
-    stage: input.stage,
+    stage: input.stage as AiStage,
     status: input.status,
     attempt: input.attempt
   };

@@ -66,6 +66,23 @@ describe('AI observability boundary', () => {
     expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'social_encounter_private_exchange',status:'completed',attempt:1})).toBeNull();
   });
 
+  it('allows the fixed procedural-world lifecycle labels only', () => {
+    for (const stage of ['procedural_world_proposer','procedural_world_critic','procedural_world_repair','procedural_world_final_critic','procedural_world_validate','procedural_world_commit','procedural_world_fallback'] as const) {
+      expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage,status:'completed',attempt:3})).not.toBeNull();
+    }
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_payload' as any,status:'completed',attempt:3})).toBeNull();
+  });
+
+  it('accepts model and token metrics only for completed provider calls', () => {
+    const providerMetric = { model:'fixture-model', tokenUsage:{input:3,output:2} };
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_proposer',status:'completed',attempt:1,...providerMetric})).toMatchObject(providerMetric);
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_proposer',status:'reused',attempt:1,...providerMetric})).toBeNull();
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_commit',status:'completed',attempt:1,...providerMetric})).toBeNull();
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_proposer',status:'completed',attempt:1,model:'fixture-model'})).toBeNull();
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_proposer',status:'completed',attempt:1,tokenUsage:{input:3,output:2}})).toBeNull();
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_proposer',status:'reused',attempt:1,durationMs:4})).toBeNull();
+  });
+
   it('serializes only the exact validated event through the normal local sink', () => {
     const written:string[]=[]; const original=console.info; console.info=(value:unknown)=>{written.push(String(value));};
     try {
