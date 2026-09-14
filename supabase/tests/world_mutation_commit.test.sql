@@ -50,14 +50,20 @@ select setseed(0.01);
 create temporary table pg_temp.ar as select public.world_settlement_commit_mutation(s,j,f,p,pg_temp.fp(p),'Lira became more careful.') result from pg_temp.a;
 reset role;
 select is((select result->>'outcome' from pg_temp.ar),'changed','service pressure commit succeeds with a deterministic qualifying roll');
+select ok((select result @> jsonb_build_object('status','completed','rulesVersion','evolving-world-v1','settlementId',s,'jobId',j,'proposalFingerprint',pg_temp.fp(p),'publicDigest','Lira became more careful.') and not (result ?| array['dimensions','chancePercent','roll','proposal','pressure']) from pg_temp.ar cross join pg_temp.a),'safe commit envelope retains all worker classification keys without private mutation state');
+select ok((select count(*)=1 from private.resident_evolution_entries where job_id=(select j from pg_temp.a)) and exists(select 1 from private.resident_evolution_entries where job_id=(select j from pg_temp.a) and instance_id=(select lira from pg_temp.r) and save_id=(select save_id from pg_temp.r) and day_number=10 and profile_revision=(select profile_revision from private.world_resident_profiles where instance_id=(select lira from pg_temp.r)) and disposition ? 'summary' and not (disposition ?| array['profile','beliefs','social','pressure','roll','proposal','critic','fence'])),'successful profile change creates one subject-bound safe evolution projection without private cognition or worker state');
 select ok((select count(*)=1 from private.world_resident_mutation_evidence where job_id=(select j from pg_temp.a)),'authorized evidence persists atomically');
 select ok((select count(*)=1 from private.world_resident_mutation_receipts where job_id=(select j from pg_temp.a)),'receipt persists atomically');
 select ok((select status='completed' and output->>'outcome'='changed' from private.world_settlement_jobs where id=(select j from pg_temp.a)),'job completion and output persist');
 select ok((select public_digest='Lira became more careful.' from private.world_settlements where id=(select s from pg_temp.a)),'settlement digest persists');
 select ok((select count(*)=1 from private.world_settlement_outbox where job_id=(select j from pg_temp.a)),'outbox persists atomically');
-select ok((select (result#>>'{dimensions,0,pressureAfterCommit}')::int=h.pressure_after and (result#>>'{dimensions,0,valueAfter}')::int=(p.current_profile#>>'{dimensions,caution}')::int and (result#>>'{dimensions,0,appliedDelta}')::int=7 from pg_temp.ar cross join private.world_resident_pressure_history h join private.world_resident_profiles p on p.instance_id=(select lira from pg_temp.r) where h.job_id=(select j from pg_temp.a)),'receipt pressure and applied/value state equal stored state');
+select ok((select (receipt.result#>>'{dimensions,0,pressureAfterCommit}')::int=h.pressure_after and (receipt.result#>>'{dimensions,0,valueAfter}')::int=(p.current_profile#>>'{dimensions,caution}')::int and (receipt.result#>>'{dimensions,0,appliedDelta}')::int=7 from private.world_resident_mutation_receipts receipt cross join private.world_resident_pressure_history h join private.world_resident_profiles p on p.instance_id=(select lira from pg_temp.r) where receipt.job_id=(select j from pg_temp.a) and h.job_id=receipt.job_id),'private audit receipt pressure and applied/value state equal stored state');
 set local role service_role; set local request.jwt.claim.role='service_role';
 select is((select public.world_settlement_commit_mutation(a.s,a.j,a.f,a.p,pg_temp.fp(a.p),'Lira became more careful.') from pg_temp.a a),(select result from pg_temp.ar),'completed job exact replay returns identical result');
+reset role;
+select is((select count(*) from private.resident_evolution_entries where job_id=(select j from pg_temp.a)),1::bigint,'exact replay does not duplicate the evolution projection');
+select throws_ok(format('insert into private.resident_evolution_entries(job_id,instance_id,save_id,day_number,profile_revision,disposition) values(%L,%L,%L,10,1,%L::jsonb)',(select j from pg_temp.a),(select torvin from pg_temp.r),(select save_id from pg_temp.r),'{}'),'23514',null,'evolution entry rejects a mismatched job subject');
+set local role service_role; set local request.jwt.claim.role='service_role';
 select throws_ok(format('select public.world_settlement_commit_mutation(%L,%L,%L,%L::jsonb,%L,%L)',s,j,f,jsonb_set(p,'{salience}','"minor"'),pg_temp.fp(jsonb_set(p,'{salience}','"minor"')),'changed'),'PT409',null,'replay with a changed proposal conflicts') from pg_temp.a;
 select throws_ok(format('select public.world_settlement_commit_mutation(%L,%L,%L,%L::jsonb,%L,%L)',s,j,f,p,pg_temp.fp(p),'changed digest'),'PT409',null,'replay with a changed digest conflicts') from pg_temp.a;
 reset role;
@@ -71,6 +77,7 @@ grant select on pg_temp.b to service_role;
 set local role service_role; set local request.jwt.claim.role='service_role';
 select lives_ok(format('select public.world_settlement_commit_mutation(%L,%L,%L,%L::jsonb,%L,%L)',s,j,f,p,pg_temp.fp(p),'prior-fence'),'latest accepted checkpoint from a prior expired fence is accepted by an active current fence') from pg_temp.b;
 reset role;
+select is((select count(*) from private.resident_evolution_entries where job_id=(select j from pg_temp.b)),0::bigint,'pressure-only or roll-failed outcome creates no public evolution projection');
 
 -- Strict contract rejections: canonical SHA, unsupported work, malformed JSON shapes and stale control plane.
 create temporary table pg_temp.c(s uuid,j uuid,f uuid,p jsonb);
@@ -99,7 +106,7 @@ insert into private.world_settlement_stage_checkpoints(job_id,fence,stage,payloa
 grant select on pg_temp.e to service_role; set local role service_role; set local request.jwt.claim.role='service_role'; select setseed(0.01);
 create temporary table pg_temp.er as select public.world_settlement_commit_mutation(s,j,f,p,pg_temp.fp(p),'Lira adds two practical preferences.') result from pg_temp.e;
 reset role;
-select is((select result->'appliedEntryOperationIndexes' from pg_temp.er),'[0,1]'::jsonb,'successful non-core entry additions report their exact operation indexes');
+select is((select result->'appliedEntryOperationIndexes' from private.world_resident_mutation_receipts where job_id=(select j from pg_temp.e)),'[0,1]'::jsonb,'private audit receipt records exact non-core entry operation indexes');
 select is((select count(*)::int from private.world_resident_profiles p,jsonb_array_elements(p.current_profile->'entries') x where p.instance_id=(select lira from pg_temp.r) and x->>'kind'='preference' and x->>'active'='true'),5,'two successful additions increase Lira preference collection to five');
 create temporary table pg_temp.f(s uuid,j uuid,f uuid,p jsonb);
 insert into pg_temp.f values('17300000-0000-4000-8000-000000000141','17300000-0000-4000-8000-000000000142','17300000-0000-4000-8000-000000000143',pg_temp.p('[{"dimensionKey":"openness","direction":1,"intendedDelta":1}]','major','[{"operation":"revise","entryId":"lira_preference_patrol","text":"dawn patrols with neighbors"},{"operation":"retract","entryId":"lira_preference_maps"}]'));
@@ -118,7 +125,7 @@ insert into private.world_settlement_stage_checkpoints(job_id,fence,stage,payloa
 grant select on pg_temp.g to service_role; set local role service_role; set local request.jwt.claim.role='service_role'; select setseed(0.01);
 create temporary table pg_temp.gr as select public.world_settlement_commit_mutation(s,j,f,p,pg_temp.fp(p),'No defining change.') result from pg_temp.g;
 reset role;
-select is((select result->'appliedEntryOperationIndexes' from pg_temp.gr),'[]'::jsonb,'core entry operation is omitted without a defining core crossing');
+select is((select result->'appliedEntryOperationIndexes' from private.world_resident_mutation_receipts where job_id=(select j from pg_temp.g)),'[]'::jsonb,'private audit receipt records omitted core operation without defining crossing');
 select ok(not exists(select 1 from private.world_resident_profiles p,jsonb_array_elements(p.current_profile->'entries') x where p.instance_id=(select lira from pg_temp.r) and x->>'id'='lira_value_watchfires'),'omitted core operation does not alter profile');
 update private.world_resident_profiles set pressure=jsonb_set(pressure,'{duty}','50') where instance_id=(select lira from pg_temp.r);
 create temporary table pg_temp.h(s uuid,j uuid,f uuid,p jsonb);
@@ -128,7 +135,7 @@ insert into private.world_settlement_stage_checkpoints(job_id,fence,stage,payloa
 grant select on pg_temp.h to service_role; set local role service_role; set local request.jwt.claim.role='service_role'; select setseed(0.01);
 create temporary table pg_temp.hr as select public.world_settlement_commit_mutation(s,j,f,p,pg_temp.fp(p),'A defining duty change.') result from pg_temp.h;
 reset role;
-select is((select result->'appliedEntryOperationIndexes' from pg_temp.hr),'[0]'::jsonb,'defining core crossing applies the core entry operation');
+select is((select result->'appliedEntryOperationIndexes' from private.world_resident_mutation_receipts where job_id=(select j from pg_temp.h)),'[0]'::jsonb,'private audit receipt records applied defining core entry operation');
 
 -- Beliefs bind their provenance to frozen evidence and use append-only history.
 create temporary table pg_temp.i(s uuid,j uuid,f uuid,p jsonb);
