@@ -145,6 +145,21 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
       throw cause;
     }
   };
+  const completeSafely = async (
+    kind: 'no_changes' | 'rejected' | 'skipped',
+    digest: string,
+    reason?: 'validation_rejected'
+  ): Promise<void> => {
+    const started = now();
+    await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'started',attempt:claim.attempt,errorCode:reason});
+    try {
+      await safeResult(client,claim,kind,digest);
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'completed',attempt:claim.attempt,durationMs:elapsed(started),errorCode:reason});
+    } catch (cause) {
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'failed',attempt:claim.attempt,durationMs:elapsed(started),errorCode:isLeaseError(cause as Error)?'lease_lost':'commit_unknown'});
+      throw cause;
+    }
+  };
   try {
     if (!await guard.establish()) return { status:'lease_lost', errorCode:'lease_unavailable' };
     if (claim.kind === 'news') {
@@ -175,9 +190,7 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
       const reject=async(reason:string):Promise<SettlementOutcome>=>{
         await saveCheckpoint(client,claim,'validated',{accepted:false,reason});
         await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_validate',status:'skipped',attempt:claim.attempt,errorCode:'validation_rejected'});
-        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'started',attempt:claim.attempt});
-        await safeResult(client,claim,'rejected','The day settled without new world changes.');
-        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'completed',attempt:claim.attempt});
+        await completeSafely('rejected','The day settled without new world changes.','validation_rejected');
         return {status:'completed',kind:'rejected'};
       };
       if (!context) return await reject('canon_context_missing');
@@ -229,31 +242,31 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
       }
     }
     if (claim.kind !== 'resident') {
-      await safeResult(client, claim, 'skipped', 'The day settled without new world changes.');
+      await completeSafely('skipped','The day settled without new world changes.');
       return { status:'completed', kind:'skipped' };
     }
     const context = frozenEvolutionContext(claim.jobInputSnapshot);
-    if (!context) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'frozen_context_missing' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed', kind:'rejected' }; }
+    if (!context) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'frozen_context_missing' }); await completeSafely('rejected','The day settled without new world changes.','validation_rejected'); return { status:'completed', kind:'rejected' }; }
     let proposal = checkpoint(claim, 'proposer')?.proposal;
     if (!proposal) {
       const result = await generate('proposer', { version:claim.jobInputVersion, jobKind:claim.kind, schema:context.schema, profile:context.profile, capability:context.capability, worldSnapshot:context.worldSnapshot, authorizedEvidence:context.authorizedEvidence });
       proposal = result.value; await saveCheckpoint(client, claim, 'proposer', { proposal }, result);
     }
-    if (proposalValidationIssues(proposal,context)) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'proposal_invalid' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed', kind:'rejected' }; }
+    if (proposalValidationIssues(proposal,context)) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'proposal_invalid' }); await completeSafely('rejected','The day settled without new world changes.','validation_rejected'); return { status:'completed', kind:'rejected' }; }
     let critic = checkpoint(claim, 'critic')?.decision;
     if (!critic) { const result = await generate('critic', { proposal, schema:context.schema, profile:context.profile, capability:context.capability, worldSnapshot:context.worldSnapshot }); critic=result.value; await saveCheckpoint(client, claim, 'critic', { decision:critic }, result); }
     let decision = parseCriticOutput(critic);
-    if (!decision) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'critic_malformed' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed',kind:'rejected' }; }
+    if (!decision) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'critic_malformed' }); await completeSafely('rejected','The day settled without new world changes.','validation_rejected'); return { status:'completed',kind:'rejected' }; }
     if (decision.outcome === 'repair') {
       let repaired = checkpoint(claim, 'repair')?.proposal;
       if (!repaired) { const result = await generate('repair', { proposal, instructions:decision.instructions, schema:context.schema, profile:context.profile, capability:context.capability, worldSnapshot:context.worldSnapshot, authorizedEvidence:context.authorizedEvidence }); repaired=result.value; await saveCheckpoint(client, claim, 'repair', { proposal:repaired }, result); }
-      if (proposalValidationIssues(repaired,context)) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'repair_invalid' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed',kind:'rejected' }; }
+      if (proposalValidationIssues(repaired,context)) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'repair_invalid' }); await completeSafely('rejected','The day settled without new world changes.','validation_rejected'); return { status:'completed',kind:'rejected' }; }
       proposal = repaired;
       let final = checkpoint(claim, 'final_critic')?.decision;
       if (!final) { const result = await generate('final_critic', { proposal, schema:context.schema, profile:context.profile, capability:context.capability, worldSnapshot:context.worldSnapshot }); final=result.value; await saveCheckpoint(client, claim, 'final_critic', { decision:final }, result); }
-      decision = parseCriticOutput(final); if (!decision || decision.outcome !== 'accept') { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'repair_rejected' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed',kind:'rejected' }; }
+      decision = parseCriticOutput(final); if (!decision || decision.outcome !== 'accept') { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'repair_rejected' }); await completeSafely('rejected','The day settled without new world changes.','validation_rejected'); return { status:'completed',kind:'rejected' }; }
     }
-    if (decision.outcome !== 'accept') { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'critic_rejected' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed',kind:'rejected' }; }
+    if (decision.outcome !== 'accept') { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'critic_rejected' }); await completeSafely('rejected','The day settled without new world changes.','validation_rejected'); return { status:'completed',kind:'rejected' }; }
     await saveCheckpoint(client, claim, 'validated', { accepted:true, proposal });
     let digest = checkpoint(claim, 'digest')?.digest;
     if (!digest) { const result = await generate('digest', publicFacts(claim, true)); digest=result.value; await saveCheckpoint(client, claim, 'digest', { digest }, result); }

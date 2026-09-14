@@ -48,11 +48,14 @@ describe('world settlement worker', () => {
   });
   it('safely skips non-resident jobs without provider work or mutation commits', async () => {
     const raw=claim() as any; raw.kind='snapshot';
-    const mock=client(); const provider=fixtureProvider({});
-    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'skipped'});
+    const mock=client(); const provider=fixtureProvider({}); const events:unknown[]=[];
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'skipped'});
     expect(provider.calls).toEqual([]);
     expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
     expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_commit_mutation');
+    expect(events.map((event:any)=>[event.stage,event.status])).toEqual([
+      ['safe_fallback','started'],['safe_fallback','completed']
+    ]);
   });
   it('admits a canon event after its independent proposer and critic calls, without a model digest', async () => {
     const events:unknown[]=[];
