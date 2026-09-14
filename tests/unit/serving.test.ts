@@ -15,8 +15,11 @@ const snapshot = {
 };
 
 describe('bar snapshot boundary', () => {
-  it('accepts the standard community rating contract', () => {
-    expect(parseBarSnapshot(snapshot as Json)?.roster[0]?.rating).toBe('standard');
+  it('accepts a generated promoted resident through the same roster contract', () => {
+    const promoted: any = structuredClone(snapshot);
+    promoted.roster[0]!.origin = 'procedural';
+    promoted.roster[0]!.creator = null;
+    expect(parseBarSnapshot(promoted as Json)?.roster[0]).toMatchObject({ origin: 'procedural', rating: 'standard' });
   });
 
   it('rejects malformed resident projections', () => {
