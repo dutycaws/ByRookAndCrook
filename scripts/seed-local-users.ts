@@ -6,6 +6,7 @@ import { assertLocalSupabaseUrl, seedLocalShopRuntimeAssets } from './local-shop
 import { seedLocalSceneRuntimeAssets } from './local-scene-runtime-assets.js';
 import { ensureLocalPilotUsers } from './local-pilot-users.js';
 import { ensurePrivatePortraitBuckets } from '../src/lib/server/community-npc-portraits/index.js';
+import { ensurePrivateRuntimeArtBucket } from '../src/lib/server/evolving-world-art/index.js';
 import {
   registerLocalCommunityNpcSettingLibrary,
   seedLocalCommunityNpcFixture,
@@ -68,6 +69,7 @@ async function main() {
   const assets = await seedLocalShopRuntimeAssets(admin.storage);
   const sceneAssets = await seedLocalSceneRuntimeAssets(admin.storage);
   await ensurePrivatePortraitBuckets(admin.storage);
+  await ensurePrivateRuntimeArtBucket(admin.storage);
   console.info('Verified private Community NPC expression-sprite master and runtime buckets.');
   console.info(`Verified ${assets.length} local Shop runtime asset(s) in local Supabase Storage.`);
   console.info(`Verified ${sceneAssets.length} local layered-scene runtime asset(s) in local Supabase Storage.`);

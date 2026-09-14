@@ -2795,6 +2795,87 @@ export type Database = {
         }
         Returns: Json
       }
+      world_demote_low_relevance_deep_npc: {
+        Args: { p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_irreversible_warning_status: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_issue_irreversible_entity_warning: {
+        Args: {
+          p_capability_id: string
+          p_public_message: string
+          p_save_id: string
+          p_target_entity_id: string
+        }
+        Returns: Json
+      }
+      world_promote_supporting_actor: {
+        Args: { p_entity_id: string; p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_public_codex: { Args: { p_save_id: string }; Returns: Json }
+      world_retire_generated_entity: {
+        Args: {
+          p_capability_id: string
+          p_entity_id: string
+          p_input_fingerprint: string
+          p_reason?: string
+          p_save_id: string
+          p_warning_id: string
+        }
+        Returns: Json
+      }
+      world_runtime_art_accept: {
+        Args: {
+          p_attempt: number
+          p_fence: string
+          p_job_id: string
+          p_runtime_key: string
+          p_sha256: string
+        }
+        Returns: Json
+      }
+      world_runtime_art_authorize_delivery: {
+        Args: { p_entity_id: string; p_render_id: string; p_save_id: string }
+        Returns: Json
+      }
+      world_runtime_art_claim_next: {
+        Args: { p_lease_seconds?: number }
+        Returns: Json
+      }
+      world_runtime_art_fail: {
+        Args: {
+          p_attempt: number
+          p_fence: string
+          p_job_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
+      world_runtime_art_projection: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_runtime_art_replace_accepted: {
+        Args: { p_job_id: string; p_runtime_key: string; p_sha256: string }
+        Returns: Json
+      }
+      world_runtime_art_service_runtime_key: {
+        Args: { p_render_id: string }
+        Returns: Json
+      }
+      world_runtime_art_set_appearance: {
+        Args: {
+          p_appearance_version: string
+          p_entity_id: string
+          p_public_appearance: string
+          p_save_id: string
+        }
+        Returns: undefined
+      }
       world_settlement_checkpoint: {
         Args: {
           p_fence: string
