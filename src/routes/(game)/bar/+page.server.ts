@@ -6,6 +6,7 @@ import { dialogueAvailability } from '$lib/server/dialogue/runtime';
 import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { presentBarPatrons } from '$lib/game/bar-scene';
+import { parsePublicSettlementStatus } from '$lib/game/evolving-world';
 import type { Journal, PublicDisposition, PublicEvolutionEntry } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -61,9 +62,19 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
   setHeaders({ 'cache-control': 'private, no-store' });
   try {
     const snapshot = await getBarSnapshot(locals.supabase);
+    let settlement = null;
     const journals: Record<string,Journal> = {};
     if(snapshot) {
       const rpc = locals.supabase.rpc.bind(locals.supabase) as any;
+      try {
+        const settlementResult = await rpc('world_settlement_status', { p_save_id: snapshot.save.id, p_settlement_id: null });
+        if (settlementResult.error) throw settlementResult.error;
+        settlement = parsePublicSettlementStatus(settlementResult.data);
+      } catch (cause) {
+        // Settlement status is an optional player interlude. The core bar and
+        // journal remain usable if that projection is temporarily unavailable.
+        console.warn('bar_settlement_status_unavailable', { cause: cause instanceof Error ? cause.name : 'unknown' });
+      }
       const requested = uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc')! : null;
       const archived = url.searchParams.get('archive') === '1';
       const rosterFunction = archived ? 'npc_archived_roster' : 'npc_roster';
@@ -111,7 +122,7 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
       // presentation list explicit so the client never guesses availability.
       snapshot.patrons = presentBarPatrons(roster, journals) as typeof snapshot.patrons;
     }
-    return { snapshot, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc') : null, dialogueUnavailable:dialogueAvailability() };
+    return { snapshot, settlement, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc') : null, dialogueUnavailable:dialogueAvailability() };
   } catch (cause) {
     console.error('bar_load_failed', cause);
     error(500, 'The bar ledger is unavailable. Please try again.');
