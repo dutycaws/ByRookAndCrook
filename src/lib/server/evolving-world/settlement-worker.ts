@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
-import { parseMutationProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
+import { fingerprintMutationProposal, parseMutationProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
 import type { Database } from '$lib/database.types';
 import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
@@ -40,6 +40,16 @@ function publicFacts(claim: SettlementClaim, accepted: boolean): Record<string, 
 function digestText(value: unknown): string {
   const digest = parsePublicDigest(value); if (!digest) return 'The day settled without new world changes.';
   return clip([digest.summary, ...digest.journalEntries].filter(Boolean).join(' '), 500) || 'The day settled without new world changes.';
+}
+type CommittedOutcome = 'pressure_only' | 'roll_failed' | 'changed';
+function committedKind(value: unknown, expected: { settlementId: string; jobId: string; proposalFingerprint: string; publicDigest: string }): CommittedOutcome | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const receipt = value as Record<string, unknown>;
+  if (receipt.status !== 'completed' || receipt.rulesVersion !== 'evolving-world-v1'
+    || !['pressure_only', 'roll_failed', 'changed'].includes(String(receipt.outcome))
+    || receipt.settlementId !== expected.settlementId || receipt.jobId !== expected.jobId
+    || receipt.proposalFingerprint !== expected.proposalFingerprint || receipt.publicDigest !== expected.publicDigest) return null;
+  return receipt.outcome as CommittedOutcome;
 }
 
 class LeaseGuard {
@@ -84,7 +94,7 @@ async function safeResult(client: SettlementWorkerClient, claim: SettlementClaim
   await rpc(client, 'world_settlement_safe_result', { p_settlement_id:claim.settlementId, p_job_id:claim.jobId, p_fence:claim.fence, p_kind:kind, p_public_digest:clip(digest, 500) || 'The day settled without new world changes.' });
 }
 
-/** Runs one fenced job. Accepted proposals are checkpointed privately, then end in safe_result until Gate E owns mechanical commits. */
+/** Runs one fenced job. A validated resident proposal is committed atomically by the server-owned mutation RPC. */
 export async function runSettlementClaim(client: SettlementWorkerClient, rawClaim: unknown, runtime: SettlementRuntime = {}): Promise<SettlementOutcome> {
   let parsed; try { parsed = parseSettlementClaim(rawClaim); } catch { return { status:'failed', errorCode:'claim_malformed' }; }
   if ('status' in parsed) return { status:'idle' };
@@ -99,6 +109,10 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   };
   try {
     if (!await guard.establish()) return { status:'lease_lost', errorCode:'lease_unavailable' };
+    if (claim.kind !== 'resident') {
+      await safeResult(client, claim, 'skipped', 'The day settled without new world changes.');
+      return { status:'completed', kind:'skipped' };
+    }
     const context = frozenEvolutionContext(claim.jobInputSnapshot);
     if (!context) { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'frozen_context_missing' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed', kind:'rejected' }; }
     let proposal = checkpoint(claim, 'proposer')?.proposal;
@@ -121,11 +135,36 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
       decision = parseCriticOutput(final); if (!decision || decision.outcome !== 'accept') { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'repair_rejected' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed',kind:'rejected' }; }
     }
     if (decision.outcome !== 'accept') { await saveCheckpoint(client, claim, 'validated', { accepted:false, reason:'critic_rejected' }); await safeResult(client, claim, 'rejected', 'The day settled without new world changes.'); return { status:'completed',kind:'rejected' }; }
-    await saveCheckpoint(client, claim, 'validated', { accepted:true, proposal, note:'Proposal is retained for Gate E; no mechanics were applied.' });
+    await saveCheckpoint(client, claim, 'validated', { accepted:true, proposal });
     let digest = checkpoint(claim, 'digest')?.digest;
     if (!digest) { const result = await generate('digest', publicFacts(claim, true)); digest=result.value; await saveCheckpoint(client, claim, 'digest', { digest }, result); }
-    if (guard.lost) return { status:'lease_lost' };
-    await safeResult(client, claim, 'no_changes', digestText(digest)); return { status:'completed',kind:'no_changes' };
+    if (guard.lost || !guard.canCall()) return { status:'lease_lost' };
+    const proposalFingerprint = await fingerprintMutationProposal(proposal);
+    if (!proposalFingerprint) throw new SettlementProviderError('provider_malformed', 'Accepted mutation proposal could not be fingerprinted.');
+    let commitDispatched = false;
+    try {
+      commitDispatched = true;
+      const persisted = await rpc(client, 'world_settlement_commit_mutation', {
+        p_settlement_id:claim.settlementId,
+        p_job_id:claim.jobId,
+        p_fence:claim.fence,
+        p_proposal:proposal,
+        p_proposal_fingerprint:proposalFingerprint,
+        p_public_digest:digestText(digest)
+      });
+      const outcome = committedKind(persisted, {
+        settlementId: claim.settlementId,
+        jobId: claim.jobId,
+        proposalFingerprint,
+        publicDigest: digestText(digest)
+      });
+      if (!outcome) return { status:'failed', errorCode:'commit_unknown' };
+      return { status:'completed', kind:outcome };
+    } catch (error) {
+      if (isLeaseError(error as Error)) return { status:'lease_lost', errorCode:'lease_lost' };
+      if (commitDispatched) return { status:'failed', errorCode:'commit_unknown' };
+      throw error;
+    }
   } catch (cause) {
     if (guard.lost) return { status:'lease_lost', errorCode:errorCode(cause) };
     if (timedOut) {

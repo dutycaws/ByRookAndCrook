@@ -200,5 +200,23 @@ select ok((select trust=100 and affection=100 and respect=100 and fear=90 and ob
 select is((select array_agg(ordinal order by ordinal) from private.world_social_effect_receipts where job_id=(select j from pg_temp.social)),array[1,2,3,4]::smallint[],'same-kind social commands preserve distinct ordinals');
 select is((select count(*)::int from private.world_social_effect_receipts where job_id=(select j from pg_temp.b)),0,'pressure-only receipt has no social state or social receipt');
 
+-- E2's public envelope is present on both the original durable receipt and an
+-- exact replay, even when the fence supplied to the replay is stale.
+set local role service_role; set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.e2_replay as select public.world_settlement_commit_mutation(s,j,'17300000-0000-4000-8000-000000000999',p,pg_temp.fp(p),' prior-fence ') result from pg_temp.b;
+reset role;
+select is((select result->>'settlementId' from pg_temp.e2_replay),(select s::text from pg_temp.b),'replay echoes requested settlement id');
+select is((select result->>'jobId' from pg_temp.e2_replay),(select j::text from pg_temp.b),'replay echoes requested job id');
+select is((select result->>'proposalFingerprint' from pg_temp.e2_replay),pg_temp.fp((select p from pg_temp.b)),'replay echoes exact proposal fingerprint');
+select is((select result->>'publicDigest' from pg_temp.e2_replay),'prior-fence','replay trims and echoes public digest');
+set local role service_role; set local request.jwt.claim.role='service_role';
+select throws_ok(format('select public.world_settlement_commit_mutation(%L,%L,%L,%L::jsonb,%L,%L)','17300000-0000-4000-8000-000000000999',(select j from pg_temp.b),'17300000-0000-4000-8000-000000000999',(select p from pg_temp.b),pg_temp.fp((select p from pg_temp.b)),'prior-fence'),'PT409',null,'replay rejects a job paired with another settlement before core receipt lookup');
+reset role;
+grant select on pg_temp.b to authenticated;
+set local role authenticated; set local request.jwt.claim.role='authenticated';
+select throws_ok(format('select public.world_settlement_commit_mutation(%L,%L,%L,%L::jsonb,%L,%L)',(select s from pg_temp.b),(select j from pg_temp.b),(select f from pg_temp.b),(select p from pg_temp.b),pg_temp.fp((select p from pg_temp.b)),'prior-fence'),'42501',null,'public mutation wrapper remains service-only');
+select throws_ok(format('select private.world_settlement_commit_mutation_core(%L,%L,%L,%L::jsonb,%L,%L)',(select s from pg_temp.b),(select j from pg_temp.b),(select f from pg_temp.b),(select p from pg_temp.b),pg_temp.fp((select p from pg_temp.b)),'prior-fence'),'42501',null,'authenticated callers cannot execute the private mutation core');
+reset role;
+
 select * from finish();
 rollback;

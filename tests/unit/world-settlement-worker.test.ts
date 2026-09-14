@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { type SettlementWorkerClient } from '$lib/server/evolving-world/settlement-worker';
 import { drainWorldSettlementQueue, runSettlementClaim, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
 import { parseSettlementClaim } from '$lib/server/evolving-world/settlement-contracts';
+import { fingerprintMutationProposal } from '$lib/game/evolving-world';
 import { createSettlementProvider } from '$lib/server/evolving-world/provider';
 import { fixtureProvider } from '../helpers/world-settlement-provider';
 
 const id = (tail: string) => `11111111-1111-4111-8111-${tail.padStart(12, '0')}`;
 const proposal = { rulesVersion:'evolving-world-v1', evidenceIds:['evidence-1'], salience:'meaningful', dimensionChanges:[], entryOperations:[], beliefOperations:[], causalExplanation:'An observed event supports no immediate profile change.', questChanges:[], worldEffects:[] };
 const digest = { summary:'The tavern rests quietly.', journalEntries:['No new world changes were committed.'], discoveredEntityIds:[] };
-function claim(checkpoints: unknown[] = [], leaseUntil = new Date(Date.now() + 120_000).toISOString()) { return { settlementId:id('1'), jobId:id('2'), fence:id('3'), kind:'resident', ordinal:3, attempt:1, leaseUntil, inputFingerprint:'a'.repeat(64), inputVersion:'world-v1', inputSnapshot:{dayNumber:1, publicEntityIds:['town-square']}, jobInputVersion:'world-v1', jobInputSnapshot:{ evolution:{ schema:{version:'personality-schema-v1',dimensions:[{key:'resolve',label:'Resolve',negativeAnchor:'yielding',positiveAnchor:'unyielding',initialValue:0,volatility:1,core:false}],collections:[]}, profile:{dimensions:{resolve:0},entries:[]}, capability:{version:'v1',allowedActions:[],allowedApproaches:[],allowedWorldEffects:[],allowedTargetKinds:[],socialCapabilities:[],irreversibleEffects:[]}, worldSnapshot:{currentDay:1,entityKinds:{lira:'npc'},activeQuestIds:[],authorizedIrreversibleEffects:[]}, pressureByDimension:{resolve:0}, authorizedEvidence:[{id:'evidence-1',kind:'dialogue',happenedOnDay:1,sequence:2,sourceFingerprint:'a'.repeat(64),salience:'meaningful',summary:'The keeper promised a safe place to rest.'}] } }, checkpoints }; }
+function committedReceipt(args: Record<string, unknown>, outcome: 'pressure_only' | 'roll_failed' | 'changed' = 'pressure_only') { return {data:{status:'completed',rulesVersion:'evolving-world-v1',outcome,settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:args.p_proposal_fingerprint,publicDigest:args.p_public_digest},error:null}; }
+function claim(checkpoints: unknown[] = [], leaseUntil = new Date(Date.now() + 120_000).toISOString()) { return { settlementId:id('1'), jobId:id('2'), fence:id('3'), kind:'resident', ordinal:3, attempt:1, leaseUntil, inputFingerprint:'a'.repeat(64), inputVersion:'world-v1', inputSnapshot:{dayNumber:1, publicEntityIds:['town-square']}, jobInputVersion:'world-v1', jobInputSnapshot:{ evolution:{ residentId:id('10'),npcId:id('11'),profileRevision:1,schema:{version:'personality-schema-v1',dimensions:[{key:'resolve',label:'Resolve',negativeAnchor:'yielding',positiveAnchor:'unyielding',initialValue:0,volatility:1,core:false}],collections:[]}, profile:{dimensions:{resolve:0},entries:[]}, capability:{version:'v1',allowedActions:[],allowedApproaches:[],allowedWorldEffects:[],allowedTargetKinds:[],socialCapabilities:[],irreversibleEffects:[]}, worldSnapshot:{currentDay:1,entityKinds:{lira:'npc'},activeQuestIds:[],authorizedIrreversibleEffects:[]}, pressureByDimension:{resolve:0}, authorizedEvidence:[{id:'evidence-1',kind:'dialogue',happenedOnDay:1,sequence:2,sourceFingerprint:'a'.repeat(64),salience:'meaningful',summary:'The keeper promised a safe place to rest.'}] } }, checkpoints }; }
 function client(overrides: Partial<Record<string, unknown>> = {}) { const calls:Array<{name:string;args:Record<string,unknown>}> = []; const api: SettlementWorkerClient = { async rpc(name,args={}) { calls.push({name,args}); const entry=overrides[name]; if (typeof entry === 'function') return (entry as (args:Record<string,unknown>)=>unknown)(args) as any; if (entry) return {data:entry,error:null}; if(name==='world_settlement_heartbeat')return {data:{leaseUntil:new Date(Date.now()+120_000).toISOString()},error:null}; return {data:{status:'recorded'},error:null}; } }; return { api,calls }; }
 
 describe('world settlement worker', () => {
@@ -16,12 +18,21 @@ describe('world settlement worker', () => {
     expect(() => parseSettlementClaim({ status:'processing', jobId:'nope' })).toThrow();
     const mock=client(); expect(await runSettlementClaim(mock.api, { jobId:'nope' })).toEqual({status:'failed',errorCode:'claim_malformed'}); expect(mock.calls).toHaveLength(0);
   });
-  it('accepts a proposal, checkpoints it privately, and records only a safe result', async () => {
-    const mock=client(); const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
-    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'no_changes'});
+  it('atomically commits an accepted resident proposal with its canonical fingerprint and digest', async () => {
+    const mock=client({world_settlement_commit_mutation:(args:Record<string,unknown>)=>committedReceipt(args)}); const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
+    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'pressure_only'});
     expect(provider.calls).toEqual(['proposer','critic','digest']);
+    const commit=mock.calls.find((call)=>call.name==='world_settlement_commit_mutation');
+    expect(commit?.args).toMatchObject({p_settlement_id:id('1'),p_job_id:id('2'),p_fence:id('3'),p_proposal:proposal,p_proposal_fingerprint:await fingerprintMutationProposal(proposal),p_public_digest:'The tavern rests quietly. No new world changes were committed.'});
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
+  });
+  it('safely skips non-resident jobs without provider work or mutation commits', async () => {
+    const raw=claim() as any; raw.kind='canon';
+    const mock=client(); const provider=fixtureProvider({});
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'skipped'});
+    expect(provider.calls).toEqual([]);
     expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
-    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_complete');
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_commit_mutation');
   });
   it('allows one repair and rejects a final repair request', async () => {
     const mock=client(); const provider=fixtureProvider({proposer:proposal,critic:{outcome:'repair',rationale:'clarify',instructions:['Keep it bounded.']},repair:proposal,final_critic:{outcome:'repair',rationale:'still wrong',instructions:['no']}});
@@ -29,11 +40,23 @@ describe('world settlement worker', () => {
     expect(provider.calls).toEqual(['proposer','critic','repair','final_critic']);
   });
   it('reuses valid checkpoint outputs without making duplicate provider calls', async () => {
-    const mock=client(); const provider=fixtureProvider({digest}); const checkpoints=[
+    const mock=client({world_settlement_commit_mutation:(args:Record<string,unknown>)=>committedReceipt(args)}); const provider=fixtureProvider({digest}); const checkpoints=[
       {stage:'proposer',payload:{proposal},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},
       {stage:'critic',payload:{decision:{outcome:'accept',rationale:'supported',instructions:[]}},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')}
     ];
     expect(await runSettlementClaim(mock.api, claim(checkpoints), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed'}); expect(provider.calls).toEqual(['digest']);
+  });
+  it('replays a prior-fence accepted checkpoint and exact digest through one commit without provider calls', async () => {
+    const mock=client({world_settlement_commit_mutation:(args:Record<string,unknown>)=>committedReceipt(args)}); const checkpoints=[
+      {stage:'proposer',payload:{proposal},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},
+      {stage:'critic',payload:{decision:{outcome:'accept',rationale:'supported',instructions:[]}},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},
+      {stage:'validated',payload:{accepted:true,proposal},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},
+      {stage:'digest',payload:{digest},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')}
+    ];
+    const provider=fixtureProvider({});
+    expect(await runSettlementClaim(mock.api, claim(checkpoints), {provider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'pressure_only'});
+    expect(provider.calls).toEqual([]);
+    expect(mock.calls.filter((call)=>call.name==='world_settlement_commit_mutation')).toHaveLength(1);
   });
   it('rejects malformed model output through a safe result without advancing mechanics', async () => {
     const mock=client(); const provider=fixtureProvider({proposer:{not:'a proposal'}});
@@ -74,6 +97,73 @@ describe('world settlement worker', () => {
     const provider={ async generate() { await new Promise((resolve)=>setTimeout(resolve,1_050)); return {value:proposal,model:'fixture',usage:{input:1,output:1},durationMs:1,promptVersion:'v'}; } };
     expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:1})).toMatchObject({status:'lease_lost'});
     expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
+  });
+  it('returns lease_lost after a stale commit without calling safe completion or failure', async () => {
+    const mock=client({world_settlement_commit_mutation:()=>({data:null,error:{message:'Stale settlement fence'}})});
+    const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
+    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'lease_lost'});
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_fail');
+  });
+  it('returns commit_unknown after an ordinary commit transport failure without attempting a safe result or failure finalization', async () => {
+    const mock=client({world_settlement_commit_mutation:()=>({data:null,error:{message:'Mutation receipt write failed'}})});
+    const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
+    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'failed',errorCode:'commit_unknown'});
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_fail');
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
+  });
+  it.each([
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,outcome:'invented'}),
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,rulesVersion:'wrong-version'}),
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,status:'pending'}),
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,settlementId:id('99')}),
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,jobId:id('99')}),
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,proposalFingerprint:'b'.repeat(64)}),
+    (args:Record<string,unknown>) => ({...committedReceipt(args).data,publicDigest:'other digest'})
+  ])('returns commit_unknown for malformed or mismatched commit receipts without a safe result: %o', async (receiptFor) => {
+    const mock=client({world_settlement_commit_mutation:(args:Record<string,unknown>)=>({data:receiptFor(args),error:null})});
+    const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
+    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'failed',errorCode:'commit_unknown'});
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_fail');
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
+  });
+  it.each([['residentId','not-a-uuid'],['npcId','not-a-uuid'],['profileRevision',0],['profileRevision',1.5]])('rejects malformed frozen %s without committing', async (field,value) => {
+    const raw=claim() as any; raw.jobInputSnapshot.evolution[field]=value;
+    const mock=client(); const provider=fixtureProvider({});
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual([]);
+    expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_commit_mutation');
+  });
+  it('rejects an evolution envelope with unrecognized keys before provider work', async () => {
+    const raw=claim() as any; raw.jobInputSnapshot.evolution.untrusted='value';
+    const mock=client(); const provider=fixtureProvider({});
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual([]);
+    expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
+  });
+  it('rejects corrupt frozen evidence fingerprints before provider work', async () => {
+    const raw=claim() as any; raw.jobInputSnapshot.evolution.authorizedEvidence[0].sourceFingerprint='not-a-fingerprint';
+    const mock=client(); const provider=fixtureProvider({});
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual([]);
+    expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
+  });
+  it.each([
+    (evolution:any) => { evolution.schema.dimensions=[]; },
+    (evolution:any) => { evolution.profile.dimensions.resolve=101; },
+    (evolution:any) => { evolution.capability.allowedWorldEffects=['invented_effect']; },
+    (evolution:any) => { evolution.capability.allowedActions=['arbitrary']; },
+    (evolution:any) => { evolution.worldSnapshot.entityKinds.lira='script'; },
+    (evolution:any) => { evolution.worldSnapshot.currentDay=0; },
+    (evolution:any) => { evolution.pressureByDimension.resolve=1_000_001; }
+  ])('rejects invalid frozen contracts before provider work', async (mutate) => {
+    const raw=claim() as any; mutate(raw.jobInputSnapshot.evolution);
+    const mock=client(); const provider=fixtureProvider({});
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual([]);
+    expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
+    expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_commit_mutation');
   });
   it('fails and yields its lease after the bounded provider deadline', async () => {
     const mock=client(); const provider={ async generate(_stage:unknown,_payload:unknown,signal:AbortSignal) { await new Promise<void>((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true})); throw new Error('unreachable'); } };

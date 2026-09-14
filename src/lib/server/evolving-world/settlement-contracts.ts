@@ -1,4 +1,8 @@
-import { SALIENCE_BANDS, type BeliefOperation, type CapabilityEnvelope, type EvolutionEvidenceKind, type PersonalityProfile, type PersonalitySchema, type SalienceBand, type WorldValidationSnapshot } from '$lib/game/evolving-world';
+import {
+  SALIENCE_BANDS, WORLD_ENTITY_KINDS, primitiveRegistry,
+  validatePersonalityProfile, validatePersonalitySchema,
+  type BeliefOperation, type CapabilityEnvelope, type EvolutionEvidenceKind, type PersonalityProfile, type PersonalitySchema, type SalienceBand, type WorldEntityKind, type WorldValidationSnapshot
+} from '$lib/game/evolving-world';
 
 export const SETTLEMENT_PROMPT_VERSION = 'world-settlement-v1' as const;
 export const SETTLEMENT_STAGES = ['proposer', 'critic', 'repair', 'final_critic', 'digest', 'validated'] as const;
@@ -68,23 +72,96 @@ export function parseSettlementClaim(value: unknown): SettlementClaim | IdleClai
 }
 
 export type AuthorizedEvidence = { id: string; kind: EvolutionEvidenceKind; happenedOnDay: number; sequence: number; sourceFingerprint: string; salience: SalienceBand; summary: string };
-export type FrozenEvolutionContext = { schema: PersonalitySchema; profile: PersonalityProfile; capability: CapabilityEnvelope; worldSnapshot: WorldValidationSnapshot; pressureByDimension: Record<string, number>; authorizedEvidence: AuthorizedEvidence[] };
+export type FrozenEvolutionContext = {
+  residentId: string;
+  npcId: string;
+  profileRevision: number;
+  schema: PersonalitySchema;
+  profile: PersonalityProfile;
+  capability: CapabilityEnvelope;
+  worldSnapshot: WorldValidationSnapshot;
+  pressureByDimension: Record<string, number>;
+  authorizedEvidence: AuthorizedEvidence[];
+};
+const evolutionKeys = new Set(['authorizedEvidence', 'capability', 'npcId', 'pressureByDimension', 'profile', 'profileRevision', 'residentId', 'schema', 'worldSnapshot']);
+const capabilityKeys = new Set(['version', 'allowedActions', 'allowedApproaches', 'allowedWorldEffects', 'allowedTargetKinds', 'socialCapabilities', 'irreversibleEffects']);
+const worldSnapshotKeys = new Set(['currentDay', 'entityKinds', 'activeQuestIds', 'authorizedIrreversibleEffects']);
+const irreversibleEffectKeys = new Set(['effectKey', 'targetEntityId', 'criticApproved', 'visibleSinceDay']);
+const entityRef = /^(?:[a-z][a-z0-9_-]{1,127}|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+function exactObjectKeys(value: Record<string, unknown>, keys: Set<string>): boolean { return Object.keys(value).length === keys.size && Object.keys(value).every((key) => keys.has(key)); }
+function stringList(value: unknown, limit: number): value is string[] { return Array.isArray(value) && value.length <= limit && value.every((entry) => string(entry, 128)) && new Set(value).size === value.length; }
+function schemaAndProfileAreValid(schema: Record<string, unknown>, profile: Record<string, unknown>): boolean {
+  if (!exactObjectKeys(schema, new Set(['version', 'dimensions', 'collections'])) || !Array.isArray(schema.dimensions) || !Array.isArray(schema.collections)
+    || !exactObjectKeys(profile, new Set(['dimensions', 'entries'])) || !object(profile.dimensions) || !Array.isArray(profile.entries)) return false;
+  if (!schema.dimensions.every(object) || !schema.collections.every(object) || !profile.entries.every(object)) return false;
+  const typedSchema = schema as unknown as PersonalitySchema;
+  const typedProfile = profile as unknown as PersonalityProfile;
+  return validatePersonalitySchema(typedSchema).length === 0 && validatePersonalityProfile(typedProfile, typedSchema).length === 0;
+}
+function capabilityIsValid(value: Record<string, unknown>): boolean {
+  if (!exactObjectKeys(value, capabilityKeys) || !string(value.version, 128)
+    || !stringList(value.allowedActions, 16) || !stringList(value.allowedApproaches, 16) || !stringList(value.allowedWorldEffects, 16)
+    || !stringList(value.allowedTargetKinds, 16) || !stringList(value.socialCapabilities, 16) || !Array.isArray(value.irreversibleEffects) || value.irreversibleEffects.length > 16) return false;
+  if (!value.allowedActions.every((entry) => primitiveRegistry.quest.actions.includes(entry))
+    || !value.allowedApproaches.every((entry) => primitiveRegistry.quest.approaches.includes(entry))
+    || !value.allowedWorldEffects.every((entry) => primitiveRegistry.worldEffects.some((effect) => effect.kind === entry))
+    || !value.allowedTargetKinds.every((entry) => WORLD_ENTITY_KINDS.includes(entry as WorldEntityKind))
+    || !value.socialCapabilities.every((entry) => primitiveRegistry.socialCapabilities.some((capability) => capability.key === entry))) return false;
+  return value.irreversibleEffects.every((raw) => {
+    if (!object(raw) || !exactObjectKeys(raw, new Set(['effectKey', 'targetKinds'])) || !string(raw.effectKey, 128) || !stringList(raw.targetKinds, 16)) return false;
+    const effect = primitiveRegistry.worldEffects.find((candidate) => candidate.kind === raw.effectKey);
+    return !!effect && effect.irreversible && raw.targetKinds.every((kind) => effect.targetKinds.includes(kind as WorldEntityKind));
+  });
+}
+function worldSnapshotIsValid(value: Record<string, unknown>): boolean {
+  if (!exactObjectKeys(value, worldSnapshotKeys) || !Number.isSafeInteger(value.currentDay) || (value.currentDay as number) < 1 || (value.currentDay as number) > 1_000_000
+    || !object(value.entityKinds) || Object.keys(value.entityKinds).length > 256 || !stringList(value.activeQuestIds, 64)
+    || !Array.isArray(value.authorizedIrreversibleEffects) || value.authorizedIrreversibleEffects.length > 64) return false;
+  if (!Object.entries(value.entityKinds).every(([id, kind]) => entityRef.test(id) && WORLD_ENTITY_KINDS.includes(kind as WorldEntityKind))) return false;
+  const entityKinds = value.entityKinds as Record<string, unknown>;
+  return value.activeQuestIds.every((id) => entityRef.test(id)) && value.authorizedIrreversibleEffects.every((raw) => {
+    if (!object(raw) || !exactObjectKeys(raw, irreversibleEffectKeys) || !string(raw.effectKey, 128) || !entityRef.test(String(raw.targetEntityId))
+      || typeof raw.criticApproved !== 'boolean' || !Number.isSafeInteger(raw.visibleSinceDay) || (raw.visibleSinceDay as number) < 1 || (raw.visibleSinceDay as number) > (value.currentDay as number)) return false;
+    const effect = primitiveRegistry.worldEffects.find((candidate) => candidate.kind === raw.effectKey);
+    return !!effect && effect.irreversible && effect.targetKinds.includes(entityKinds[raw.targetEntityId as string] as WorldEntityKind);
+  });
+}
 /** The settlement input is a frozen database snapshot. This deliberately accepts only the explicitly versioned evolution envelope. */
 export function frozenEvolutionContext(snapshot: Record<string, unknown>): FrozenEvolutionContext | null {
   const candidate = object(snapshot.evolution) ? snapshot.evolution : snapshot;
-  if (!object(candidate.schema) || !object(candidate.profile) || !object(candidate.capability) || !object(candidate.worldSnapshot)
+  if (!exactObjectKeys(candidate, evolutionKeys)
+    || !uuid.test(String(candidate.residentId)) || !uuid.test(String(candidate.npcId)) || !Number.isSafeInteger(candidate.profileRevision) || (candidate.profileRevision as number) < 1
+    || !object(candidate.schema) || !object(candidate.profile) || !object(candidate.capability) || !object(candidate.worldSnapshot)
     || !object(candidate.pressureByDimension) || !Array.isArray(candidate.authorizedEvidence) || candidate.authorizedEvidence.length < 1 || candidate.authorizedEvidence.length > 64) return null;
-  if (!Object.values(candidate.pressureByDimension).every((value) => Number.isSafeInteger(value))) return null;
+  const schema = candidate.schema as Record<string, unknown>;
+  const profile = candidate.profile as Record<string, unknown>;
+  const capability = candidate.capability as Record<string, unknown>;
+  const worldSnapshot = candidate.worldSnapshot as Record<string, unknown>;
+  const pressureByDimension = candidate.pressureByDimension as Record<string, unknown>;
+  if (!schemaAndProfileAreValid(schema, profile) || !capabilityIsValid(capability) || !worldSnapshotIsValid(worldSnapshot)
+    || !Object.values(pressureByDimension).every((value) => Number.isSafeInteger(value) && Math.abs(value as number) <= 1_000_000)
+    || Object.keys(pressureByDimension).length !== (schema.dimensions as unknown[]).length
+    || !Object.keys(pressureByDimension).every((key) => (schema.dimensions as Array<Record<string, unknown>>).some((dimension) => dimension.key === key))) return null;
   const authorizedEvidence: AuthorizedEvidence[] = [];
   for (const raw of candidate.authorizedEvidence) {
     if (!object(raw) || !Object.keys(raw).every((key) => ['id','kind','happenedOnDay','sequence','sourceFingerprint','salience','summary'].includes(key))
       || !string(raw.id,128) || !['dialogue','quest_outcome','world_event','hospitality_reaction','social_encounter','gossip'].includes(String(raw.kind))
       || !Number.isInteger(raw.happenedOnDay) || (raw.happenedOnDay as number) < 0 || !Number.isInteger(raw.sequence) || (raw.sequence as number) < 0
-      || !string(raw.sourceFingerprint,128) || !SALIENCE_BANDS.includes(raw.salience as SalienceBand) || !string(raw.summary,1_000)) return null;
+      || !fingerprint.test(String(raw.sourceFingerprint)) || !SALIENCE_BANDS.includes(raw.salience as SalienceBand) || !string(raw.summary,1_000)) return null;
     authorizedEvidence.push({ id:raw.id as string,kind:raw.kind as EvolutionEvidenceKind,happenedOnDay:raw.happenedOnDay as number,sequence:raw.sequence as number,sourceFingerprint:raw.sourceFingerprint as string,salience:raw.salience as SalienceBand,summary:raw.summary as string });
   }
   if (new Set(authorizedEvidence.map((entry)=>entry.id)).size !== authorizedEvidence.length) return null;
-  return { ...(candidate as unknown as Omit<FrozenEvolutionContext, 'authorizedEvidence'>), authorizedEvidence };
+  return {
+    residentId: candidate.residentId as string,
+    npcId: candidate.npcId as string,
+    profileRevision: candidate.profileRevision as number,
+    schema: schema as unknown as PersonalitySchema,
+    profile: profile as unknown as PersonalityProfile,
+    capability: capability as unknown as CapabilityEnvelope,
+    worldSnapshot: worldSnapshot as unknown as WorldValidationSnapshot,
+    pressureByDimension: pressureByDimension as Record<string, number>,
+    authorizedEvidence
+  };
 }
 
 export type CriticOutput = { outcome: 'accept' | 'reject' | 'repair'; rationale: string; instructions: string[] };
