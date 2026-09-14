@@ -67,7 +67,7 @@ describe('AI observability boundary', () => {
   });
 
   it('allows the fixed procedural-world lifecycle labels only', () => {
-    for (const stage of ['procedural_world_proposer','procedural_world_critic','procedural_world_repair','procedural_world_final_critic','procedural_world_validate','procedural_world_commit','procedural_world_fallback'] as const) {
+    for (const stage of ['procedural_world_proposer','procedural_world_critic','procedural_world_repair','procedural_world_final_critic','procedural_world_validate','procedural_world_commit','procedural_world_fallback','procedural_world_promotion'] as const) {
       expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage,status:'completed',attempt:3})).not.toBeNull();
     }
     expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'procedural_world_payload' as any,status:'completed',attempt:3})).toBeNull();

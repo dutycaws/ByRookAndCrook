@@ -2860,6 +2860,10 @@ export type Database = {
         }
         Returns: Json
       }
+      world_discover_procedural_npc_promotions: {
+        Args: { p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
       world_generated_gameplay_availability: {
         Args: { p_save_id: string }
         Returns: Json
@@ -2899,6 +2903,10 @@ export type Database = {
           p_save_id: string
           p_warning_id: string
         }
+        Returns: Json
+      }
+      world_retry_procedural_npc_promotion: {
+        Args: { p_job_id: string; p_settlement_id: string }
         Returns: Json
       }
       world_runtime_art_accept: {

@@ -134,6 +134,15 @@ function proceduralWorldCommitReplay(value: unknown, expected: { settlementId: s
   return receipt.replayed;
 }
 
+function proceduralWorldPromotionStatus(value: unknown): 'completed' | 'reused' | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const receipt=value as Record<string, unknown>;
+  if ((receipt.status !== 'completed' && receipt.status !== 'reused')
+    || !Number.isSafeInteger(receipt.promotedCount) || (receipt.promotedCount as number) < 0 || (receipt.promotedCount as number) > 8) return null;
+  if ((receipt.status === 'completed') !== ((receipt.promotedCount as number) > 0)) return null;
+  return receipt.status;
+}
+
 async function fingerprintProceduralWorldProposal(proposal: unknown, context: NonNullable<ReturnType<typeof parseFrozenProceduralWorldContext>>): Promise<string | null> {
   const canonical=canonicalizeProceduralWorldProposal(proposal,context); if (!canonical) return null;
   const digest=await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical));
@@ -433,7 +442,23 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
             return {status:'failed',errorCode:'commit_unknown'};
           }
           await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:replayed?'reused':'completed',attempt:claim.attempt,...(replayed ? {} : {durationMs:elapsed(commitStarted)})});
-          return {status:'completed',kind:'procedural_world'};
+          const promotionStarted=now();
+          try {
+            const promotion=proceduralWorldPromotionStatus(await rpc(client,'world_discover_procedural_npc_promotions',{
+              p_settlement_id:claim.settlementId,p_job_id:claim.jobId
+            }));
+            if (!promotion) throw new Error('Procedural NPC promotion receipt was malformed.');
+            await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_promotion',status:promotion,attempt:claim.attempt,...(promotion==='reused' ? {} : {durationMs:elapsed(promotionStarted)})});
+            return {status:'completed',kind:'procedural_world'};
+          } catch {
+            await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_promotion',status:'failed',attempt:claim.attempt,durationMs:elapsed(promotionStarted),errorCode:'promotion_failed'});
+            // The canonical command is already durable. Requeue only this exact
+            // receipt-backed job, then let its next claim replay without provider work.
+            try {
+              await rpc(client,'world_retry_procedural_npc_promotion',{p_settlement_id:claim.settlementId,p_job_id:claim.jobId});
+            } catch { /* A concurrent claimer may have already taken the retry. */ }
+            return {status:'failed',errorCode:'promotion_failed'};
+          }
         } catch (cause) {
           const code=isLeaseError(cause as Error) ? 'lease_lost' : /PT409|conflict/i.test(String(cause)) ? 'commit_conflict' : 'commit_unknown';
           await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:code});

@@ -23,7 +23,7 @@ export const WORLD_SETTLEMENT_AI_STAGES = [
   'social_encounter_fallback',
   'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair',
   'procedural_world_final_critic', 'procedural_world_validate', 'procedural_world_commit', 'lease',
-  'procedural_world_fallback'
+  'procedural_world_fallback', 'procedural_world_promotion'
 ] as const;
 
 export type DialogueAiStage = (typeof DIALOGUE_AI_STAGES)[number];
@@ -70,7 +70,7 @@ const permittedErrors = new Set([
   'provider_unavailable', 'provider_timeout', 'provider_malformed', 'provider_failed',
   'worker_failed', 'claim_malformed', 'lease_unavailable', 'lease_lost', 'commit_unknown',
   'validation_rejected', 'commit_rejected', 'commit_conflict',
-  'context_budget', 'budget', 'structure', 'consistency', 'state_changed', 'internal_error'
+  'context_budget', 'budget', 'structure', 'consistency', 'state_changed', 'promotion_failed', 'internal_error'
 ]);
 const providerStages = new Set<string>([
   ...DIALOGUE_AI_STAGES,
