@@ -184,8 +184,8 @@ select is((
   select array_agg(job_kind order by ordinal)
   from private.world_settlement_jobs
   where settlement_id = (select id from pg_temp.settlement)
-), array['snapshot', 'canon', 'resident', 'resident', 'quest', 'effects', 'news', 'finalize', 'social_encounter']::text[],
-  'two deterministic resident jobs and one attributable social encounter are queued in order');
+), array['snapshot', 'canon', 'resident', 'resident', 'quest', 'effects', 'news', 'finalize', 'social_encounter', 'procedural_world']::text[],
+  'resident, social, and procedural jobs are queued in deterministic order');
 select is((
   select count(*) from private.world_settlement_jobs
   where settlement_id = (select id from pg_temp.settlement) and job_kind = 'resident'
@@ -355,8 +355,8 @@ select is((
   select array_agg(job_kind order by ordinal)
   from private.world_settlement_jobs
   where settlement_id = (select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.quiet_close)
-), array['snapshot', 'canon', 'quest', 'effects', 'news', 'finalize']::text[],
-  'no-evidence close queues static work without inventing resident evidence');
+), array['snapshot', 'canon', 'quest', 'effects', 'news', 'finalize', 'procedural_world']::text[],
+  'no-evidence close queues static and procedural work without inventing resident evidence');
 
 select ok(not has_function_privilege(
   'authenticated', 'public.world_settlement_enqueue(uuid,uuid,bigint,jsonb,text)', 'execute'

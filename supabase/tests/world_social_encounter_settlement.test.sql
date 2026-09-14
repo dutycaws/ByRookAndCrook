@@ -15,9 +15,9 @@ select ok(position('participantResidentIds' in pg_get_functiondef('public.world_
   and position('privateCommunicativeIntents' in pg_get_functiondef('public.world_settlement_commit_social_encounter(uuid,uuid,uuid,jsonb)'::regprocedure))>0
   and position('gossipBeliefAdditions' in pg_get_functiondef('public.world_settlement_commit_social_encounter(uuid,uuid,uuid,jsonb)'::regprocedure))>0,
   'commit validates the exact ten-field SocialEncounterProposal names');
-select ok(position('world_day_close_evidence' in pg_get_functiondef('public.advance_tavern_day(uuid,uuid,bigint)'::regprocedure))>0
-  and position('world_settlement_attempts' in pg_get_functiondef('public.advance_tavern_day(uuid,uuid,bigint)'::regprocedure))>0,
-  'day-close wrapper uses attributable evidence and avoids attempted settlement insertion');
+select ok(position('world_day_close_evidence' in pg_get_functiondef('private.advance_tavern_day_before_procedural_world_v1(uuid,uuid,bigint)'::regprocedure))>0
+  and position('world_settlement_attempts' in pg_get_functiondef('private.advance_tavern_day_before_procedural_world_v1(uuid,uuid,bigint)'::regprocedure))>0,
+  'the social day-close layer uses attributable evidence and avoids attempted settlement insertion');
 select ok(position('world_public_discoveries' in pg_get_functiondef('public.world_settlement_commit_social_encounter(uuid,uuid,uuid,jsonb)'::regprocedure))=0,
   'social completion never projects private exchanges as public news');
 select throws_ok($$insert into private.world_social_encounter_templates(template_key) values('invented-template')$$,
