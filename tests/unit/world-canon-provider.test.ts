@@ -34,6 +34,7 @@ describe('world canon event provider stages',()=>{
     expect(SETTLEMENT_PROVIDER_CALL_BUDGETS).toEqual({
       resident:{maximum:5,stages:['proposer','critic','repair','final_critic','digest']},
       canon:{maximum:4,accepted:2,stages:['canon_proposer','canon_critic','canon_repair','canon_final_critic']},
+      social_encounter:{maximum:4,ordinary:2,stages:['social_encounter_proposer','social_encounter_critic','social_encounter_repair','social_encounter_final_critic']},
       news:{maximum:0,stages:[]}
     });
     expect(SETTLEMENT_PROVIDER_CALL_BUDGETS.canon.stages).not.toContain('digest');
