@@ -17,7 +17,10 @@ export const DIALOGUE_AI_STAGES = ['investigate0', 'investigate1', 'deliberate',
 export const WORLD_SETTLEMENT_AI_STAGES = [
   'proposer', 'critic', 'repair', 'final_critic', 'digest', 'validated',
   'canon_proposer', 'canon_critic', 'canon_repair', 'canon_final_critic',
-  'canon_validate', 'canon_commit', 'news_aggregate', 'news_commit', 'safe_fallback'
+  'canon_validate', 'canon_commit', 'news_aggregate', 'news_commit', 'safe_fallback',
+  'social_encounter_proposer', 'social_encounter_critic', 'social_encounter_repair',
+  'social_encounter_final_critic', 'social_encounter_validate', 'social_encounter_commit',
+  'social_encounter_fallback'
 ] as const;
 
 export type AiObservabilityEvent = Readonly<{

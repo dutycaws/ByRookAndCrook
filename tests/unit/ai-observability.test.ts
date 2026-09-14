@@ -51,6 +51,21 @@ describe('AI observability boundary', () => {
     expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'canon_payload',status:'completed',attempt:1})).toBeNull();
   });
 
+  it('allows only fixed social encounter lifecycle labels without private metadata', () => {
+    for (const stage of ['social_encounter_proposer','social_encounter_critic','social_encounter_repair','social_encounter_final_critic','social_encounter_validate','social_encounter_commit','social_encounter_fallback']) {
+      expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage,status:'completed',attempt:1})).not.toBeNull();
+    }
+    const event=createAiObservabilityEvent({
+      correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'social_encounter_proposer',status:'completed',attempt:1,
+      model:'fixture-model',tokenUsage:{input:3,output:2},context:{private:'hidden'},proposal:'private exchange',participantIds:['one','two'],fingerprint:'secret'
+    } as unknown as Parameters<typeof createAiObservabilityEvent>[0]);
+    expect(event).toMatchObject({stage:'social_encounter_proposer',model:'fixture-model',tokenUsage:{input:3,output:2}});
+    expect(JSON.stringify(event)).not.toContain('private exchange');
+    expect(JSON.stringify(event)).not.toContain('hidden');
+    expect(JSON.stringify(event)).not.toContain('secret');
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'social_encounter_private_exchange',status:'completed',attempt:1})).toBeNull();
+  });
+
   it('serializes only the exact validated event through the normal local sink', () => {
     const written:string[]=[]; const original=console.info; console.info=(value:unknown)=>{written.push(String(value));};
     try {

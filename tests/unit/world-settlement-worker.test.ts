@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { type SettlementWorkerClient } from '$lib/server/evolving-world/settlement-worker';
 import { drainWorldSettlementQueue, runSettlementClaim, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
-import { parseSettlementClaim } from '$lib/server/evolving-world/settlement-contracts';
-import { fingerprintMutationProposal } from '$lib/game/evolving-world';
+import { parseSettlementClaim, SettlementProviderError } from '$lib/server/evolving-world/settlement-contracts';
+import { fingerprintMutationProposal, fingerprintSocialEncounterProposal } from '$lib/game/evolving-world';
 import { createSettlementProvider } from '$lib/server/evolving-world/provider';
 import { fixtureProvider } from '../helpers/world-settlement-provider';
 
@@ -15,6 +15,13 @@ function client(overrides: Partial<Record<string, unknown>> = {}) { const calls:
 const canonEvent={version:'world-canon-event-v1',kind:'world_event',templateKey:'market-day',participantEntityIds:['lira'],title:'Market day arrives',summary:'Merchants have reached the square.',payload:{template:'market-day',participants:['lira'],visibility:'public' as const}};
 function canonClaim(checkpoints: unknown[] = []) { const raw=claim(checkpoints) as any; raw.kind='canon'; raw.jobInputSnapshot={worldSnapshot:{activeGeneratedEntityCount:0,existingPublicEventReuseKeys:[],registeredTemplateKeys:['market-day'],entityKinds:{lira:'npc'}},privateSentinel:'sk-secret-canon-input'}; return raw; }
 function canonReceipt(args: Record<string,unknown>) { const event=args.p_event as typeof canonEvent; return {data:{status:'completed',rulesVersion:'world-canon-event-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:'ignored',canonicalEventId:id('88'),kind:'world_event',title:event.title,summary:event.summary},error:null}; }
+const socialLira=id('101'); const socialTorvin=id('102'); const socialLiraNpc=id('103'); const socialTorvinNpc=id('104'); const socialBelief=id('105'); const socialFingerprint='b'.repeat(64);
+function socialCapability(socialCapabilities: string[]) { return {version:'v1',allowedActions:[],allowedApproaches:[],allowedWorldEffects:[],allowedTargetKinds:[],socialCapabilities,irreversibleEffects:[]}; }
+function socialResident(residentId:string,npcId:string,socialCapabilities:string[],beliefs:unknown[]=[]) { return {residentId,npcId,profileRevision:1,profile:{dimensions:{},entries:[]},beliefs,edges:[{subjectNpcId:npcId,objectEntityId:npcId===socialLiraNpc ? socialTorvinNpc : socialLiraNpc,axes:{trust:0,affection:0,respect:0,fear:0,obligation:0}}],capability:socialCapability(socialCapabilities)}; }
+function socialContext() { const belief={id:socialBelief,subjectEntityId:socialTorvinNpc,content:'Smoke rose by the northern pass.',confidence:67,provenance:[{sourceKind:'direct_evidence',sourceId:'evidence-smoke'}],originalClaimFingerprint:socialFingerprint,contradictionStatus:'uncontested',state:'active'}; return {version:'social-encounter-v1',templateKey:'road-rumor',participantResidentIds:[socialLira,socialTorvin],publicCanon:{currentDay:4,entityKinds:{[socialLiraNpc]:'npc',[socialTorvinNpc]:'npc'}},authorizedEvidence:[{id:'evidence-smoke',kind:'world_event',sourceFingerprint:socialFingerprint,summary:'Smoke rose by the northern pass.'}],participants:[socialResident(socialLira,socialLiraNpc,['conceal','share_gossip'],[belief]),socialResident(socialTorvin,socialTorvinNpc,[])]}; }
+function socialProposal(publicSummary: string | null = 'Lira and Torvin compared reports by the northern road.') { return {version:'social-encounter-v1',templateKey:'road-rumor',participantResidentIds:[socialLira,socialTorvin],privateCommunicativeIntents:[{speakerResidentId:socialLira,recipientResidentId:socialTorvin,mode:'withhold',message:'Do not mention the smoke to the keeper yet.'}],privateExchangeSummary:'Lira privately asks Torvin to keep their smoke report close.',evidenceIds:['evidence-smoke'],causalExplanation:'The exchange relies only on the frozen smoke report.',relationshipEffects:[{recipientResidentId:socialTorvin,sourceResidentId:socialLira,axis:'trust',delta:1}],gossipBeliefAdditions:[{recipientResidentId:socialTorvin,sourceResidentId:socialLira,sourceBeliefId:socialBelief,sourceEvidenceId:'evidence-smoke',originalClaimFingerprint:socialFingerprint,content:'Smoke rose by the northern pass.',confidence:56,provenance:[{sourceKind:'direct_evidence',sourceId:'evidence-smoke'},{sourceKind:'gossip',sourceId:socialBelief,speakerNpcId:socialLiraNpc}]}],publicSummary}; }
+function socialClaim(checkpoints: unknown[] = []) { const raw=claim(checkpoints) as any; raw.kind='social_encounter'; raw.jobInputVersion='social-encounter-v1'; raw.jobInputSnapshot=socialContext(); return raw; }
+async function socialReceipt(args: Record<string, unknown>) { return {data:{status:'completed',rulesVersion:'social-encounter-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:await fingerprintSocialEncounterProposal(args.p_proposal,socialContext() as any)},error:null}; }
 
 describe('world settlement worker', () => {
   it('strictly rejects malformed claims before any RPC', async () => {
@@ -96,6 +103,66 @@ describe('world settlement worker', () => {
     const checkpoints=[{stage:'proposer',payload:{proposal:canonEvent},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},{stage:'critic',payload:{decision:{outcome:'accept',rationale:'frozen',instructions:[]}},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')}];
     const mock=client({world_settlement_commit_canon:async(args:Record<string,unknown>)=>{const { fingerprintWorldCanonEventProposal }=await import('$lib/game/evolving-world'); const fingerprint=await fingerprintWorldCanonEventProposal(args.p_event,{entityKinds:{lira:'npc'},activeGeneratedEntityCount:0,existingPublicEventReuseKeys:[]}); return {...canonReceipt(args),data:{...(canonReceipt(args).data as object),proposalFingerprint:fingerprint}};}});
     const provider=fixtureProvider({}); expect(await runSettlementClaim(mock.api,canonClaim(checkpoints),{provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'canon'}); expect(provider.calls).toEqual([]);
+  });
+  it('commits one accepted social encounter through the server-only social RPC and records no private content in telemetry', async () => {
+    const events: unknown[]=[];
+    const mock=client({world_settlement_commit_social_encounter:socialReceipt});
+    const provider=fixtureProvider({social_encounter_proposer:socialProposal(),social_encounter_critic:{decision:'accept',instructions:[]}});
+    const payloads:Array<[string, unknown]>=[]; const generate=provider.generate.bind(provider);
+    provider.generate=async(stage,payload,signal)=>{payloads.push([stage,payload]); return generate(stage,payload,signal);};
+    expect(await runSettlementClaim(mock.api,socialClaim(),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'social_encounter'});
+    expect(provider.calls).toEqual(['social_encounter_proposer','social_encounter_critic']);
+    expect(payloads[0][1]).toMatchObject({version:'social-encounter-v1',publicCanon:{currentDay:4}});
+    expect(payloads[1][1]).toMatchObject({context:payloads[0][1],proposal:socialProposal()});
+    expect(Object.keys(payloads[1][1] as object).sort()).toEqual(['context','proposal']);
+    const commit=mock.calls.find((entry)=>entry.name==='world_settlement_commit_social_encounter');
+    expect(commit?.args).toMatchObject({p_settlement_id:id('1'),p_job_id:id('2'),p_fence:id('3'),p_proposal:socialProposal()});
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({stage:'social_encounter_proposer',status:'completed',model:'fixture-model',tokenUsage:{input:1,output:1}}),
+      expect.objectContaining({stage:'social_encounter_critic',status:'completed'}),
+      expect.objectContaining({stage:'social_encounter_validate',status:'completed'}),
+      expect.objectContaining({stage:'social_encounter_commit',status:'completed'})
+    ]));
+    expect(JSON.stringify(events)).not.toContain('Do not mention the smoke');
+    expect(JSON.stringify(events)).not.toContain('Smoke rose by the northern pass');
+  });
+  it('uses at most one social repair and one final critic before committing', async () => {
+    const mock=client({world_settlement_commit_social_encounter:socialReceipt});
+    const provider=fixtureProvider({
+      social_encounter_proposer:socialProposal(),
+      social_encounter_critic:{decision:'repair',instructions:[{code:'public_projection',path:'publicSummary'}]},
+      social_encounter_repair:socialProposal(null),
+      social_encounter_final_critic:{decision:'accept',instructions:[]}
+    });
+    expect(await runSettlementClaim(mock.api,socialClaim(),{provider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'social_encounter'});
+    expect(provider.calls).toEqual(['social_encounter_proposer','social_encounter_critic','social_encounter_repair','social_encounter_final_critic']);
+  });
+  it('reuses valid social checkpoints and avoids duplicate provider work', async () => {
+    const checkpoints=[
+      {stage:'proposer',payload:{proposal:socialProposal()},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},
+      {stage:'critic',payload:{decision:{decision:'accept',instructions:[]}},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')}
+    ];
+    const mock=client({world_settlement_commit_social_encounter:socialReceipt}); const provider=fixtureProvider({}); const events:unknown[]=[];
+    expect(await runSettlementClaim(mock.api,socialClaim(checkpoints),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'social_encounter'});
+    expect(provider.calls).toEqual([]);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'social_encounter_proposer',status:'reused'}),expect.objectContaining({stage:'social_encounter_critic',status:'reused'})]));
+  });
+  it('fails closed into a social safe fallback for invalid, rejected, or unavailable social work', async () => {
+    const invalid=client(); const invalidProvider=fixtureProvider({social_encounter_proposer:{invalid:true}});
+    expect(await runSettlementClaim(invalid.api,socialClaim(),{provider:invalidProvider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'rejected'});
+    expect(invalidProvider.calls).toEqual(['social_encounter_proposer']);
+    expect(invalid.calls.map((entry)=>entry.name)).toContain('world_settlement_safe_result');
+
+    const rejected=client(); const rejectedProvider=fixtureProvider({social_encounter_proposer:socialProposal(),social_encounter_critic:{decision:'reject',instructions:[]}});
+    expect(await runSettlementClaim(rejected.api,socialClaim(),{provider:rejectedProvider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'rejected'});
+    expect(rejected.calls.map((entry)=>entry.name)).toContain('world_settlement_safe_result');
+
+    const unavailable=client(); const unavailableEvents:unknown[]=[]; const unavailableProvider=fixtureProvider({social_encounter_proposer:new SettlementProviderError('provider_unavailable','provider unavailable')});
+    expect(await runSettlementClaim(unavailable.api,socialClaim(),{provider:unavailableProvider,heartbeatMs:99_999,observability:(event)=>{unavailableEvents.push(event);}})).toEqual({status:'completed',kind:'skipped'});
+    expect(unavailable.calls.map((entry)=>entry.name)).toContain('world_settlement_safe_result');
+    expect(unavailable.calls.map((entry)=>entry.name)).not.toContain('world_settlement_commit_social_encounter');
+    expect(unavailableEvents).toEqual(expect.arrayContaining([expect.objectContaining({stage:'social_encounter_fallback',status:'completed',errorCode:'provider_unavailable'})]));
+    expect(JSON.stringify(unavailableEvents)).not.toContain('Do not mention the smoke');
   });
   it('treats a malformed canon receipt as unknown rather than retrying or applying a fallback', async () => {
     const mock=client({world_settlement_commit_canon:{status:'completed',rulesVersion:'world-canon-event-v1'}}); const provider=fixtureProvider({canon_proposer:canonEvent,canon_critic:{outcome:'accept',rationale:'frozen',instructions:[]}});

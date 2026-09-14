@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
-import { fingerprintMutationProposal, fingerprintWorldCanonEventProposal, parseMutationProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
+import { fingerprintMutationProposal, fingerprintSocialEncounterProposal, fingerprintWorldCanonEventProposal, parseFrozenSocialEncounterContext, parseMutationProposal, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
 import type { Database } from '$lib/database.types';
 import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
 import { emitAiObservability, localAiObservabilitySink, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import {
-  CANON_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
+  CANON_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, SOCIAL_ENCOUNTER_CHECKPOINT_STAGE, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
   type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
 } from './settlement-contracts';
 
@@ -24,6 +24,12 @@ function serviceClient(config = runtimeConfig()): SettlementWorkerClient | null 
 }
 function clip(value: string, limit: number): string { return value.replace(/\s+/g, ' ').trim().slice(0, limit); }
 function errorCode(cause: unknown): string { return cause instanceof SettlementProviderError ? cause.code : 'worker_failed'; }
+type SafeFallbackReason = 'validation_rejected' | 'provider_unavailable' | 'provider_malformed' | 'provider_failed' | 'budget' | 'worker_failed';
+function socialFallbackReason(cause: unknown): SafeFallbackReason {
+  const code=errorCode(cause);
+  return ['provider_unavailable','provider_malformed','provider_failed','budget','worker_failed'].includes(code)
+    ? code as SafeFallbackReason : 'worker_failed';
+}
 function isLeaseError(error: { message: string } | null): boolean { return !!error && /stale settlement fence|attempt is not active|lease/i.test(error.message); }
 async function rpc(client: SettlementWorkerClient, name: string, args: Record<string, unknown>): Promise<unknown> {
   const result = await client.rpc(name, args); if (result.error) throw new Error(result.error.message); return result.data;
@@ -111,6 +117,14 @@ function newsCompleted(value: unknown, expected: { settlementId:string; jobId:st
     && typeof receipt.morningNews === 'string' && receipt.morningNews.length > 0 && receipt.morningNews.length <= 500;
 }
 
+function socialEncounterCommitted(value: unknown, expected: { settlementId: string; jobId: string; proposalFingerprint: string }): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const receipt=value as Record<string, unknown>;
+  return receipt.status === 'completed' && receipt.rulesVersion === 'social-encounter-v1'
+    && receipt.settlementId === expected.settlementId && receipt.jobId === expected.jobId
+    && receipt.proposalFingerprint === expected.proposalFingerprint;
+}
+
 /** Runs one fenced job. A validated resident proposal is committed atomically by the server-owned mutation RPC. */
 export async function runSettlementClaim(client: SettlementWorkerClient, rawClaim: unknown, runtime: SettlementRuntime = {}): Promise<SettlementOutcome> {
   let parsed; try { parsed = parseSettlementClaim(rawClaim); } catch { return { status:'failed', errorCode:'claim_malformed' }; }
@@ -124,7 +138,8 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   const now = runtime.now ?? Date.now;
   const elapsed = (started: number) => Math.max(0, Math.min(24 * 60 * 60 * 1_000, Math.round(now() - started)));
   const callBudget = claim.kind === 'canon' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.canon.maximum
-    : claim.kind === 'resident' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.resident.maximum : 0;
+    : claim.kind === 'resident' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.resident.maximum
+      : claim.kind === 'social_encounter' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.social_encounter.maximum : 0;
   const generate = async (stage: ProviderStage, payload: unknown): Promise<ProviderResult> => {
     if (calls >= callBudget) {
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'budget'});
@@ -148,15 +163,16 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   const completeSafely = async (
     kind: 'no_changes' | 'rejected' | 'skipped',
     digest: string,
-    reason?: 'validation_rejected'
+    reason?: SafeFallbackReason,
+    stage: 'safe_fallback' | 'social_encounter_fallback' = 'safe_fallback'
   ): Promise<void> => {
     const started = now();
-    await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'started',attempt:claim.attempt,errorCode:reason});
+    await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'started',attempt:claim.attempt,errorCode:reason});
     try {
       await safeResult(client,claim,kind,digest);
-      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'completed',attempt:claim.attempt,durationMs:elapsed(started),errorCode:reason});
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'completed',attempt:claim.attempt,durationMs:elapsed(started),errorCode:reason});
     } catch (cause) {
-      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'failed',attempt:claim.attempt,durationMs:elapsed(started),errorCode:isLeaseError(cause as Error)?'lease_lost':'commit_unknown'});
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,durationMs:elapsed(started),errorCode:isLeaseError(cause as Error)?'lease_lost':'commit_unknown'});
       throw cause;
     }
   };
@@ -239,6 +255,96 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
         await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:code});
         if (isLeaseError(cause as Error)) return {status:'lease_lost',errorCode:'lease_lost'};
         return {status:'failed',errorCode:dispatched?'commit_unknown':errorCode(cause)};
+      }
+    }
+    if (claim.kind === 'social_encounter') {
+      const context=parseFrozenSocialEncounterContext(claim.jobInputSnapshot);
+      const reject=async(reason:string):Promise<SettlementOutcome> => {
+        await saveCheckpoint(client,claim,'validated',{accepted:false,reason});
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_validate',status:'skipped',attempt:claim.attempt,errorCode:'validation_rejected'});
+        await completeSafely('rejected','The day settled without new world changes.','validation_rejected','social_encounter_fallback');
+        return {status:'completed',kind:'rejected'};
+      };
+      if (!context) return await reject('social_context_missing');
+      try {
+        let rawProposal=checkpoint(claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_proposer)?.proposal;
+        if (rawProposal) {
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_proposer',status:'reused',attempt:claim.attempt});
+        } else {
+          const result=await generate('social_encounter_proposer',context);
+          rawProposal=result.value;
+          await saveCheckpoint(client,claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_proposer,{proposal:rawProposal},result);
+        }
+        let parsedProposal=parseSocialEncounterProposal(rawProposal,context);
+        if (!parsedProposal.ok) return await reject('social_proposal_invalid');
+
+        let rawDecision=checkpoint(claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_critic)?.decision;
+        if (rawDecision) {
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_critic',status:'reused',attempt:claim.attempt});
+        } else {
+          const result=await generate('social_encounter_critic',{context,proposal:parsedProposal.value});
+          rawDecision=result.value;
+          await saveCheckpoint(client,claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_critic,{decision:rawDecision},result);
+        }
+        let decision=parseSocialEncounterCriticDecision(rawDecision);
+        if (!decision || decision.decision === 'reject') return await reject('social_critic_rejected');
+
+        if (decision.decision === 'repair') {
+          let rawRepair=checkpoint(claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_repair)?.proposal;
+          if (rawRepair) {
+            await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_repair',status:'reused',attempt:claim.attempt});
+          } else {
+            const result=await generate('social_encounter_repair',{context,proposal:parsedProposal.value,instructions:decision.instructions});
+            rawRepair=result.value;
+            await saveCheckpoint(client,claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_repair,{proposal:rawRepair},result);
+          }
+          parsedProposal=parseSocialEncounterProposal(rawRepair,context);
+          if (!parsedProposal.ok) return await reject('social_repair_invalid');
+          let rawFinal=checkpoint(claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_final_critic)?.decision;
+          if (rawFinal) {
+            await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_final_critic',status:'reused',attempt:claim.attempt});
+          } else {
+            const result=await generate('social_encounter_final_critic',{context,proposal:parsedProposal.value});
+            rawFinal=result.value;
+            await saveCheckpoint(client,claim,SOCIAL_ENCOUNTER_CHECKPOINT_STAGE.social_encounter_final_critic,{decision:rawFinal},result);
+          }
+          decision=parseSocialEncounterCriticDecision(rawFinal);
+          if (!decision || decision.decision !== 'accept') return await reject('social_repair_rejected');
+        }
+        if (decision.decision !== 'accept') return await reject('social_critic_malformed');
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_validate',status:'completed',attempt:claim.attempt});
+        await saveCheckpoint(client,claim,'validated',{accepted:true,proposal:parsedProposal.value});
+
+        const proposalFingerprint=await fingerprintSocialEncounterProposal(parsedProposal.value,context);
+        if (!proposalFingerprint) return await reject('social_fingerprint_invalid');
+        if (guard.lost || !guard.canCall()) return {status:'lease_lost',errorCode:'lease_lost'};
+        const commitStarted=now();
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_commit',status:'started',attempt:claim.attempt});
+        let dispatched=false;
+        try {
+          dispatched=true;
+          const result=await rpc(client,'world_settlement_commit_social_encounter',{
+            p_settlement_id:claim.settlementId,p_job_id:claim.jobId,p_fence:claim.fence,p_proposal:parsedProposal.value
+          });
+          if (!socialEncounterCommitted(result,{settlementId:claim.settlementId,jobId:claim.jobId,proposalFingerprint})) {
+            await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:'commit_unknown'});
+            return {status:'failed',errorCode:'commit_unknown'};
+          }
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_commit',status:'completed',attempt:claim.attempt,durationMs:elapsed(commitStarted)});
+          return {status:'completed',kind:'social_encounter'};
+        } catch (cause) {
+          const code=isLeaseError(cause as Error) ? 'lease_lost' : /PT409|conflict/i.test(String(cause)) ? 'commit_conflict' : 'commit_unknown';
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:code});
+          if (isLeaseError(cause as Error)) return {status:'lease_lost',errorCode:'lease_lost'};
+          return {status:'failed',errorCode:dispatched ? 'commit_unknown' : errorCode(cause)};
+        }
+      } catch (cause) {
+        if (guard.lost || timedOut || controller.signal.aborted) {
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'social_encounter_fallback',status:'failed',attempt:claim.attempt,errorCode:'provider_timeout'});
+          throw cause;
+        }
+        await completeSafely('skipped','The day settled without new world changes.',socialFallbackReason(cause),'social_encounter_fallback');
+        return {status:'completed',kind:'skipped'};
       }
     }
     if (claim.kind !== 'resident') {
