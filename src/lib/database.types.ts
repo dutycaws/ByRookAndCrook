@@ -2813,6 +2813,17 @@ export type Database = {
         Returns: Json
       }
       world_settlement_claim_next: { Args: never; Returns: Json }
+      world_settlement_commit_mutation: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_proposal_fingerprint: string
+          p_public_digest: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
       world_settlement_complete: {
         Args: {
           p_fence: string

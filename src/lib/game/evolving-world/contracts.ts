@@ -7,6 +7,8 @@ export type SalienceBand = (typeof SALIENCE_BANDS)[number];
 export const PROFILE_ENTRY_KINDS = [
   'value',
   'boundary',
+  'preference',
+  'aversion',
   'belief',
   'motive',
   'fear',
