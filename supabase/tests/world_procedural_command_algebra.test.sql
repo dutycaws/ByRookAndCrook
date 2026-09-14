@@ -39,7 +39,7 @@ insert into pg_temp.attempt values ('18000000-0000-4000-8000-000000000020','1800
 insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,fence,lease_until,deadline_at,input_snapshot,input_version)
 select s,save_id,4,1,'procedural-fixture','processing',f,clock_timestamp()+interval '5 minutes',clock_timestamp()+interval '5 minutes','{}','procedural-world-v1' from pg_temp.attempt cross join pg_temp.fixture;
 insert into private.world_settlement_jobs(id,settlement_id,ordinal,job_kind,status,input_fingerprint,input_snapshot,input_version)
-select j,s,1,'canon','processing','procedural-job','{}','procedural-world-v1' from pg_temp.attempt;
+select j,s,1,'procedural_world','processing',encode(extensions.digest(private.world_canonical_json(private.world_procedural_world_context(save_id)),'sha256'),'hex'),private.world_procedural_world_context(save_id),'procedural-world-v1' from pg_temp.attempt cross join pg_temp.fixture;
 insert into private.world_settlement_attempts(job_id,attempt_number,fence,lease_until)
 select j,1,f,clock_timestamp()+interval '5 minutes' from pg_temp.attempt;
 
@@ -52,26 +52,45 @@ grant select on pg_temp.attempt,pg_temp.fixture to service_role;
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.result as select public.world_settlement_commit_procedural_world(s,j,f,pg_temp.proposal()) result from pg_temp.attempt;
 reset role;
-select ok((select result @> jsonb_build_object('status','completed','rulesVersion','procedural-world-v1','settlementId',s,'jobId',j) and result ? 'proposalFingerprint' from pg_temp.result cross join pg_temp.attempt), 'valid entity and public event commands return a safe stable receipt');
+select ok((select result @> jsonb_build_object('status','completed','rulesVersion','procedural-world-v1','settlementId',s,'jobId',j,'replayed',false) and result ? 'proposalFingerprint' from pg_temp.result cross join pg_temp.attempt), 'valid entity and public event commands return a safe stable receipt');
 select ok(exists(select 1 from private.world_canonical_entities e join pg_temp.fixture f on f.save_id=e.save_id where e.entity_kind='location' and e.entity_key='old-mill' and e.origin='procedural'), 'place alias normalizes to the registered location key and the server assigns its id');
 select is((select count(*) from private.world_procedural_public_events where job_id=(select j from pg_temp.attempt)), 1::bigint, 'public event operation records one server-owned public event');
 select ok((select template_key='market-day' and canonical_entity_id in (select id from private.world_canonical_entities where entity_key='old-mill-market') from private.world_procedural_public_events where job_id=(select j from pg_temp.attempt)), 'public event reuses the canonical entity registry with registered template metadata');
 set local role service_role; set local request.jwt.claim.role='service_role';
-select is(public.world_settlement_commit_procedural_world((select s from pg_temp.attempt),(select j from pg_temp.attempt),(select f from pg_temp.attempt),pg_temp.proposal()),(select result from pg_temp.result), 'identical replay returns the exact receipt');
+select ok((public.world_settlement_commit_procedural_world((select s from pg_temp.attempt),(select j from pg_temp.attempt),(select f from pg_temp.attempt),pg_temp.proposal())->>'replayed')='true', 'identical replay has a server-only replay discriminator');
 select throws_ok($$select public.world_settlement_commit_procedural_world((select s from pg_temp.attempt),(select j from pg_temp.attempt),(select f from pg_temp.attempt),jsonb_set(pg_temp.proposal(),'{commands,0,proposedName}','"Changed Mill"'))$$, 'PT409', null, 'changed replay conflicts before duplicating world state');
 reset role;
 select is((select count(*) from private.world_procedural_public_events where job_id=(select j from pg_temp.attempt)), 1::bigint, 'replay does not duplicate the public event operation');
 
-select lives_ok($$insert into private.world_procedural_quests(save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day) select f.save_id,i.id,'active','successor-quest','fixture-one','{}',4 from pg_temp.fixture f join private.world_npc_instances i on i.save_id=f.save_id limit 1$$, 'one direct active successor quest can be recorded for a resident');
+-- The frozen `npc` references are active resident instance IDs.  A quest can
+-- target one directly, proving the server resolver agrees with the context.
+create temporary table pg_temp.npc_target(s uuid,j uuid,f uuid);
+insert into pg_temp.npc_target values ('18000000-0000-4000-8000-000000000040','18000000-0000-4000-8000-000000000041','18000000-0000-4000-8000-000000000042');
+insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,fence,lease_until,deadline_at,input_snapshot,input_version)
+select s,save_id,6,1,'procedural-npc-target','processing',f,clock_timestamp()+interval '5 minutes',clock_timestamp()+interval '5 minutes','{}','procedural-world-v1' from pg_temp.npc_target cross join pg_temp.fixture;
+insert into private.world_settlement_jobs(id,settlement_id,ordinal,job_kind,status,input_fingerprint,input_snapshot,input_version)
+select j,s,1,'procedural_world','processing',encode(extensions.digest(private.world_canonical_json(private.world_procedural_world_context(save_id)),'sha256'),'hex'),private.world_procedural_world_context(save_id),'procedural-world-v1' from pg_temp.npc_target cross join pg_temp.fixture;
+insert into private.world_settlement_attempts(job_id,attempt_number,fence,lease_until) select j,1,f,clock_timestamp()+interval '5 minutes' from pg_temp.npc_target;
+grant select on pg_temp.npc_target to service_role;
+set local role service_role; set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.npc_target_result as
+select public.world_settlement_commit_procedural_world(s,j,f,jsonb_build_object('version','procedural-world-v1','commands',jsonb_build_array(jsonb_build_object('operation','quest','effectKind','create_quest','ownerResidentId',(select source_resident_id::text from pg_temp.fixture),'primitiveKey','successor-quest','action','prepare','approach','scouting','targetEntityRefs',jsonb_build_array((select source_resident_id::text from pg_temp.fixture)),'motivation','Meet the ranger at the old watch.')))) result from pg_temp.npc_target;
+reset role;
+select ok((select result->>'status'='completed' and result->'operations'->0->>'operation'='quest' from pg_temp.npc_target_result),'a procedural quest may target a frozen active resident NPC instance');
+
+select lives_ok($$insert into private.world_procedural_quests(save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day) select f.save_id,i.id,'active','successor-quest','fixture-one','{}',4 from pg_temp.fixture f join private.world_npc_instances i on i.save_id=f.save_id and i.id<>f.source_resident_id limit 1$$, 'one direct active successor quest can be recorded for a resident');
 select throws_ok($$insert into private.world_procedural_quests(save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day) select q.save_id,q.instance_id,'active','successor-quest','fixture-two','{}',4 from private.world_procedural_quests q where q.input_fingerprint='fixture-one'$$, '23505', null, 'unique active-quest index prevents a second active successor quest');
 
 create temporary table pg_temp.invalid(s uuid,j uuid,f uuid);
 insert into pg_temp.invalid values ('18000000-0000-4000-8000-000000000030','18000000-0000-4000-8000-000000000031','18000000-0000-4000-8000-000000000032');
 insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,fence,lease_until,deadline_at,input_snapshot,input_version) select s,save_id,5,1,'procedural-invalid','processing',f,clock_timestamp()+interval '5 minutes',clock_timestamp()+interval '5 minutes','{}','procedural-world-v1' from pg_temp.invalid cross join pg_temp.fixture;
-insert into private.world_settlement_jobs(id,settlement_id,ordinal,job_kind,status,input_fingerprint,input_snapshot,input_version) select j,s,1,'canon','processing','procedural-invalid-job','{}','procedural-world-v1' from pg_temp.invalid;
+insert into private.world_settlement_jobs(id,settlement_id,ordinal,job_kind,status,input_fingerprint,input_snapshot,input_version) select j,s,1,'procedural_world','processing',encode(extensions.digest(private.world_canonical_json(private.world_procedural_world_context(save_id)),'sha256'),'hex'),private.world_procedural_world_context(save_id),'procedural-world-v1' from pg_temp.invalid cross join pg_temp.fixture;
 insert into private.world_settlement_attempts(job_id,attempt_number,fence,lease_until) select j,1,f,clock_timestamp()+interval '5 minutes' from pg_temp.invalid;
 grant select on pg_temp.invalid to service_role;
 set local role service_role; set local request.jwt.claim.role='service_role';
+select throws_ok($$select public.world_settlement_commit_procedural_world((select save_id from pg_temp.fixture),(select j from pg_temp.invalid),(select f from pg_temp.invalid),pg_temp.proposal())$$, 'PT409', null, 'a job cannot be committed against another settlement');
+select throws_ok($$select public.world_settlement_commit_procedural_world((select s from pg_temp.invalid),'18000000-0000-4000-8000-000000000099',(select f from pg_temp.invalid),pg_temp.proposal())$$, 'PT409', null, 'an unknown procedural job is rejected');
+select throws_ok($$select public.world_settlement_commit_procedural_world((select s from pg_temp.invalid),(select j from pg_temp.invalid),'18000000-0000-4000-8000-000000000099',pg_temp.proposal())$$, 'PT409', null, 'a stale procedural fence is rejected');
 select throws_ok($$select public.world_settlement_commit_procedural_world((select s from pg_temp.invalid),(select j from pg_temp.invalid),(select f from pg_temp.invalid),jsonb_build_object('version','procedural-world-v1','commands',jsonb_build_array(jsonb_build_object('operation','entity','effectKind','create_entity','entityKind','location','entityKey','bad','archetypeKey','landmark','proposedName','Bad','payload',jsonb_build_object('script','no')))))$$, 'PT400', null, 'unsafe payloads are rejected before authoritative writes');
 select throws_ok($$select public.world_settlement_commit_procedural_world((select s from pg_temp.invalid),(select j from pg_temp.invalid),(select f from pg_temp.invalid),jsonb_build_object('version','procedural-world-v1','commands',jsonb_build_array(jsonb_build_object('operation','entity','effectKind','create_entity','sourceResidentId',(select source_resident_id::text from pg_temp.fixture),'entityKind','location','entityKey','bad','archetypeKey','landmark','proposedName','Bad','payload',jsonb_build_object('nested',jsonb_build_object('script','no'))))))$$, 'PT400', null, 'nested executable payload keys are rejected before authoritative writes');
 select throws_ok($$select public.world_settlement_commit_procedural_world((select s from pg_temp.invalid),(select j from pg_temp.invalid),(select f from pg_temp.invalid),jsonb_build_object('version','procedural-world-v1','commands',jsonb_build_array(jsonb_build_object('operation','entity','effectKind','create_entity','sourceResidentId',(select source_resident_id::text from pg_temp.fixture),'entityKind','location','entityKey','deep','archetypeKey','landmark','proposedName','Deep','payload','{"one":{"two":{"three":{"four":"deep"}}}}'::jsonb))))$$, 'PT400', null, 'an otherwise-safe payload beyond the recursive depth bound is rejected');
@@ -82,6 +101,25 @@ select throws_ok($$select public.world_settlement_commit_procedural_world((selec
 reset role;
 select is((select count(*) from private.world_procedural_command_receipts where job_id=(select j from pg_temp.invalid)),0::bigint, 'invalid command does not leave a receipt');
 select is((select count(*) from private.world_procedural_public_events where job_id=(select j from pg_temp.invalid)),0::bigint, 'capability-denied public event creates no provenance row');
+
+-- A normal day close appends at most one immutable job after the pre-existing
+-- canon/social chain.  Replaying the same player action does not enqueue it again.
+insert into auth.users(id,email,role,aud) values ('18000000-0000-4000-8000-000000000090','procedural-close@example.test','authenticated','authenticated');
+set local role authenticated; set local request.jwt.claim.role='authenticated'; set local request.jwt.claim.sub='18000000-0000-4000-8000-000000000090';
+select public.create_tavern();
+create temporary table pg_temp.close_fixture as select (public.npc_bar_snapshot()#>>'{save,id}')::uuid save_id;
+create temporary table pg_temp.close_result as select public.advance_tavern_day((select save_id from pg_temp.close_fixture),'18000000-0000-4000-8000-000000000091',0) result;
+reset role;
+select is((select count(*) from private.world_settlement_jobs where settlement_id=(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result) and job_kind='procedural_world'),1::bigint,'day close queues exactly one dedicated procedural-world job');
+select ok((select j.input_version='procedural-world-v1' and j.input_snapshot->>'version'='procedural-world-v1' and (select count(*) from jsonb_object_keys(j.input_snapshot))=5 and j.input_snapshot ?& array['version','entityKinds','activeGeneratedEntityCount','activeQuestByResident','capabilities'] and j.input_fingerprint=encode(extensions.digest(private.world_canonical_json(j.input_snapshot),'sha256'),'hex') from private.world_settlement_jobs j where j.settlement_id=(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result) and j.job_kind='procedural_world'),'procedural job freezes only the versioned TypeScript validation context and canonical fingerprint');
+select ok((select p.ordinal>(select max(c.ordinal) from private.world_settlement_jobs c where c.settlement_id=p.settlement_id and c.job_kind='canon') from private.world_settlement_jobs p where p.settlement_id=(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result) and p.job_kind='procedural_world'),'procedural work preserves canonical ordering by appending after established jobs');
+set local role authenticated; set local request.jwt.claim.role='authenticated'; set local request.jwt.claim.sub='18000000-0000-4000-8000-000000000090';
+select is(public.advance_tavern_day((select save_id from pg_temp.close_fixture),'18000000-0000-4000-8000-000000000091',0),(select result from pg_temp.close_result),'same player day-close action replays exactly');
+reset role;
+select is((select count(*) from private.world_settlement_jobs where settlement_id=(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result) and job_kind='procedural_world'),1::bigint,'day-close replay cannot create a second procedural job');
+set local role authenticated; set local request.jwt.claim.role='authenticated'; set local request.jwt.claim.sub='18000000-0000-4000-8000-000000000090';
+select ok(not (public.world_settlement_status((select save_id from pg_temp.close_fixture),(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result))::text ilike '%procedural-world-v1%' or public.world_settlement_status((select save_id from pg_temp.close_fixture),(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result)) ? 'inputSnapshot' or public.world_settlement_status((select save_id from pg_temp.close_fixture),(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result)) ? 'inputFingerprint' or public.world_settlement_status((select save_id from pg_temp.close_fixture),(select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.close_result)) ? 'jobs'),'authenticated settlement status does not project the private procedural context, fingerprint, or job internals');
+reset role;
 
 select * from finish();
 rollback;
