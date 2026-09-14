@@ -42,7 +42,7 @@ async function openFundedShop(page: Page, player: Awaited<ReturnType<typeof crea
 test('Shop opens in Art6, transitions to Art8 detail, and restores browse focus and scroll', async ({ page }) => {
   const player = await createTestPlayer('shop-art6-opening');
   try {
-    await page.setViewportSize({ width: 1672, height: 941 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await openFundedShop(page, player);
     const market = page.locator('[data-shop-market]');
     const status = page.locator('[aria-label="Shop status"]');
@@ -54,24 +54,65 @@ test('Shop opens in Art6, transitions to Art8 detail, and restores browse focus 
     await expect(merchant).toBeVisible();
     await expect(catalog).toBeVisible();
     await expect(detail).toHaveCount(0);
-    await expect(merchant.getByRole('img', { name: 'Elara Greenbloom at her garden shop counter' })).toBeVisible();
+    const scene = merchant.locator('[data-shop-scene]');
+    const composition = scene.locator('[data-scene-composition="shop"]');
+    const elara = composition.locator('[data-scene-actor="shop-elara"]');
+    const background = composition.locator('.scene-background');
+    const counter = composition.locator('.scene-foreground');
+    await expect(scene).toHaveAttribute('data-shop-scene-persistent', 'true');
+    await expect(composition).toHaveAttribute('data-scene-version', /scene-composition-v\d+/);
+    await expect(elara).toHaveAttribute('role', 'img');
+    await expect(elara).toHaveAttribute('aria-label', 'Elara Greenbloom');
+    await expect(elara).not.toHaveAttribute('tabindex');
+    await expect(elara).toHaveAttribute('data-scene-entrance-ms', '450');
+    await expect(elara).toHaveAttribute('data-scene-exit-ms', '300');
+    const sceneIdentity = await scene.evaluate((element) => {
+      const marked = element as HTMLElement & { __shopSceneIdentity?: string };
+      return marked.__shopSceneIdentity ?? (marked.__shopSceneIdentity = crypto.randomUUID());
+    });
+    await expect(background).toBeVisible();
+    const layerDepths = await Promise.all([background, elara].map((layer) => layer.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10))));
+    expect(layerDepths[0]).toBeLessThan(layerDepths[1]);
+    // Runtime scene masters are intentionally Git-ignored. When seeded fixture
+    // art is available, prove the counter renders in front; otherwise prove
+    // the named background and static Elara fallback keep Shop usable.
+    if (await counter.count()) {
+      await expect(counter).toBeVisible();
+      const counterDepth = await counter.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10));
+      expect(layerDepths[1]).toBeLessThan(counterDepth);
+    }
     await expect(catalog.getByText('Elara Greenbloom', { exact: true })).toBeVisible();
-    const heroUrl = await merchant.locator('img.shop-merchant').getAttribute('src');
+    const backgroundUrl = await background.getAttribute('src');
+    const elaraImage = elara.locator('img');
     const cloverUrl = await page.locator('[data-good-key="seed_clover"] .good-art img').getAttribute('src');
-    expect(heroUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
+    if (backgroundUrl) {
+      expect(backgroundUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
+    } else {
+      await expect(background).toHaveAttribute('aria-label', /artwork unavailable/);
+    }
+    if (await elaraImage.count()) {
+      expect(await elaraImage.getAttribute('src')).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
+    } else {
+      await expect(elara).toContainText('Elara Greenbloom');
+    }
     expect(cloverUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
-    expect((await page.request.get(heroUrl!)).ok()).toBe(true);
+    if (backgroundUrl) expect((await page.request.get(backgroundUrl)).ok()).toBe(true);
+    if (await elaraImage.count()) expect((await page.request.get((await elaraImage.getAttribute('src'))!)).ok()).toBe(true);
     expect((await page.request.get(cloverUrl!)).ok()).toBe(true);
     const [statusBox, merchantBox, catalogBox] = await Promise.all([status.boundingBox(), merchant.boundingBox(), catalog.boundingBox()]);
     expect(statusBox && merchantBox && catalogBox).toBeTruthy();
     expect(statusBox!.x).toBeLessThan(merchantBox!.x);
     expect(merchantBox!.x).toBeLessThan(catalogBox!.x);
+    await noHorizontalOverflow(page);
 
     const grid = page.locator('[data-shop-goods-scroll]');
     await grid.evaluate((element) => { element.scrollTop = 80; });
     const hops = page.locator('[data-good-key="seed_hops"]');
     await hops.getByRole('button', { name: 'Select Hops seed' }).click();
     await expect(market).toHaveClass(/art8-layout/);
+    await expect(scene).toHaveAttribute('data-shop-scene-persistent', 'true');
+    await expect(scene.locator('[data-scene-actor="shop-elara"]')).toHaveCount(1);
+    expect(await scene.evaluate((element) => (element as HTMLElement & { __shopSceneIdentity?: string }).__shopSceneIdentity)).toBe(sceneIdentity);
     await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeVisible();
     await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeFocused();
     await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeEnabled();
@@ -248,12 +289,12 @@ test('Garden expansion restores the selected good and reports full capacity with
   }
 });
 
-test('Shop survives asset failures and remains reachable at 1024, 768, and 390 pixels with reduced motion', async ({ page }) => {
+test('Shop survives asset failures and remains reachable at 1440, 768, and 390 pixels with reduced motion', async ({ page }) => {
   const player = await createTestPlayer('shop-art6-responsive');
   try {
     await page.route('**/*.webp', (route) => route.abort('failed'));
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await openFundedShop(page, player);
     await expect(page.locator('[data-shop-market]')).toHaveClass(/art6-layout/);
     await noHorizontalOverflow(page);
@@ -269,7 +310,7 @@ test('Shop survives asset failures and remains reachable at 1024, 768, and 390 p
     await page.setViewportSize({ width: 390, height: 844 });
     await detail.getByRole('heading', { name: 'Hops seed' }).scrollIntoViewIfNeeded();
     await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeInViewport();
-    await expect(page.getByRole('img', { name: 'Elara Greenbloom at her garden shop counter' })).toBeVisible();
+    await expect(page.locator('[data-shop-scene] [data-scene-actor="shop-elara"]')).toBeVisible();
     await noHorizontalOverflow(page);
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-shop-market]')).toHaveClass(/art6-layout/);

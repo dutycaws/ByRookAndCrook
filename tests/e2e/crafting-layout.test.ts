@@ -7,8 +7,11 @@ async function loginAndHarvest(page: Page, email: string, password: string) {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Open the ledger' }).click();
   await page.getByRole('button', { name: 'Start tavern' }).click();
-  await page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }).click();
-  await page.getByRole('button', { name: 'Actions', exact: true }).click();
+  const fennel = page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i });
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
+  await fennel.click();
+  await expect(fennel).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
   const harvestButton = page.getByRole('button', { name: 'Harvest crop' });
   await expect(harvestButton).toBeEnabled();
   await harvestButton.click();
@@ -117,9 +120,10 @@ test('the shared crafting layout preserves scene-first semantics at every target
     expect(target!.height).toBeGreaterThanOrEqual(44);
     if (await page.evaluate(() => navigator.maxTouchPoints > 0)) {
       const touchHarvestable = page.getByRole('button', { name: /ready to harvest/i }).first();
+      await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
       await touchHarvestable.tap();
       await expect(touchHarvestable).toHaveAttribute('aria-pressed', 'true');
-      await page.getByRole('button', { name: 'Actions', exact: true }).tap();
+      await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
       await page.getByRole('button', { name: 'Harvest crop' }).tap();
       await expect(page.getByRole('status')).toContainText(/Harvested \d ingredients?/);
     }

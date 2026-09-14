@@ -51,15 +51,17 @@ async function loginAndStart(page: Page, player: Awaited<ReturnType<typeof creat
   const start = page.getByRole('button', { name: 'Start tavern' });
   if (await start.isVisible()) await start.click();
   await page.getByRole('heading', { name: 'Hex garden' }).waitFor();
+  await page.locator('main[data-hydrated="true"]').waitFor();
   // Create one pantry ingredient before measurements. Later route interactions
   // are all client-only selections, so the shared fixture stays unchanged.
   const starterCrop = page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i });
   await starterCrop.waitFor({ state: 'visible' });
   await starterCrop.click();
+  await page.locator('[data-garden-action-menu][data-menu-pane="root"]').waitFor({ state: 'visible' });
   const harvest = page.getByRole('button', { name: 'Harvest crop' });
   await harvest.waitFor({ state: 'visible' });
   await harvest.click();
-  await page.getByRole('status').filter({ hasText: 'Harvested 2 ingredients' }).waitFor({ state: 'visible' });
+  await page.getByRole('status').filter({ hasText: 'Harvested 1 ingredient' }).waitFor({ state: 'visible' });
 }
 
 /** Runs the documented, route-owned non-persistent interaction for Event Timing. */
@@ -73,7 +75,7 @@ async function performRepresentativeInteraction(page: Page, route: MediaRoute) {
       await page.locator('input[name="ingredient"]').first().check();
       return;
     case '/bar': {
-      const patrons = page.getByRole('group', { name: 'Choose a patron' }).getByRole('button');
+      const patrons = page.locator('[data-scene-composition="bar"] [data-scene-actor]');
       if (await patrons.count() < 2) throw new Error('Bar performance fixture did not render a second selectable patron.');
       await patrons.nth(1).click();
       return;

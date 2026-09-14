@@ -1,8 +1,8 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
-  import type { DialogueInput, Journal, Offering, PatronKey } from '$lib/game/dialogue';
+  import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
   import type { BarSnapshot } from '$lib/game/serving';
-  let { patronKey, name, journal, stock, unavailable }: {patronKey:PatronKey;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null}=$props();
+  let { npcId, name, journal, stock, unavailable }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null}=$props();
   let message=$state(''); let intentCardId=$state(''); let offeringSelection=$state(''); let busy=$state(false);
   let frozen=$state<DialogueInput|null>(null); let notice=$state(''); let failure=$state(false);
   let hydrated=$state(false);
@@ -33,7 +33,7 @@
       await invalidateAll();
     } else {
       frozen=body.input;message=body.input.message;intentCardId=body.input.intentCardId??'';
-      offeringSelection=body.input.offering ? `${body.input.offering.kind}:${body.input.offering.itemId}` : '';
+      offeringSelection=body.input.offeringKind ? `${body.input.offeringKind}:${body.input.offeringItemId}` : '';
       canRetry=body.canRetry??body.status!=='processing';
       notice=body.status==='processing'?'Your conversation is still being completed. Check again shortly.'
         :canRetry?'The last reply was not completed. Retry the same message or cancel it.'
@@ -58,7 +58,7 @@
     const offering: Offering | null = offeringId && (offeringKind === 'food' || offeringKind === 'beverage')
       ? { kind: offeringKind, itemId: offeringId }
       : null;
-    frozen??={turnId:crypto.randomUUID(),patronKey,message,expectedConversationSequence:journal.sequence,
+    frozen??={turnId:crypto.randomUUID(),npcId,message,expectedConversationSequence:journal.sequence,
       interactionVersion:'dialogue-v2',intentCardId:intentCardId||null,offering};
     const command=frozen as DialogueInput;const current=++operation;
     const controller=new AbortController();posting=controller;
@@ -109,7 +109,7 @@
   <h2 id="conversation-heading" class="sr-only">Talk with {name}</h2>
 
   {#if journal.availability!=='present'}
-    <div class="dialogue-unavailable"><p class="eyebrow">{journal.availability==='dead'?'In memory':'Departed'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
+    <div class="dialogue-unavailable"><p class="eyebrow">{journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
   {:else}
     {#if unavailable}<p class="form-message dialogue-provider-notice" role="note">{unavailable}</p>{/if}
     <form onsubmit={send} class="dialogue-composer">
