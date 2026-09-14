@@ -14,6 +14,9 @@ export type CanonProviderStage = (typeof CANON_PROVIDER_STAGES)[number];
 export const SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION = 'social-encounter-v1' as const;
 export const SOCIAL_ENCOUNTER_PROVIDER_STAGES = ['social_encounter_proposer', 'social_encounter_critic', 'social_encounter_repair', 'social_encounter_final_critic'] as const;
 export type SocialEncounterProviderStage = (typeof SOCIAL_ENCOUNTER_PROVIDER_STAGES)[number];
+export const PROCEDURAL_WORLD_SETTLEMENT_PROMPT_VERSION = 'procedural-world-v1' as const;
+export const PROCEDURAL_WORLD_PROVIDER_STAGES = ['procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair', 'procedural_world_final_critic'] as const;
+export type ProceduralWorldProviderStage = (typeof PROCEDURAL_WORLD_PROVIDER_STAGES)[number];
 /**
  * Versioned provider-call ceilings for the two settlement flows. Canon admits
  * no provider-produced digest or news: a straight acceptance is proposer plus
@@ -23,10 +26,11 @@ export const SETTLEMENT_PROVIDER_CALL_BUDGETS = {
   resident: { maximum: 5, stages: ['proposer', 'critic', 'repair', 'final_critic', 'digest'] },
   canon: { maximum: 4, accepted: 2, stages: CANON_PROVIDER_STAGES },
   social_encounter: { maximum: 4, ordinary: 2, stages: SOCIAL_ENCOUNTER_PROVIDER_STAGES },
+  procedural_world: { maximum: 4, ordinary: 2, stages: PROCEDURAL_WORLD_PROVIDER_STAGES },
   news: { maximum: 0, stages: [] }
 } as const;
 export type ResidentProviderStage = Exclude<SettlementStage, 'validated'>;
-export type ProviderStage = ResidentProviderStage | CanonProviderStage | SocialEncounterProviderStage;
+export type ProviderStage = ResidentProviderStage | CanonProviderStage | SocialEncounterProviderStage | ProceduralWorldProviderStage;
 /** Provider stages remain namespaced while durable checkpoints retain their frozen original names. */
 export const CANON_CHECKPOINT_STAGE: Readonly<Record<CanonProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
   canon_proposer:'proposer', canon_critic:'critic', canon_repair:'repair', canon_final_critic:'final_critic'
@@ -34,17 +38,22 @@ export const CANON_CHECKPOINT_STAGE: Readonly<Record<CanonProviderStage, Extract
 export const SOCIAL_ENCOUNTER_CHECKPOINT_STAGE: Readonly<Record<SocialEncounterProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
   social_encounter_proposer:'proposer', social_encounter_critic:'critic', social_encounter_repair:'repair', social_encounter_final_critic:'final_critic'
 };
+export const PROCEDURAL_WORLD_CHECKPOINT_STAGE: Readonly<Record<ProceduralWorldProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
+  procedural_world_proposer:'proposer', procedural_world_critic:'critic', procedural_world_repair:'repair', procedural_world_final_critic:'final_critic'
+};
 export function checkpointStageForProviderStage(stage: ProviderStage): SettlementStage {
   if (stage in CANON_CHECKPOINT_STAGE) return CANON_CHECKPOINT_STAGE[stage as CanonProviderStage];
   if (stage in SOCIAL_ENCOUNTER_CHECKPOINT_STAGE) return SOCIAL_ENCOUNTER_CHECKPOINT_STAGE[stage as SocialEncounterProviderStage];
+  if (stage in PROCEDURAL_WORLD_CHECKPOINT_STAGE) return PROCEDURAL_WORLD_CHECKPOINT_STAGE[stage as ProceduralWorldProviderStage];
   return stage as SettlementStage;
 }
 export function promptVersionForProviderStage(stage: ProviderStage): string {
   if (stage in CANON_CHECKPOINT_STAGE) return CANON_SETTLEMENT_PROMPT_VERSION;
   if (stage in SOCIAL_ENCOUNTER_CHECKPOINT_STAGE) return SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION;
+  if (stage in PROCEDURAL_WORLD_CHECKPOINT_STAGE) return PROCEDURAL_WORLD_SETTLEMENT_PROMPT_VERSION;
   return SETTLEMENT_PROMPT_VERSION;
 }
-export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'social_encounter' | 'quest' | 'effects' | 'news' | 'finalize';
+export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'social_encounter' | 'procedural_world' | 'quest' | 'effects' | 'news' | 'finalize';
 
 export type ProviderUsage = { input: number; output: number };
 export type ProviderResult = { value: unknown; model: string; usage: ProviderUsage; durationMs: number; promptVersion: string };
@@ -67,7 +76,7 @@ export type SettlementClaim = {
 export type IdleClaim = { status: 'idle' | 'terminal' };
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const jobKinds = new Set<SettlementJobKind>(['snapshot', 'canon', 'resident', 'social_encounter', 'quest', 'effects', 'news', 'finalize']);
+const jobKinds = new Set<SettlementJobKind>(['snapshot', 'canon', 'resident', 'social_encounter', 'procedural_world', 'quest', 'effects', 'news', 'finalize']);
 const stages = new Set<string>(SETTLEMENT_STAGES);
 const terminalStatuses = new Set(['completed', 'failed', 'skipped', 'expired']);
 const fingerprint = /^[0-9a-f]{64}$/i;

@@ -1,5 +1,5 @@
 import { primitiveRegistry } from './registry';
-import type { CapabilityEnvelope, ContractIssue, WorldEntityKind } from './contracts';
+import { WORLD_ENTITY_KINDS, type CapabilityEnvelope, type ContractIssue, type SocialCapability, type WorldEffectKind, type WorldEntityKind } from './contracts';
 
 /** The finite command language committed by the server-only procedural seam. */
 export const PROCEDURAL_WORLD_VERSION = 'procedural-world-v1' as const;
@@ -22,12 +22,28 @@ export interface ProceduralWorldValidationContext {
   capabilities: Readonly<Record<string, CapabilityEnvelope>>;
 }
 
+/** This is the exact five-field server snapshot queued by migration 051. */
+export interface FrozenProceduralWorldContext extends ProceduralWorldValidationContext {
+  version: typeof PROCEDURAL_WORLD_VERSION;
+}
+
+export const PROCEDURAL_WORLD_CRITIC_CODES = ['proposal_shape','command_shape','entity_registry','quest_capability','event_registry','budget'] as const;
+export type ProceduralWorldCriticCode = (typeof PROCEDURAL_WORLD_CRITIC_CODES)[number];
+export const PROCEDURAL_WORLD_CRITIC_PATHS = ['commands','commands.entity','commands.quest','commands.public_event'] as const;
+export type ProceduralWorldCriticPath = (typeof PROCEDURAL_WORLD_CRITIC_PATHS)[number];
+export type ProceduralWorldCriticInstruction = { code: ProceduralWorldCriticCode; path: ProceduralWorldCriticPath };
+export type ProceduralWorldCriticDecision =
+  | { decision:'accept' | 'reject'; instructions:[] }
+  | { decision:'repair'; instructions:ProceduralWorldCriticInstruction[] };
+
 export type ProceduralWorldParseResult = { ok: true; value: ProceduralWorldProposal } | { ok: false; issues: ContractIssue[] };
 const keyPattern = /^[a-z][a-z0-9_-]{1,79}$/;
 const publicKeyPattern = /^[a-z][a-z0-9-]{1,63}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const forbidden = /(?:^|_)(?:sql|query|route|url|endpoint|code|function|handler|script|executable)(?:$|_)/i;
 const aliases: Record<string, WorldEntityKind> = { ...primitiveRegistry.entityKindAliases };
+const socialCapabilities = new Set<SocialCapability>(['conceal','misdirect','deceive','share_gossip']);
+const worldEffects = new Set<WorldEffectKind>(['adjust_relationship','create_quest','update_quest','create_entity','retire_entity','record_world_event','apply_location_modifier','transfer_inventory','unlock_recipe','apply_economy_modifier','set_availability']);
 
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
@@ -62,6 +78,49 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (object(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
   return JSON.stringify(value);
+}
+
+function capability(value: unknown): value is CapabilityEnvelope {
+  if (!object(value) || !exact(value, ['version','allowedActions','allowedApproaches','allowedWorldEffects','allowedTargetKinds','socialCapabilities','irreversibleEffects']) || !text(value.version, 128)
+    || !Array.isArray(value.allowedActions) || !Array.isArray(value.allowedApproaches) || !Array.isArray(value.allowedWorldEffects) || !Array.isArray(value.allowedTargetKinds) || !Array.isArray(value.socialCapabilities) || !Array.isArray(value.irreversibleEffects)
+    || value.allowedActions.length > 32 || value.allowedApproaches.length > 32 || value.allowedWorldEffects.length > 16 || value.allowedTargetKinds.length > WORLD_ENTITY_KINDS.length || value.socialCapabilities.length > 4 || value.irreversibleEffects.length > 8
+    || !value.allowedActions.every((entry) => text(entry, 40)) || !value.allowedApproaches.every((entry) => text(entry, 40))
+    || !value.allowedWorldEffects.every((entry) => worldEffects.has(entry as WorldEffectKind)) || !value.allowedTargetKinds.every((entry) => WORLD_ENTITY_KINDS.includes(entry as WorldEntityKind)) || !value.socialCapabilities.every((entry) => socialCapabilities.has(entry as SocialCapability))) return false;
+  return value.irreversibleEffects.every((entry) => object(entry) && exact(entry, ['effectKey','targetKinds']) && text(entry.effectKey, 80) && Array.isArray(entry.targetKinds) && entry.targetKinds.length > 0 && entry.targetKinds.length <= WORLD_ENTITY_KINDS.length && entry.targetKinds.every((kind) => WORLD_ENTITY_KINDS.includes(kind as WorldEntityKind)));
+}
+
+/** Parse the queued DB JSON before it can reach a model or validate model output. */
+export function parseFrozenProceduralWorldContext(value: unknown): FrozenProceduralWorldContext | null {
+  const activeGeneratedEntityCount=object(value) ? value.activeGeneratedEntityCount : undefined;
+  if (!object(value) || !exact(value, ['version','entityKinds','activeGeneratedEntityCount','activeQuestByResident','capabilities']) || value.version !== PROCEDURAL_WORLD_VERSION
+    || !object(value.entityKinds) || typeof activeGeneratedEntityCount !== 'number' || !Number.isSafeInteger(activeGeneratedEntityCount) || activeGeneratedEntityCount < 0 || activeGeneratedEntityCount > primitiveRegistry.worldBudgets.activeGeneratedEntities
+    || !object(value.activeQuestByResident) || !object(value.capabilities)) return null;
+  try { if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 16_384) return null; } catch { return null; }
+  const entityEntries=Object.entries(value.entityKinds); const questEntries=Object.entries(value.activeQuestByResident); const capabilityEntries=Object.entries(value.capabilities);
+  if (entityEntries.length > 512 || questEntries.length > 128 || capabilityEntries.length > 128
+    || !entityEntries.every(([id, kind]) => text(id, 128) && WORLD_ENTITY_KINDS.includes(kind as WorldEntityKind))
+    || !questEntries.every(([residentId, quest]) => uuidPattern.test(residentId) && object(quest) && exact(quest, ['id','primitiveKey']) && uuidPattern.test(String(quest.id)) && text(quest.primitiveKey, 80))
+    || !capabilityEntries.every(([residentId, entry]) => uuidPattern.test(residentId) && capability(entry))) return null;
+  return {
+    version:PROCEDURAL_WORLD_VERSION,
+    entityKinds:Object.fromEntries(entityEntries) as Record<string, WorldEntityKind>,
+    activeGeneratedEntityCount,
+    activeQuestByResident:Object.fromEntries(questEntries.map(([residentId, quest]) => [residentId, {id:(quest as Record<string, unknown>).id as string,primitiveKey:(quest as Record<string, unknown>).primitiveKey as string}])),
+    capabilities:Object.fromEntries(capabilityEntries.map(([residentId, entry]) => [residentId, {...entry as CapabilityEnvelope, allowedActions:[...(entry as CapabilityEnvelope).allowedActions], allowedApproaches:[...(entry as CapabilityEnvelope).allowedApproaches], allowedWorldEffects:[...(entry as CapabilityEnvelope).allowedWorldEffects], allowedTargetKinds:[...(entry as CapabilityEnvelope).allowedTargetKinds], socialCapabilities:[...(entry as CapabilityEnvelope).socialCapabilities], irreversibleEffects:(entry as CapabilityEnvelope).irreversibleEffects.map((effect) => ({...effect,targetKinds:[...effect.targetKinds]}))}]))
+  };
+}
+
+export function parseProceduralWorldCriticDecision(value: unknown): ProceduralWorldCriticDecision | null {
+  if (!object(value) || !exact(value, ['decision','instructions']) || !['accept','reject','repair'].includes(String(value.decision)) || !Array.isArray(value.instructions)) return null;
+  if ((value.decision === 'accept' || value.decision === 'reject') && value.instructions.length !== 0) return null;
+  if (value.decision === 'repair' && (value.instructions.length < 1 || value.instructions.length > 4)) return null;
+  const instructions:ProceduralWorldCriticInstruction[]=[];
+  for (const instruction of value.instructions) {
+    if (!object(instruction) || !exact(instruction, ['code','path']) || !PROCEDURAL_WORLD_CRITIC_CODES.includes(instruction.code as ProceduralWorldCriticCode) || !PROCEDURAL_WORLD_CRITIC_PATHS.includes(instruction.path as ProceduralWorldCriticPath)) return null;
+    instructions.push({code:instruction.code as ProceduralWorldCriticCode,path:instruction.path as ProceduralWorldCriticPath});
+  }
+  if (new Set(instructions.map((instruction) => `${instruction.code}:${instruction.path}`)).size !== instructions.length) return null;
+  return value.decision === 'repair' ? {decision:'repair',instructions} : {decision:value.decision as 'accept'|'reject',instructions:[]};
 }
 
 /** Validates only finite commands and frozen context; it cannot create arbitrary actions. */
