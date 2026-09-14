@@ -9,7 +9,8 @@ export type ProceduralWorldCommand =
   | { operation: 'entity'; effectKind: 'create_entity'; sourceResidentId: string; entityKind: WorldEntityKind; entityKey: string; archetypeKey: string; proposedName: string; payload: Record<string, unknown> }
   | { operation: 'quest'; effectKind: 'create_quest' | 'update_quest'; ownerResidentId: string; primitiveKey: string; action: string; approach: string; targetEntityRefs: string[]; motivation: string }
   | { operation: 'public_event'; effectKind: 'record_world_event'; sourceResidentId: string; templateKey: string; participantEntityRefs: string[]; title: string; summary: string; reuseKey: string }
-  | { operation: 'gameplay_unlock'; effectKind: 'unlock_gameplay'; sourceResidentId: string; entityRef: string; family: 'herb_loaf_variant'; definition: { displayName: string } };
+  | { operation: 'gameplay_unlock'; effectKind: 'unlock_gameplay'; sourceResidentId: string; entityRef: string; family: 'herb_loaf_variant'; definition: { displayName: string } }
+  | { operation: 'gameplay_unlock'; effectKind: 'unlock_gameplay'; sourceResidentId: string; entityRef: string; family: 'successor_provisions'; definition: { displayName: string; price: number; dailyStock: number } };
 
 export interface ProceduralWorldProposal {
   version: typeof PROCEDURAL_WORLD_VERSION;
@@ -163,14 +164,21 @@ export function validateProceduralWorldProposal(value: unknown, context: Procedu
       }
     } else if (command.operation === 'gameplay_unlock') {
       if (!exact(command, ['operation','effectKind','sourceResidentId','entityRef','family','definition']) || command.effectKind !== 'unlock_gameplay' || !text(command.sourceResidentId, 128) || !uuidPattern.test(command.sourceResidentId) || !text(command.entityRef, 128)
-        || command.family !== 'herb_loaf_variant' || !object(command.definition)
-        || !exact(command.definition, ['displayName'])
-        || !text(command.definition.displayName, 120)) return issue(path, 'gameplay_unlock', 'Gameplay unlocks require an exact registered family and bounded definition.');
+        || !object(command.definition)) return issue(path, 'gameplay_unlock', 'Gameplay unlocks require an exact registered family and bounded definition.');
+      const recipeFamily = command.family === 'herb_loaf_variant'
+        && exact(command.definition, ['displayName']) && text(command.definition.displayName, 120);
+      const supplyDefinition = command.definition as Record<string, unknown>;
+      const supplyFamily = command.family === 'successor_provisions'
+        && exact(command.definition, ['displayName','price','dailyStock']) && text(command.definition.displayName, 120)
+        && Number.isSafeInteger(supplyDefinition.price) && (supplyDefinition.price as number) >= 1 && (supplyDefinition.price as number) <= 100
+        && Number.isSafeInteger(supplyDefinition.dailyStock) && (supplyDefinition.dailyStock as number) >= 1 && (supplyDefinition.dailyStock as number) <= 10;
+      if (!recipeFamily && !supplyFamily) return issue(path, 'gameplay_unlock', 'Gameplay unlocks require an exact registered family and bounded definition.');
       const key = normalizeKey(command.entityRef as string);
       const created = value.commands.find((candidate) => object(candidate) && candidate.operation === 'entity' && candidate.sourceResidentId === command.sourceResidentId && normalizeKey(String(candidate.entityKey ?? '')) === key);
-      const target = created && created.entityKind === 'recipe' ? { id:key, kind:created.entityKind as WorldEntityKind } : null;
+      const targetKind = command.family === 'herb_loaf_variant' ? 'recipe' : 'item';
+      const target = created && created.entityKind === targetKind ? { id:key, kind:created.entityKind as WorldEntityKind } : null;
       const capability = context.capabilities[command.sourceResidentId as string];
-      if (!target || !capability || !capability.allowedWorldEffects.includes('create_entity') || !capability.allowedTargetKinds.includes(target.kind) || target.kind !== 'recipe') return issue(path, 'gameplay_unlock', 'Gameplay unlocks must follow a matching canonical recipe and frozen initiating capability.');
+      if (!target || !capability || !capability.allowedWorldEffects.includes('create_entity') || !capability.allowedTargetKinds.includes(target.kind) || target.kind !== targetKind) return issue(path, 'gameplay_unlock', 'Gameplay unlocks must follow a matching canonical entity and frozen initiating capability.');
     } else return issue(path, 'operation', 'The command operation is not in the finite procedural algebra.');
   }
   if (context.activeGeneratedEntityCount + plannedCanonicalEntities > primitiveRegistry.worldBudgets.activeGeneratedEntities) return issue('commands', 'budget', 'New canonical entities would exceed the frozen generated-entity budget.');
@@ -186,6 +194,7 @@ export function parseProceduralWorldProposal(value: unknown, context: Procedural
     if (command.operation === 'quest') return { operation:'quest', effectKind:command.effectKind as 'create_quest' | 'update_quest', ownerResidentId:command.ownerResidentId as string, primitiveKey:normalizeKey(command.primitiveKey as string), action:command.action as string, approach:command.approach as string, targetEntityRefs:(command.targetEntityRefs as string[]).map((entry) => resolveReference(entry, context)!.id), motivation:(command.motivation as string).trim() };
     if (command.operation === 'public_event') return { operation:'public_event', effectKind:'record_world_event', sourceResidentId:command.sourceResidentId as string, templateKey:normalizeKey(command.templateKey as string), participantEntityRefs:(command.participantEntityRefs as string[]).map((entry) => resolveReference(entry, context)!.id), title:(command.title as string).trim(), summary:(command.summary as string).trim(), reuseKey:normalizeKey(command.reuseKey as string) };
     const definition = command.definition as Record<string, unknown>;
+    if (command.family === 'successor_provisions') return { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:command.sourceResidentId as string, entityRef:normalizeKey(command.entityRef as string), family:'successor_provisions', definition:{ displayName:(definition.displayName as string).trim(), price:definition.price as number, dailyStock:definition.dailyStock as number } };
     return { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:command.sourceResidentId as string, entityRef:normalizeKey(command.entityRef as string), family:'herb_loaf_variant', definition:{ displayName:(definition.displayName as string).trim() } };
   }) } };
 }

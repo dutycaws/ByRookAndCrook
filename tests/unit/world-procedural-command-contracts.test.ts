@@ -74,4 +74,15 @@ describe('procedural world command contracts', () => {
       { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:'10000000-0000-4000-8000-000000000001', entityRef:'loaf', family:'herb_loaf_variant', definition:{displayName:'Forest loaf'} }
     ] }, context)).toMatchObject({ ok:false });
   });
+
+  it('permits only finite settlement supplies bound to a same-proposal item', () => {
+    const supply = { version:'procedural-world-v1', commands:[
+      { operation:'entity', effectKind:'create_entity', sourceResidentId:'10000000-0000-4000-8000-000000000001', entityKind:'item', entityKey:'road-provisions', archetypeKey:'trade-good', proposedName:'Road provisions', payload:{} },
+      { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:'10000000-0000-4000-8000-000000000001', entityRef:'road-provisions', family:'successor_provisions', definition:{ displayName:'Road provisions', price:12, dailyStock:3 } }
+    ] };
+    expect(parseProceduralWorldProposal(supply, context)).toMatchObject({ ok:true });
+    expect(validateProceduralWorldProposal({ ...supply, commands:[supply.commands[0], { ...supply.commands[1], definition:{ ...supply.commands[1].definition, effect:'run' } }] }, context)).not.toEqual([]);
+    expect(validateProceduralWorldProposal({ ...supply, commands:[{ ...supply.commands[0], entityKind:'recipe' }, supply.commands[1]] }, context)).not.toEqual([]);
+    expect(validateProceduralWorldProposal({ ...supply, commands:[supply.commands[0], { ...supply.commands[1], definition:{ displayName:'Road provisions', price:0, dailyStock:3 } }] }, context)).not.toEqual([]);
+  });
 });
