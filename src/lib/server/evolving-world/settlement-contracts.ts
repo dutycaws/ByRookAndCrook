@@ -1,4 +1,4 @@
-import { SALIENCE_BANDS, type CapabilityEnvelope, type EvolutionEvidenceKind, type PersonalityProfile, type PersonalitySchema, type SalienceBand, type WorldValidationSnapshot } from '$lib/game/evolving-world';
+import { SALIENCE_BANDS, type BeliefOperation, type CapabilityEnvelope, type EvolutionEvidenceKind, type PersonalityProfile, type PersonalitySchema, type SalienceBand, type WorldValidationSnapshot } from '$lib/game/evolving-world';
 
 export const SETTLEMENT_PROMPT_VERSION = 'world-settlement-v1' as const;
 export const SETTLEMENT_STAGES = ['proposer', 'critic', 'repair', 'final_critic', 'digest', 'validated'] as const;
@@ -97,6 +97,18 @@ export function parseCriticOutput(value: unknown): CriticOutput | null {
 
 export function proposalEvidenceIsAuthorized(evidenceIds: readonly string[], context: FrozenEvolutionContext): boolean {
   return evidenceIds.length > 0 && evidenceIds.every((id) => context.authorizedEvidence.some((entry) => entry.id === id));
+}
+
+/** Belief sources must point at this frozen evidence set; attributed knowledge cannot mint canon. */
+export function proposalBeliefsAreAttributed(operations: readonly BeliefOperation[], context: FrozenEvolutionContext): boolean {
+  const evidenceById = new Map(context.authorizedEvidence.map((entry) => [entry.id, entry]));
+  return operations.every((operation) => {
+    if (operation.operation === 'retract') {
+      return context.authorizedEvidence.some((entry) => entry.sourceFingerprint === operation.sourceFingerprint);
+    }
+    const citedEvidence = operation.provenance.map((link) => evidenceById.get(link.sourceId));
+    return citedEvidence.every(Boolean) && citedEvidence.some((entry) => entry?.sourceFingerprint === operation.originalClaimFingerprint);
+  });
 }
 
 export type PublicDigest = { summary: string; journalEntries: string[]; discoveredEntityIds: string[] };

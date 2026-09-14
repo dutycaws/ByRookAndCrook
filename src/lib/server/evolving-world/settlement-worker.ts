@@ -6,7 +6,7 @@ import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
 import {
-  frozenEvolutionContext, parseCriticOutput, parsePublicDigest, parseSettlementClaim, proposalEvidenceIsAuthorized, SettlementProviderError,
+  frozenEvolutionContext, parseCriticOutput, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
   type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
 } from './settlement-contracts';
 
@@ -69,10 +69,10 @@ class LeaseGuard {
 }
 
 function proposalValidationIssues(proposal: unknown, context: NonNullable<ReturnType<typeof frozenEvolutionContext>>): boolean {
-  const parsed=parseMutationProposal(proposal); if (!parsed.ok || !proposalEvidenceIsAuthorized(parsed.value.evidenceIds,context)) return true;
+  const parsed=parseMutationProposal(proposal); if (!parsed.ok || !proposalEvidenceIsAuthorized(parsed.value.evidenceIds,context) || !proposalBeliefsAreAttributed(parsed.value.beliefOperations, context)) return true;
   return [
     ...validatePersonalitySchema(context.schema), ...validatePersonalityProfile(context.profile,context.schema),
-    ...validateMutationProposal(parsed.value,context.schema,context.profile), ...validateQuestChanges(parsed.value.questChanges,context.capability,context.worldSnapshot),
+    ...validateMutationProposal(parsed.value,context.schema,context.profile,context.worldSnapshot), ...validateQuestChanges(parsed.value.questChanges,context.capability,context.worldSnapshot),
     ...validateWorldEffectCommands(parsed.value.worldEffects,context.capability,context.worldSnapshot)
   ].length > 0;
 }

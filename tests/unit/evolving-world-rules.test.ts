@@ -4,8 +4,10 @@ import {
   EVOLVING_WORLD_RULES_VERSION,
   PERSONALITY_SCHEMA_VERSION,
   clampTrait,
+  canonicalizeMutationProposal,
   consumeSignedThreshold,
   createMutationReceipt,
+  fingerprintMutationProposal,
   parseMutationProposal,
   pressureContribution,
   rollPasses,
@@ -84,6 +86,7 @@ function proposal(overrides: Partial<PersonalityMutationProposal> = {}): Persona
     salience: 'meaningful',
     dimensionChanges: [{ dimensionKey: 'openness', direction: 1, intendedDelta: 3 }],
     entryOperations: [],
+    beliefOperations: [],
     causalExplanation: 'The keeper honored a difficult promise.',
     questChanges: [],
     worldEffects: [],
@@ -210,6 +213,9 @@ describe('evolving-world deterministic rules', () => {
       proposal: proposal({ worldEffects: [{ kind: 'retire_entity', entityId: 'lira', reason: 'Leaves for good.' }] }),
       pressureByDimension: {}
     })).toThrow('irreversible_authorization');
+    expect(validateWorldEffectCommands([
+      { kind: 'retire_entity', entityId: 'old_road', reason: 'The road is gone.' }
+    ], capability as never, worldSnapshot).map((issue) => issue.code)).toContain('irreversible_authorization');
   });
 
   it('parses model output as unknown data before semantic validation', () => {
@@ -222,6 +228,51 @@ describe('evolving-world deterministic rules', () => {
     expect(parseMutationProposal({ ...proposal(), worldEffects: [null] })).toMatchObject({ ok: true });
     expect(() => receipt({ proposal: { ...proposal(), worldEffects: [null] } as never, pressureByDimension: {} })).toThrow('effect_shape');
     expect(parseMutationProposal(proposal())).toMatchObject({ ok: true });
+  });
+
+  it('keeps beliefs attributed, bounded, and separate from canonical world effects', () => {
+    const claim = 'a'.repeat(64);
+    const valid = proposal({ beliefOperations: [{ operation: 'add', subjectEntityId: 'lira', content: 'The keeper may shelter travelers.', confidence: 65, provenance: [{ sourceKind: 'dialogue_claim', sourceId: 'event_1' }], originalClaimFingerprint: claim }] });
+    expect(validateMutationProposal(valid, schema, profile)).toEqual([]);
+    const addedBelief = valid.beliefOperations[0];
+    if (addedBelief.operation !== 'add') throw new Error('Expected the test belief to be an add operation.');
+    expect(validateMutationProposal({ ...valid, beliefOperations: [{ ...addedBelief, subjectEntityId: 'unknown_npc' }] }, schema, profile, worldSnapshot).map((issue) => issue.code)).toContain('belief_add');
+    expect(parseMutationProposal(valid)).toMatchObject({ ok: true });
+    expect(validateMutationProposal(proposal({ beliefOperations: [
+      { operation: 'retract', beliefId: 'rumor_1', reason: 'Evidence disproved it.', sourceFingerprint: claim },
+      { operation: 'retract', beliefId: 'rumor_2', reason: 'Evidence disproved it.', sourceFingerprint: claim },
+      { operation: 'retract', beliefId: 'rumor_3', reason: 'Evidence disproved it.', sourceFingerprint: claim }
+    ] }), schema, profile).map((issue) => issue.code)).toContain('belief_width');
+    expect(parseMutationProposal({ ...valid, beliefOperations: [{ ...valid.beliefOperations[0], id: 'fabricated-db-id' }] })).toMatchObject({ ok: false });
+    expect(valid.worldEffects).toEqual([]);
+  });
+
+  it('uses registry bounds and immutable references for effect commands', () => {
+    const richerSnapshot = { ...worldSnapshot, entityKinds: { ...worldSnapshot.entityKinds, faction_1: 'faction' as const, herb: 'item' as const, recipe_1: 'recipe' as const } };
+    expect(validateWorldEffectCommands([{ kind: 'adjust_relationship', subjectNpcId: 'lira', objectEntityId: 'faction_1', axis: 'trust', delta: 26 }], { ...capability, allowedWorldEffects: ['adjust_relationship'] } as never, richerSnapshot).map((issue) => issue.code)).toContain('effect_payload');
+    expect(validateWorldEffectCommands([{ kind: 'create_entity', entityKind: 'npc', archetypeKey: 'missing-archetype', proposedName: 'Aster', payload: {} }], { ...capability, allowedWorldEffects: ['create_entity'], allowedTargetKinds: ['npc'] } as never, richerSnapshot).map((issue) => issue.code)).toContain('effect_payload');
+  });
+
+  it('canonicalizes and fingerprints validated proposals stably and rejects executable or oversized payloads', async () => {
+    const first = proposal({ beliefOperations: [] });
+    const reordered = { worldEffects: [], questChanges: [], causalExplanation: first.causalExplanation, beliefOperations: [], entryOperations: [], dimensionChanges: first.dimensionChanges, salience: first.salience, evidenceIds: first.evidenceIds, rulesVersion: first.rulesVersion };
+    expect(canonicalizeMutationProposal(first)).toBe(canonicalizeMutationProposal(reordered));
+    expect(await fingerprintMutationProposal(first)).toBe(await fingerprintMutationProposal(reordered));
+    expect(canonicalizeMutationProposal({ ...first, worldEffects: [{ kind: 'record_world_event', handler: 'bad' }] })).toBeNull();
+    expect(canonicalizeMutationProposal({ ...first, unsafeCode: 'bad' })).toBeNull();
+    expect(canonicalizeMutationProposal(JSON.parse('{"rulesVersion":"evolving-world-v1","evidenceIds":["event-1"],"salience":"meaningful","dimensionChanges":[],"entryOperations":[],"beliefOperations":[],"causalExplanation":"x","questChanges":[],"worldEffects":[],"constructor":"bad"}'))).toBeNull();
+    expect(canonicalizeMutationProposal({ ...first, causalExplanation: 'x'.repeat(1_001) })).toBeNull();
+    expect(canonicalizeMutationProposal({ ...first, evidenceIds: Array.from({ length: 16 }, (_, index) => `${index}-${'x'.repeat(998)}`) })).toBeNull();
+  });
+
+  it('keeps core entries mutable only after a successful defining core threshold', () => {
+    const coreRetraction = [{ operation: 'retract', entryId: 'keep_promises' } as const];
+    const ordinary = receipt({ proposal: proposal({ salience: 'major', entryOperations: coreRetraction }), pressureByDimension: { openness: 0 }, roll: 0 });
+    expect(ordinary.outcome).toBe('changed');
+    expect(ordinary.appliedEntryOperationIndexes).toEqual([]);
+    const defining = receipt({ proposal: proposal({ salience: 'major', dimensionChanges: [{ dimensionKey: 'duty', direction: -1, intendedDelta: -2 }], entryOperations: coreRetraction }), pressureByDimension: { duty: -45 }, roll: 0 });
+    expect(defining.outcome).toBe('changed');
+    expect(defining.appliedEntryOperationIndexes).toEqual([0]);
   });
 
   it('validates immutable schemas and clamps all trait and social-axis values', () => {

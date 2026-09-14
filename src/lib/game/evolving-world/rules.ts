@@ -4,6 +4,7 @@ import {
   PROFILE_ENTRY_KINDS,
   SALIENCE_BANDS,
   type CapabilityEnvelope,
+  type BeliefOperation,
   type ContractIssue,
   type DimensionMutationReceipt,
   type MutationReceipt,
@@ -15,6 +16,7 @@ import {
   type WorldEffectCommand,
   type WorldValidationSnapshot
 } from './contracts';
+import { primitiveRegistry, type PrimitiveRegistry } from './registry';
 
 export const DEFAULT_SALIENCE_PRESSURE: Record<SalienceBand, number> = {
   minor: 5,
@@ -34,6 +36,7 @@ export const DEFAULT_ORDINARY_CHANGE_THRESHOLD = 25;
 export const DEFAULT_DEFINING_RUPTURE_THRESHOLD = 100;
 export const MAX_DIMENSION_CHANGES_PER_JOB = 3;
 export const MAX_ENTRY_OPERATIONS_PER_JOB = 2;
+export const MAX_BELIEF_OPERATIONS_PER_JOB = 2;
 export const MIN_TRAIT_VALUE = -100;
 export const MAX_TRAIT_VALUE = 100;
 
@@ -150,7 +153,7 @@ export function validatePersonalityProfile(profile: PersonalityProfile, schema: 
   return issues;
 }
 
-export function validateMutationProposal(proposal: PersonalityMutationProposal, schema: PersonalitySchema, profile: PersonalityProfile): ContractIssue[] {
+export function validateMutationProposal(proposal: PersonalityMutationProposal, schema: PersonalitySchema, profile: PersonalityProfile, snapshot?: WorldValidationSnapshot): ContractIssue[] {
   const issues: ContractIssue[] = [];
   if (proposal.rulesVersion !== EVOLVING_WORLD_RULES_VERSION) {
     issues.push({ path: 'rulesVersion', code: 'rules_version', message: 'The proposal must use the active evolution rules.' });
@@ -170,6 +173,7 @@ export function validateMutationProposal(proposal: PersonalityMutationProposal, 
   if (proposal.entryOperations.length > MAX_ENTRY_OPERATIONS_PER_JOB) {
     issues.push({ path: 'entryOperations', code: 'entry_width', message: `A proposal may contain at most ${MAX_ENTRY_OPERATIONS_PER_JOB} typed-entry operations.` });
   }
+  issues.push(...validateBeliefOperations(proposal.beliefOperations, snapshot));
 
   const dimensions = new Set(schema.dimensions.map((dimension) => dimension.key));
   const proposedDimensions = new Set<string>();
@@ -218,12 +222,82 @@ export function validateMutationProposal(proposal: PersonalityMutationProposal, 
   return issues;
 }
 
+/** Validates attributed knowledge only. It never treats a belief as a canonical world assertion. */
+const REFERENCE_ID = /^(?:[a-z][a-z0-9_-]{1,127}|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+function referenceId(value: unknown): value is string { return typeof value === 'string' && REFERENCE_ID.test(value); }
+
+export function validateBeliefOperations(operations: readonly BeliefOperation[], snapshot?: WorldValidationSnapshot): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  if (operations.length > MAX_BELIEF_OPERATIONS_PER_JOB) {
+    issues.push({ path: 'beliefOperations', code: 'belief_width', message: `A proposal may contain at most ${MAX_BELIEF_OPERATIONS_PER_JOB} belief operations.` });
+  }
+  const retracted = new Set<string>();
+  operations.forEach((operation, index) => {
+    const path = `beliefOperations.${index}`;
+    if (operation.operation === 'add') {
+      if (!referenceId(operation.subjectEntityId) || (snapshot && !knownEntity(snapshot, operation.subjectEntityId)) || !operation.content.trim() || operation.content.length > 1_000
+        || !Number.isInteger(operation.confidence) || operation.confidence < 0 || operation.confidence > 100
+        || !/^[a-f0-9]{64}$/i.test(operation.originalClaimFingerprint)
+        || operation.provenance.length < 1 || operation.provenance.length > 4) {
+        issues.push({ path, code: 'belief_add', message: 'A new belief requires bounded attributed content, confidence, provenance, and claim fingerprint.' });
+        return;
+      }
+      operation.provenance.forEach((link, provenanceIndex) => {
+        if (!['direct_evidence', 'dialogue_claim', 'gossip', 'inference'].includes(link.sourceKind)
+          || !referenceId(link.sourceId) || (link.speakerNpcId !== undefined && !referenceId(link.speakerNpcId))) {
+          issues.push({ path: `${path}.provenance.${provenanceIndex}`, code: 'belief_provenance', message: 'Belief provenance must use the typed, bounded attribution contract.' });
+        }
+      });
+      return;
+    }
+    if (!referenceId(operation.beliefId) || retracted.has(operation.beliefId) || !operation.reason.trim() || operation.reason.length > 500
+      || !/^[a-f0-9]{64}$/i.test(operation.sourceFingerprint)) {
+      issues.push({ path, code: 'belief_retract', message: 'A belief retraction requires one existing belief reference, a bounded reason, and source fingerprint.' });
+    }
+    retracted.add(operation.beliefId);
+  });
+  return issues;
+}
+
 function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
   return Object.keys(value).every((key) => allowed.includes(key));
 }
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+const FORBIDDEN_PROPOSAL_SEGMENT = /(?:^|_)(?:sql|query|route|url|endpoint|code|function|handler|script|executable)(?:$|_)/;
+const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const MAX_PROPOSAL_DEPTH = 6;
+const MAX_PROPOSAL_NODES = 160;
+const MAX_PROPOSAL_STRING = 1_000;
+const MAX_PROPOSAL_BYTES = 15_000;
+
+function normalizedKey(value: string): string {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
+
+function proposalFitsByteBudget(value: unknown): boolean {
+  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_PROPOSAL_BYTES; }
+  catch { return false; }
+}
+
+function safeProposalJson(value: unknown, depth = 0, tally = { count: 0 }): boolean {
+  if (depth > MAX_PROPOSAL_DEPTH || ++tally.count > MAX_PROPOSAL_NODES) return false;
+  if (value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'string') return value.length <= MAX_PROPOSAL_STRING;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length <= 32 && value.every((entry) => safeProposalJson(entry, depth + 1, tally));
+  if (!record(value) || Object.getPrototypeOf(value) !== Object.prototype) return false;
+  return Object.entries(value).every(([key, entry]) => !FORBIDDEN_OBJECT_KEYS.has(key) && !FORBIDDEN_PROPOSAL_SEGMENT.test(normalizedKey(key)) && key.length <= 80 && safeProposalJson(entry, depth + 1, tally));
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right));
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`;
 }
 
 export type ParsedMutationProposal =
@@ -234,12 +308,13 @@ export function parseMutationProposal(value: unknown): ParsedMutationProposal {
   const issue = (path: string, code: string, message: string): ParsedMutationProposal => ({ ok: false, issues: [{ path, code, message }] });
   if (!record(value) || !hasOnlyKeys(value, [
     'rulesVersion', 'evidenceIds', 'salience', 'dimensionChanges', 'entryOperations',
-    'causalExplanation', 'questChanges', 'worldEffects'
+    'beliefOperations', 'causalExplanation', 'questChanges', 'worldEffects'
   ])) return issue('', 'proposal_shape', 'A mutation proposal must contain only the versioned contract fields.');
   if (value.rulesVersion !== EVOLVING_WORLD_RULES_VERSION || !SALIENCE_BANDS.includes(value.salience as never)
     || !Array.isArray(value.evidenceIds) || !value.evidenceIds.every((id) => typeof id === 'string')
     || typeof value.causalExplanation !== 'string' || !Array.isArray(value.dimensionChanges)
-    || !Array.isArray(value.entryOperations) || !Array.isArray(value.questChanges) || !Array.isArray(value.worldEffects)) {
+    || !Array.isArray(value.entryOperations) || !Array.isArray(value.beliefOperations)
+    || !Array.isArray(value.questChanges) || !Array.isArray(value.worldEffects) || !proposalFitsByteBudget(value) || !safeProposalJson(value)) {
     return issue('', 'proposal_shape', 'The mutation proposal has missing or invalid top-level fields.');
   }
   if (!value.dimensionChanges.every((change) => record(change) && hasOnlyKeys(change, ['dimensionKey', 'direction', 'intendedDelta'])
@@ -257,11 +332,38 @@ export function parseMutationProposal(value: unknown): ParsedMutationProposal {
       && typeof operation.entryId === 'string' && typeof operation.text === 'string';
     return operation.operation === 'retract' && hasOnlyKeys(operation, ['operation', 'entryId']) && typeof operation.entryId === 'string';
   })) return issue('entryOperations', 'entry_shape', 'Entry operations must use a supported strict structured shape.');
+  if (!value.beliefOperations.every((operation) => {
+    if (!record(operation) || typeof operation.operation !== 'string') return false;
+    if (operation.operation === 'add') {
+      return hasOnlyKeys(operation, ['operation', 'subjectEntityId', 'content', 'confidence', 'provenance', 'originalClaimFingerprint'])
+        && typeof operation.subjectEntityId === 'string' && typeof operation.content === 'string' && typeof operation.confidence === 'number'
+        && typeof operation.originalClaimFingerprint === 'string' && Array.isArray(operation.provenance)
+        && operation.provenance.every((link) => record(link) && hasOnlyKeys(link, ['sourceKind', 'sourceId', 'speakerNpcId'])
+          && typeof link.sourceKind === 'string' && typeof link.sourceId === 'string'
+          && (link.speakerNpcId === undefined || typeof link.speakerNpcId === 'string'));
+    }
+    return operation.operation === 'retract' && hasOnlyKeys(operation, ['operation', 'beliefId', 'reason', 'sourceFingerprint'])
+      && typeof operation.beliefId === 'string' && typeof operation.reason === 'string' && typeof operation.sourceFingerprint === 'string';
+  })) return issue('beliefOperations', 'belief_shape', 'Belief operations must be strict attributed additions or retractions.');
   if (!value.questChanges.every((change) => record(change) && hasOnlyKeys(change, ['questId', 'action', 'motivation'])
     && typeof change.questId === 'string' && typeof change.action === 'string' && typeof change.motivation === 'string')) {
     return issue('questChanges', 'quest_shape', 'Quest changes must use the strict structured shape.');
   }
   return { ok: true, value: value as unknown as PersonalityMutationProposal };
+}
+
+/** A sorted, bounded canonical representation for exact action replay. */
+export function canonicalizeMutationProposal(value: unknown): string | null {
+  const parsed = parseMutationProposal(value);
+  return parsed.ok ? canonicalJson(parsed.value) : null;
+}
+
+/** SHA-256 of the canonical proposal; the database may persist this as its exact replay key. */
+export async function fingerprintMutationProposal(value: unknown): Promise<string | null> {
+  const canonical = canonicalizeMutationProposal(value);
+  if (!canonical || !globalThis.crypto?.subtle) return null;
+  const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function stableKey(value: unknown): value is string {
@@ -275,7 +377,8 @@ function knownEntity(snapshot: WorldValidationSnapshot, id: unknown, expectedKin
 export function validateWorldEffectCommands(
   commands: unknown,
   capability: CapabilityEnvelope,
-  snapshot: WorldValidationSnapshot
+  snapshot: WorldValidationSnapshot,
+  definitions: Pick<PrimitiveRegistry, 'worldEffects' | 'entityArchetypes' | 'locationModifiers' | 'economyModifiers' | 'worldEventTemplates'> = primitiveRegistry
 ): ContractIssue[] {
   if (!Array.isArray(commands)) return [{ path: 'worldEffects', code: 'effect_shape', message: 'World effects must be an array.' }];
   const issues: ContractIssue[] = [];
@@ -293,26 +396,35 @@ export function validateWorldEffectCommands(
     const invalid = (allowed: string[], condition: boolean, code = 'effect_payload') => {
       if (!hasOnlyKeys(command, ['kind', ...allowed]) || !condition) issues.push({ path, code, message: 'The effect payload is malformed or references unsupported state.' });
     };
+    const metadata = definitions.worldEffects.find((effect) => effect.kind === command.kind);
+    if (!metadata) {
+      issues.push({ path: `${path}.kind`, code: 'effect_registry', message: 'The effect kind is missing from the immutable primitive registry.' });
+      return;
+    }
+    const targetAllowed = (id: unknown) => knownEntity(snapshot, id) && metadata.targetKinds.includes(snapshot.entityKinds[String(id)]);
+    const quantity = (value: unknown) => Number.isInteger(value) && Number(value) >= metadata.bounds.min && Number(value) <= metadata.bounds.max;
     switch (command.kind as WorldEffectCommand['kind']) {
       case 'adjust_relationship':
         invalid(['subjectNpcId', 'objectEntityId', 'axis', 'delta'], knownEntity(snapshot, command.subjectNpcId, 'npc') && knownEntity(snapshot, command.objectEntityId)
-          && ['trust', 'affection', 'respect', 'fear', 'obligation'].includes(String(command.axis))
-          && Number.isInteger(command.delta) && Number(command.delta) >= -100 && Number(command.delta) <= 100);
+          && targetAllowed(command.objectEntityId) && ['trust', 'affection', 'respect', 'fear', 'obligation'].includes(String(command.axis))
+          && quantity(command.delta));
         break;
       case 'create_quest':
         invalid(['ownerNpcId', 'templateKey', 'targetEntityIds'], knownEntity(snapshot, command.ownerNpcId, 'npc') && stableKey(command.templateKey)
-          && Array.isArray(command.targetEntityIds) && command.targetEntityIds.length > 0 && command.targetEntityIds.every((id) => knownEntity(snapshot, id)));
+          && Array.isArray(command.targetEntityIds) && command.targetEntityIds.length >= metadata.bounds.min && command.targetEntityIds.length <= metadata.bounds.max && command.targetEntityIds.every(targetAllowed));
         break;
       case 'update_quest':
         invalid(['questId', 'action', 'approach', 'targetEntityIds'], typeof command.questId === 'string' && snapshot.activeQuestIds.includes(command.questId)
           && typeof command.action === 'string' && capability.allowedActions.includes(command.action)
           && (command.approach === undefined || (typeof command.approach === 'string' && capability.allowedApproaches.includes(command.approach)))
-          && (command.targetEntityIds === undefined || (Array.isArray(command.targetEntityIds) && command.targetEntityIds.every((id) => knownEntity(snapshot, id)))));
+          && (command.targetEntityIds === undefined || (Array.isArray(command.targetEntityIds) && command.targetEntityIds.length >= metadata.bounds.min && command.targetEntityIds.length <= metadata.bounds.max && command.targetEntityIds.every(targetAllowed))));
         break;
       case 'create_entity':
         invalid(['entityKind', 'archetypeKey', 'proposedName', 'payload'], capability.allowedTargetKinds.includes(command.entityKind as never)
-          && stableKey(command.archetypeKey) && typeof command.proposedName === 'string' && command.proposedName.trim().length > 0 && command.proposedName.length <= 120
-          && !!command.payload && typeof command.payload === 'object' && !Array.isArray(command.payload));
+          && metadata.targetKinds.includes(command.entityKind as never) && stableKey(command.archetypeKey)
+          && definitions.entityArchetypes.some((archetype) => archetype.key === command.archetypeKey && archetype.kind === command.entityKind)
+          && typeof command.proposedName === 'string' && command.proposedName.trim().length > 0 && command.proposedName.length <= 120
+          && record(command.payload) && safeProposalJson(command.payload));
         break;
       case 'retire_entity': {
         const targetKind = snapshot.entityKinds[String(command.entityId)];
@@ -322,37 +434,37 @@ export function validateWorldEffectCommands(
         const capabilityRule = typeof command.irreversibleEffectKey === 'string'
           ? capability.irreversibleEffects.find((entry) => entry.effectKey === command.irreversibleEffectKey)
           : undefined;
-        const irreversibleAllowed = (targetKind !== 'npc' && command.irreversibleEffectKey === undefined) || (!!authorization && authorization.criticApproved
+        const irreversibleAllowed = !!targetKind && !!authorization && authorization.criticApproved
           && snapshot.currentDay - authorization.visibleSinceDay >= 1 && !!capabilityRule
-          && capabilityRule.targetKinds.includes(targetKind));
-        invalid(['entityId', 'reason', 'irreversibleEffectKey'], knownEntity(snapshot, command.entityId) && typeof command.reason === 'string'
+          && capabilityRule.targetKinds.includes(targetKind);
+        invalid(['entityId', 'reason', 'irreversibleEffectKey'], knownEntity(snapshot, command.entityId) && targetAllowed(command.entityId) && metadata.irreversible && typeof command.reason === 'string'
           && command.reason.trim().length > 0 && irreversibleAllowed, 'irreversible_authorization');
         break;
       }
       case 'record_world_event':
-        invalid(['templateKey', 'participantEntityIds', 'payload'], stableKey(command.templateKey) && Array.isArray(command.participantEntityIds)
-          && command.participantEntityIds.every((id) => knownEntity(snapshot, id)) && !!command.payload && typeof command.payload === 'object' && !Array.isArray(command.payload));
+        invalid(['templateKey', 'participantEntityIds', 'payload'], stableKey(command.templateKey) && definitions.worldEventTemplates.includes(command.templateKey)
+          && Array.isArray(command.participantEntityIds) && command.participantEntityIds.length >= metadata.bounds.min && command.participantEntityIds.length <= metadata.bounds.max
+          && command.participantEntityIds.every(targetAllowed) && record(command.payload) && safeProposalJson(command.payload));
         break;
       case 'apply_location_modifier':
-        invalid(['locationId', 'modifierKey', 'magnitude', 'durationDays'], knownEntity(snapshot, command.locationId, 'location') && stableKey(command.modifierKey)
-          && Number.isFinite(command.magnitude) && Number(command.magnitude) >= -100 && Number(command.magnitude) <= 100
+        invalid(['locationId', 'modifierKey', 'magnitude', 'durationDays'], knownEntity(snapshot, command.locationId, 'location') && targetAllowed(command.locationId) && definitions.locationModifiers.includes(String(command.modifierKey))
+          && quantity(command.magnitude)
           && Number.isInteger(command.durationDays) && Number(command.durationDays) > 0 && Number(command.durationDays) <= 365);
         break;
       case 'transfer_inventory':
         invalid(['itemEntityId', 'fromEntityId', 'toEntityId', 'quantity'], knownEntity(snapshot, command.itemEntityId, 'item')
-          && knownEntity(snapshot, command.fromEntityId) && knownEntity(snapshot, command.toEntityId)
-          && Number.isInteger(command.quantity) && Number(command.quantity) > 0 && Number(command.quantity) <= 1000);
+          && targetAllowed(command.itemEntityId) && targetAllowed(command.fromEntityId) && targetAllowed(command.toEntityId)
+          && quantity(command.quantity));
         break;
       case 'unlock_recipe':
-        invalid(['recipeEntityId'], knownEntity(snapshot, command.recipeEntityId, 'recipe'));
+        invalid(['recipeEntityId'], knownEntity(snapshot, command.recipeEntityId, 'recipe') && targetAllowed(command.recipeEntityId));
         break;
       case 'apply_economy_modifier':
-        invalid(['modifierKey', 'magnitude', 'durationDays'], stableKey(command.modifierKey) && Number.isFinite(command.magnitude)
-          && Number(command.magnitude) >= -100 && Number(command.magnitude) <= 100 && Number.isInteger(command.durationDays)
+        invalid(['modifierKey', 'magnitude', 'durationDays'], definitions.economyModifiers.includes(String(command.modifierKey)) && quantity(command.magnitude) && Number.isInteger(command.durationDays)
           && Number(command.durationDays) > 0 && Number(command.durationDays) <= 365);
         break;
       case 'set_availability':
-        invalid(['npcId', 'available', 'reason'], knownEntity(snapshot, command.npcId, 'npc') && typeof command.available === 'boolean'
+        invalid(['npcId', 'available', 'reason'], knownEntity(snapshot, command.npcId, 'npc') && targetAllowed(command.npcId) && typeof command.available === 'boolean'
           && typeof command.reason === 'string' && command.reason.trim().length > 0);
         break;
       default:
@@ -398,13 +510,17 @@ export function createMutationReceipt(args: {
   const issues = [
     ...validatePersonalitySchema(args.schema),
     ...validatePersonalityProfile(args.currentProfile, args.schema),
-    ...validateMutationProposal(proposal, args.schema, args.currentProfile),
+    ...validateMutationProposal(proposal, args.schema, args.currentProfile, args.worldSnapshot),
     ...validateQuestChanges(proposal.questChanges, args.capabilityEnvelope, args.worldSnapshot),
     ...validateWorldEffectCommands(proposal.worldEffects, args.capabilityEnvelope, args.worldSnapshot)
   ];
   if (issues.length > 0) throw new Error(`Invalid mutation input: ${issues.map((issue) => `${issue.path}:${issue.code}`).join(', ')}`);
 
   const definitions = new Map(args.schema.dimensions.map((dimension) => [dimension.key, dimension]));
+  const entryOperationIsCore = (operation: PersonalityMutationProposal['entryOperations'][number]): boolean => {
+    if (operation.operation === 'add') return operation.entry.core;
+    return args.currentProfile.entries.find((entry) => entry.id === operation.entryId)?.core === true;
+  };
   const dimensions: DimensionMutationReceipt[] = proposal.dimensionChanges.map((change) => {
     const definition = definitions.get(change.dimensionKey)!;
     const pressureBefore = args.pressureByDimension[change.dimensionKey] ?? 0;
@@ -429,14 +545,14 @@ export function createMutationReceipt(args: {
 
   const thresholdQualified = dimensions.some((dimension) => dimension.crossedThreshold);
   if (!thresholdQualified) {
-    return { rulesVersion: EVOLVING_WORLD_RULES_VERSION, outcome: 'pressure_only', chancePercent: null, roll: null, dimensions };
+    return { rulesVersion: EVOLVING_WORLD_RULES_VERSION, outcome: 'pressure_only', chancePercent: null, roll: null, dimensions, appliedEntryOperationIndexes: [] };
   }
 
   if (args.roll === undefined) throw new Error('A persisted 0–99 roll is required for a threshold-qualified proposal.');
   const chancePercent = DEFAULT_MUTATION_CHANCE[proposal.salience];
   const changed = rollPasses(args.roll, chancePercent);
   if (!changed) {
-    return { rulesVersion: EVOLVING_WORLD_RULES_VERSION, outcome: 'roll_failed', chancePercent, roll: args.roll, dimensions };
+    return { rulesVersion: EVOLVING_WORLD_RULES_VERSION, outcome: 'roll_failed', chancePercent, roll: args.roll, dimensions, appliedEntryOperationIndexes: [] };
   }
 
   for (const dimension of dimensions) {
@@ -446,5 +562,7 @@ export function createMutationReceipt(args: {
     dimension.valueAfter = clampTrait(dimension.valueBefore + dimension.intendedDelta);
     dimension.appliedDelta = dimension.valueAfter - dimension.valueBefore;
   }
-  return { rulesVersion: EVOLVING_WORLD_RULES_VERSION, outcome: 'changed', chancePercent, roll: args.roll, dimensions };
+  const definingCoreThresholdCrossed = dimensions.some((dimension) => definitions.get(dimension.dimensionKey)?.core && dimension.crossedThreshold);
+  const appliedEntryOperationIndexes = proposal.entryOperations.flatMap((operation, index) => !entryOperationIsCore(operation) || definingCoreThresholdCrossed ? [index] : []);
+  return { rulesVersion: EVOLVING_WORLD_RULES_VERSION, outcome: 'changed', chancePercent, roll: args.roll, dimensions, appliedEntryOperationIndexes };
 }

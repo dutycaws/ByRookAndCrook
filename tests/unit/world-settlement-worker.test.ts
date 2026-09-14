@@ -6,9 +6,9 @@ import { createSettlementProvider } from '$lib/server/evolving-world/provider';
 import { fixtureProvider } from '../helpers/world-settlement-provider';
 
 const id = (tail: string) => `11111111-1111-4111-8111-${tail.padStart(12, '0')}`;
-const proposal = { rulesVersion:'evolving-world-v1', evidenceIds:['evidence-1'], salience:'meaningful', dimensionChanges:[], entryOperations:[], causalExplanation:'An observed event supports no immediate profile change.', questChanges:[], worldEffects:[] };
+const proposal = { rulesVersion:'evolving-world-v1', evidenceIds:['evidence-1'], salience:'meaningful', dimensionChanges:[], entryOperations:[], beliefOperations:[], causalExplanation:'An observed event supports no immediate profile change.', questChanges:[], worldEffects:[] };
 const digest = { summary:'The tavern rests quietly.', journalEntries:['No new world changes were committed.'], discoveredEntityIds:[] };
-function claim(checkpoints: unknown[] = [], leaseUntil = new Date(Date.now() + 120_000).toISOString()) { return { settlementId:id('1'), jobId:id('2'), fence:id('3'), kind:'resident', ordinal:3, attempt:1, leaseUntil, inputFingerprint:'a'.repeat(64), inputVersion:'world-v1', inputSnapshot:{dayNumber:1, publicEntityIds:['town-square']}, jobInputVersion:'world-v1', jobInputSnapshot:{ evolution:{ schema:{version:'personality-schema-v1',dimensions:[{key:'resolve',label:'Resolve',negativeAnchor:'yielding',positiveAnchor:'unyielding',initialValue:0,volatility:1,core:false}],collections:[]}, profile:{dimensions:{resolve:0},entries:[]}, capability:{version:'v1',allowedActions:[],allowedApproaches:[],allowedWorldEffects:[],allowedTargetKinds:[],socialCapabilities:[],irreversibleEffects:[]}, worldSnapshot:{currentDay:1,entityKinds:{},activeQuestIds:[],authorizedIrreversibleEffects:[]}, pressureByDimension:{resolve:0}, authorizedEvidence:[{id:'evidence-1',kind:'dialogue',happenedOnDay:1,sequence:2,sourceFingerprint:'source-123',salience:'meaningful',summary:'The keeper promised a safe place to rest.'}] } }, checkpoints }; }
+function claim(checkpoints: unknown[] = [], leaseUntil = new Date(Date.now() + 120_000).toISOString()) { return { settlementId:id('1'), jobId:id('2'), fence:id('3'), kind:'resident', ordinal:3, attempt:1, leaseUntil, inputFingerprint:'a'.repeat(64), inputVersion:'world-v1', inputSnapshot:{dayNumber:1, publicEntityIds:['town-square']}, jobInputVersion:'world-v1', jobInputSnapshot:{ evolution:{ schema:{version:'personality-schema-v1',dimensions:[{key:'resolve',label:'Resolve',negativeAnchor:'yielding',positiveAnchor:'unyielding',initialValue:0,volatility:1,core:false}],collections:[]}, profile:{dimensions:{resolve:0},entries:[]}, capability:{version:'v1',allowedActions:[],allowedApproaches:[],allowedWorldEffects:[],allowedTargetKinds:[],socialCapabilities:[],irreversibleEffects:[]}, worldSnapshot:{currentDay:1,entityKinds:{lira:'npc'},activeQuestIds:[],authorizedIrreversibleEffects:[]}, pressureByDimension:{resolve:0}, authorizedEvidence:[{id:'evidence-1',kind:'dialogue',happenedOnDay:1,sequence:2,sourceFingerprint:'a'.repeat(64),salience:'meaningful',summary:'The keeper promised a safe place to rest.'}] } }, checkpoints }; }
 function client(overrides: Partial<Record<string, unknown>> = {}) { const calls:Array<{name:string;args:Record<string,unknown>}> = []; const api: SettlementWorkerClient = { async rpc(name,args={}) { calls.push({name,args}); const entry=overrides[name]; if (typeof entry === 'function') return (entry as (args:Record<string,unknown>)=>unknown)(args) as any; if (entry) return {data:entry,error:null}; if(name==='world_settlement_heartbeat')return {data:{leaseUntil:new Date(Date.now()+120_000).toISOString()},error:null}; return {data:{status:'recorded'},error:null}; } }; return { api,calls }; }
 
 describe('world settlement worker', () => {
@@ -43,6 +43,18 @@ describe('world settlement worker', () => {
   it('rejects a fabricated evidence reference before critic work', async () => {
     const mock=client(); const provider=fixtureProvider({proposer:{...proposal,evidenceIds:['fabricated']}});
     expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual(['proposer']);
+  });
+  it('rejects belief provenance that is not frozen authorized evidence', async () => {
+    const mock=client(); const provider=fixtureProvider({proposer:{...proposal,beliefOperations:[{operation:'add',subjectEntityId:'lira',content:'The keeper keeps promises.',confidence:60,provenance:[{sourceKind:'dialogue_claim',sourceId:'fabricated'}],originalClaimFingerprint:'a'.repeat(64)}]}});
+    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual(['proposer']);
+  });
+  it('rejects a belief when its claim fingerprint belongs to different frozen evidence', async () => {
+    const raw=claim() as any;
+    raw.jobInputSnapshot.evolution.authorizedEvidence.push({id:'evidence-2',kind:'gossip',happenedOnDay:1,sequence:3,sourceFingerprint:'b'.repeat(64),salience:'minor',summary:'A second rumor.'});
+    const mock=client(); const provider=fixtureProvider({proposer:{...proposal,beliefOperations:[{operation:'add',subjectEntityId:'lira',content:'The keeper keeps promises.',confidence:60,provenance:[{sourceKind:'dialogue_claim',sourceId:'evidence-1'}],originalClaimFingerprint:'b'.repeat(64)}]}});
+    expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'rejected'});
     expect(provider.calls).toEqual(['proposer']);
   });
   it('gives the proposer only the frozen authorized evidence records', async () => {

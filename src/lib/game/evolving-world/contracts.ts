@@ -130,6 +130,26 @@ export type ProfileEntryOperation =
   | { operation: 'revise'; entryId: string; text: string }
   | { operation: 'retract'; entryId: string };
 
+/**
+ * Beliefs are attributed NPC knowledge, never world canon. Database IDs are deliberately
+ * absent from adds: the server assigns them only when it commits a validated operation.
+ */
+export type BeliefOperation =
+  | {
+      operation: 'add';
+      subjectEntityId: string;
+      content: string;
+      confidence: number;
+      provenance: BeliefProvenanceLink[];
+      originalClaimFingerprint: string;
+    }
+  | {
+      operation: 'retract';
+      beliefId: string;
+      reason: string;
+      sourceFingerprint: string;
+    };
+
 export type WorldEffectCommand =
   | {
       kind: 'adjust_relationship';
@@ -155,6 +175,7 @@ export interface PersonalityMutationProposal {
   salience: SalienceBand;
   dimensionChanges: DimensionPressureProposal[];
   entryOperations: ProfileEntryOperation[];
+  beliefOperations: BeliefOperation[];
   causalExplanation: string;
   questChanges: Array<{ questId: string; action: string; motivation: string }>;
   worldEffects: WorldEffectCommand[];
@@ -208,6 +229,8 @@ export interface MutationReceipt {
   chancePercent: number | null;
   roll: number | null;
   dimensions: DimensionMutationReceipt[];
+  /** Indexes of profile-entry operations authorized by this exact threshold/roll result. */
+  appliedEntryOperationIndexes: number[];
 }
 
 export interface ContractIssue {
