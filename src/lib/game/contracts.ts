@@ -498,6 +498,12 @@ export interface AdvanceDayReceipt {
   actionId: string;
   newDay: number;
   committedRevision: number;
+  /** Present only for day closes created after the evolving-world queue was added. */
+  worldSettlement?: {
+    settlementId: string;
+    status: 'queued';
+    dayNumber: number;
+  };
 }
 
 export function qualityLabel(index: number): string {
@@ -715,6 +721,14 @@ export function parseAdvanceDayReceipt(value: Json): AdvanceDayReceipt {
   const receipt = parseCommandReceipt<AdvanceDayReceipt>(value);
   if (!Number.isInteger(receipt.newDay) || receipt.newDay < 2) {
     throw new Error('Invalid day transition receipt');
+  }
+  if (receipt.worldSettlement !== undefined) {
+    const settlement = receipt.worldSettlement;
+    if (!settlement || typeof settlement !== 'object' || Array.isArray(settlement)
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(settlement.settlementId)
+      || settlement.status !== 'queued' || !Number.isInteger(settlement.dayNumber) || settlement.dayNumber < 1) {
+      throw new Error('Invalid day transition receipt');
+    }
   }
   return receipt;
 }

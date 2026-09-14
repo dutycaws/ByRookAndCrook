@@ -12,7 +12,7 @@ select is((select value->>'status' from pg_temp.enqueue),'queued','service enque
 select is((select value->>'replayed' from pg_temp.enqueue),'false','first enqueue is not replayed');
 reset role;
 select is((select world_phase from public.tavern_saves where id='17200000-0000-4000-8000-000000000010'),'settling','enqueue places save in settling phase without advancing the day');
-select is((select count(*) from private.world_settlement_jobs where settlement_id=(select (value->>'settlementId')::uuid from pg_temp.enqueue)),7::bigint,'enqueue creates deterministic ordered job rows');
+select is((select count(*) from private.world_settlement_jobs where settlement_id=(select (value->>'settlementId')::uuid from pg_temp.enqueue)),6::bigint,'generic enqueue creates the deterministic non-resident job rows');
 set local role service_role; set local request.jwt.claim.role='service_role';
 select is((public.world_settlement_enqueue('17200000-0000-4000-8000-000000000010','17200000-0000-4000-8000-000000000020',0,'{"ignored":"replay"}'::jsonb,'settlement-input-v1')->>'replayed'),'true','same save action replays exact enqueue receipt');
 select throws_ok($$select public.world_settlement_enqueue('17200000-0000-4000-8000-000000000010','17200000-0000-4000-8000-000000000021',1,'{}'::jsonb,'settlement-input-v1')$$,'PT409',null,'stale revision cannot enqueue settlement work');

@@ -18,6 +18,17 @@ describe('world settlement worker', () => {
     expect(() => parseSettlementClaim({ status:'processing', jobId:'nope' })).toThrow();
     const mock=client(); expect(await runSettlementClaim(mock.api, { jobId:'nope' })).toEqual({status:'failed',errorCode:'claim_malformed'}); expect(mock.calls).toHaveLength(0);
   });
+  it('accepts full settlement ordinals and an optional nullable resident subject', () => {
+    const full=claim() as any;
+    full.ordinal=64; full.subjectInstanceId=id('10');
+    expect(parseSettlementClaim(full)).toMatchObject({ordinal:64,subjectInstanceId:id('10')});
+    full.subjectInstanceId=null;
+    expect(parseSettlementClaim(full)).toMatchObject({ordinal:64,subjectInstanceId:null});
+    full.subjectInstanceId='not-a-uuid';
+    expect(() => parseSettlementClaim(full)).toThrow();
+    full.subjectInstanceId=null; full.ordinal=65;
+    expect(() => parseSettlementClaim(full)).toThrow();
+  });
   it('atomically commits an accepted resident proposal with its canonical fingerprint and digest', async () => {
     const mock=client({world_settlement_commit_mutation:(args:Record<string,unknown>)=>committedReceipt(args)}); const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
     expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'pressure_only'});

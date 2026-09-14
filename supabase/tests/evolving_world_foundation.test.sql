@@ -26,8 +26,8 @@ select throws_ok($$update private.world_canonical_entities set payload='{"rewrit
 select throws_ok($$delete from private.world_canonical_entities where entity_key='old-road'$$,'55000',null,'canonical entities cannot be deleted with their history');
 
 select is((select version_id from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'18181818-1818-4181-8181-181818181819'::uuid,'resident profile backfill pins immutable NPC version');
-select is((select profile_schema_version from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'resident-profile-compat-v1','backfill gives every resident an explicit compatibility profile schema');
-select ok((select current_profile ? 'identity' and public_disposition ? 'name' from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'current profile and bounded public disposition are separate from frozen source pins');
+select is((select profile_schema_version from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'personality-schema-v1','pilot resident backfill installs the current typed personality schema');
+select ok((select current_profile ? 'dimensions' and current_profile ? 'entries' and public_disposition ? 'name' from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'typed current profile and bounded public disposition remain separate from frozen source pins');
 insert into private.world_resident_personality_ledger(instance_id,profile_revision,receipt_key,delta) values ('17100000-0000-4000-8000-000000000020',1,'17100000-0000-4000-8000-000000000021','{"caution":2}');
 select throws_ok($$delete from private.world_resident_personality_ledger$$,'55000',null,'personality ledger is append-only');
 select throws_ok($$update private.world_resident_profiles set current_profile='{"changed":true}' where instance_id='17100000-0000-4000-8000-000000000020'$$,'55000',null,'profile state cannot change without a receipt-backed revision');

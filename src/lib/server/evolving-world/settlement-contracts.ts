@@ -23,6 +23,7 @@ export class SettlementProviderError extends Error {
 export type SettlementCheckpoint = { stage: SettlementStage; payload: Record<string, unknown>; usage: Record<string, unknown>; model: string; promptVersion: string; sourceFence: string };
 export type SettlementClaim = {
   settlementId: string; jobId: string; fence: string; kind: SettlementJobKind; ordinal: number; attempt: number;
+  subjectInstanceId: string | null;
   leaseUntil: string; leaseUntilMs: number;
   inputFingerprint: string; inputVersion: string; inputSnapshot: Record<string, unknown>;
   jobInputVersion: string; jobInputSnapshot: Record<string, unknown>; checkpoints: SettlementCheckpoint[];
@@ -48,8 +49,10 @@ export function parseSettlementClaim(value: unknown): SettlementClaim | IdleClai
   if (typeof value.status === 'string' && terminalStatuses.has(value.status) && !('jobId' in value)) return { status: 'terminal' };
   const lease = futureIso(value.leaseUntil);
   const ordinal = value.ordinal; const attempt = value.attempt;
+  const subjectInstanceId = value.subjectInstanceId;
   if (!uuid.test(String(value.settlementId)) || !uuid.test(String(value.jobId)) || !uuid.test(String(value.fence))
-    || !jobKinds.has(value.kind as SettlementJobKind) || !Number.isInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > 7 || !Number.isInteger(attempt) || (attempt as number) < 1 || (attempt as number) > 3
+    || !jobKinds.has(value.kind as SettlementJobKind) || !Number.isInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > 64 || !Number.isInteger(attempt) || (attempt as number) < 1 || (attempt as number) > 3
+    || (subjectInstanceId !== undefined && subjectInstanceId !== null && !uuid.test(String(subjectInstanceId)))
     || !fingerprint.test(String(value.inputFingerprint)) || !string(value.inputVersion, 80) || !object(value.inputSnapshot) || byteSize(value.inputSnapshot) > 32_768
     || !string(value.jobInputVersion, 80) || !object(value.jobInputSnapshot) || byteSize(value.jobInputSnapshot) > 16_384 || !lease || !Array.isArray(value.checkpoints) || value.checkpoints.length > 6) {
     throw new SettlementProviderError('provider_malformed', 'Settlement claim was incomplete or invalid.');
@@ -65,7 +68,7 @@ export function parseSettlementClaim(value: unknown): SettlementClaim | IdleClai
     checkpoints.push({ stage: checkpoint.stage as SettlementStage, payload: checkpoint.payload, usage: checkpoint.usage, model: checkpoint.model as string, promptVersion: checkpoint.promptVersion as string, sourceFence: checkpoint.sourceFence as string });
   }
   return {
-    settlementId: value.settlementId as string, jobId: value.jobId as string, fence: value.fence as string, kind: value.kind as SettlementJobKind, leaseUntil:lease.text, leaseUntilMs:lease.ms,
+    settlementId: value.settlementId as string, jobId: value.jobId as string, fence: value.fence as string, kind: value.kind as SettlementJobKind, subjectInstanceId: subjectInstanceId === undefined ? null : subjectInstanceId as string | null, leaseUntil:lease.text, leaseUntilMs:lease.ms,
     ordinal: value.ordinal as number, attempt: value.attempt as number, inputFingerprint: value.inputFingerprint as string, inputVersion: value.inputVersion as string,
     inputSnapshot: value.inputSnapshot, jobInputVersion: value.jobInputVersion as string, jobInputSnapshot: value.jobInputSnapshot, checkpoints
   };

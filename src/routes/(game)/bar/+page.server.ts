@@ -1,8 +1,8 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getBarSnapshot, serveHospitality } from '$lib/server/serving';
+import { advanceDay } from '$lib/server/game';
 import { GameServiceError } from '$lib/server/game';
 import { dialogueAvailability } from '$lib/server/dialogue/runtime';
-import { databaseError } from '$lib/server/dialogue/orchestrator';
 import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { presentBarPatrons } from '$lib/game/bar-scene';
@@ -78,9 +78,17 @@ export const actions: Actions = {
     const action=String(data.get('actionId')??''); const save=String(data.get('saveId')??'');
     const revision=Number(data.get('revision'));
     if(!uuid.test(action)||!uuid.test(save)||!data.has('revision')||!Number.isSafeInteger(revision)||revision<0)return fail(400,{message:'Invalid day transition.'});
-    const r=await locals.supabase.rpc('advance_tavern_day',{p_save_id:save,p_action_id:action,p_expected_revision:revision});
-    if(r.error){const e=databaseError(r.error);return fail(e.status,{message:e.message});}
-    return {success:true,message:'The tavern is closed. A new day begins; the journal records what happened overnight.'};
+    try {
+      const receipt = await advanceDay(locals.supabase, { saveId:save, actionId:action, expectedRevision:revision });
+      if (receipt.worldSettlement) {
+        return { success:true, receipt, message:'The tavern is closed. Overnight settlement is underway; the journal will update when it completes.' };
+      }
+      return { success:true, receipt, message:'The tavern is closed. A new day begins; the journal records what happened overnight.' };
+    } catch (cause) {
+      const message = cause instanceof GameServiceError ? cause.message : 'The tavern ledger is unavailable. Please retry the same close.';
+      const status = cause instanceof GameServiceError ? cause.status : 500;
+      return fail(status, { message });
+    }
   },
   serve: async ({ locals, request }) => {
     if (!await locals.getVerifiedUser()) redirect(303, '/login');

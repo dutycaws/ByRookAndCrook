@@ -20,7 +20,7 @@ create function pg_temp.fp(p jsonb) returns text language sql security definer s
 create function pg_temp.evo(i uuid,t uuid) returns jsonb language sql as $$select private.world_frozen_resident_evolution_base(i)||jsonb_build_object('authorizedEvidence',jsonb_build_array(jsonb_build_object('happenedOnDay',1,'id','evidence-1','kind','world_event','salience','major','sequence',1,'sourceFingerprint',repeat('a',64),'summary','The road was kept safe.')),'worldSnapshot',jsonb_build_object('entityKinds',jsonb_build_object(t::text,'npc')))$$;
 create function pg_temp.case(s uuid,j uuid,f uuid,i uuid,t uuid,d integer) returns void language plpgsql as $$begin
  insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,fence,lease_until,deadline_at,input_snapshot,input_version) values(s,(select save_id from pg_temp.r),d,0,'fixture-'||d,'processing',f,clock_timestamp()+interval '5 minutes',clock_timestamp()+interval '5 minutes','{}','fixture-v1');
- insert into private.world_settlement_jobs(id,settlement_id,ordinal,job_kind,status,input_fingerprint,input_snapshot,input_version) values(j,s,1,'resident','processing','job-'||d,jsonb_build_object('evolution',pg_temp.evo(i,t)),'fixture-v1');
+ insert into private.world_settlement_jobs(id,settlement_id,ordinal,job_kind,subject_instance_id,status,input_fingerprint,input_snapshot,input_version) values(j,s,1,'resident',i,'processing','job-'||d,jsonb_build_object('evolution',pg_temp.evo(i,t)),'fixture-v1');
  insert into private.world_settlement_attempts(job_id,attempt_number,fence,lease_until) values(j,1,f,clock_timestamp()+interval '5 minutes'); end$$;
 
 -- Installed definition authority, including source values the RPC depends upon.
