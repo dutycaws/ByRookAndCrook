@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { type SettlementWorkerClient } from '$lib/server/evolving-world/settlement-worker';
 import { drainWorldSettlementQueue, runSettlementClaim, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
 import { parseSettlementClaim, SettlementProviderError } from '$lib/server/evolving-world/settlement-contracts';
-import { fingerprintMutationProposal, fingerprintSocialEncounterProposal } from '$lib/game/evolving-world';
+import { canonicalizeProceduralWorldProposal, fingerprintMutationProposal, fingerprintSocialEncounterProposal, parseFrozenProceduralWorldContext } from '$lib/game/evolving-world';
 import { createSettlementProvider } from '$lib/server/evolving-world/provider';
 import { fixtureProvider } from '../helpers/world-settlement-provider';
 
@@ -22,6 +22,12 @@ function socialContext() { const belief={id:socialBelief,subjectEntityId:socialT
 function socialProposal(publicSummary: string | null = 'Lira and Torvin compared reports by the northern road.') { return {version:'social-encounter-v1',templateKey:'road-rumor',participantResidentIds:[socialLira,socialTorvin],privateCommunicativeIntents:[{speakerResidentId:socialLira,recipientResidentId:socialTorvin,mode:'withhold',message:'Do not mention the smoke to the keeper yet.'}],privateExchangeSummary:'Lira privately asks Torvin to keep their smoke report close.',evidenceIds:['evidence-smoke'],causalExplanation:'The exchange relies only on the frozen smoke report.',relationshipEffects:[{recipientResidentId:socialTorvin,sourceResidentId:socialLira,axis:'trust',delta:1}],gossipBeliefAdditions:[{recipientResidentId:socialTorvin,sourceResidentId:socialLira,sourceBeliefId:socialBelief,sourceEvidenceId:'evidence-smoke',originalClaimFingerprint:socialFingerprint,content:'Smoke rose by the northern pass.',confidence:56,provenance:[{sourceKind:'direct_evidence',sourceId:'evidence-smoke'},{sourceKind:'gossip',sourceId:socialBelief,speakerNpcId:socialLiraNpc}]}],publicSummary}; }
 function socialClaim(checkpoints: unknown[] = []) { const raw=claim(checkpoints) as any; raw.kind='social_encounter'; raw.jobInputVersion='social-encounter-v1'; raw.jobInputSnapshot=socialContext(); return raw; }
 async function socialReceipt(args: Record<string, unknown>) { return {data:{status:'completed',rulesVersion:'social-encounter-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:await fingerprintSocialEncounterProposal(args.p_proposal,socialContext() as any)},error:null}; }
+const proceduralResident=id('201');
+function proceduralContext() { return {version:'procedural-world-v1',entityKinds:{millhaven:'location'},activeGeneratedEntityCount:12,activeQuestByResident:{},capabilities:{[proceduralResident]:{version:'capabilities-v1',allowedActions:['prepare'],allowedApproaches:['scouting'],allowedWorldEffects:['create_entity','record_world_event'],allowedTargetKinds:['location'],socialCapabilities:[],irreversibleEffects:[]}}}; }
+function proceduralProposal() { return {version:'procedural-world-v1',commands:[{operation:'entity',effectKind:'create_entity',sourceResidentId:proceduralResident,entityKind:'place',entityKey:'Old Mill',archetypeKey:'landmark',proposedName:'Old Mill',payload:{region:'north'}},{operation:'public_event',effectKind:'record_world_event',sourceResidentId:proceduralResident,templateKey:'market-day',participantEntityRefs:['millhaven'],title:'Market day returns',summary:'Merchants gather by the old mill.',reuseKey:'old-mill-market'}]}; }
+function proceduralClaim(checkpoints: unknown[] = []) { const raw=claim(checkpoints) as any; raw.kind='procedural_world'; raw.jobInputVersion='procedural-world-v1'; raw.jobInputSnapshot=proceduralContext(); return raw; }
+async function proceduralFingerprint(proposal:unknown) { const context=parseFrozenProceduralWorldContext(proceduralContext()); const canonical=context && canonicalizeProceduralWorldProposal(proposal,context); if (!canonical) throw new Error('fixture proposal must canonicalize'); const bytes=await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical)); return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join(''); }
+async function proceduralReceipt(args: Record<string,unknown>, replayed=false) { return {data:{status:'completed',rulesVersion:'procedural-world-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:await proceduralFingerprint(args.p_proposal),replayed},error:null}; }
 
 describe('world settlement worker', () => {
   it('strictly rejects malformed claims before any RPC', async () => {
@@ -146,6 +152,46 @@ describe('world settlement worker', () => {
     expect(await runSettlementClaim(mock.api,socialClaim(checkpoints),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'social_encounter'});
     expect(provider.calls).toEqual([]);
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'social_encounter_proposer',status:'reused'}),expect.objectContaining({stage:'social_encounter_critic',status:'reused'})]));
+  });
+  it('commits an accepted procedural proposal through the service-only RPC with two calls and content-free telemetry', async () => {
+    const events:unknown[]=[]; const mock=client({world_settlement_commit_procedural_world:proceduralReceipt});
+    const provider=fixtureProvider({procedural_world_proposer:proceduralProposal(),procedural_world_critic:{decision:'accept',instructions:[]}});
+    expect(await runSettlementClaim(mock.api,proceduralClaim(),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'procedural_world'});
+    expect(provider.calls).toEqual(['procedural_world_proposer','procedural_world_critic']);
+    expect(mock.calls.find((entry)=>entry.name==='world_settlement_commit_procedural_world')?.args).toMatchObject({p_settlement_id:id('1'),p_job_id:id('2'),p_fence:id('3'),p_proposal:{version:'procedural-world-v1'}});
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({stage:'procedural_world_proposer',status:'completed',attempt:1,model:'fixture-model',tokenUsage:{input:1,output:1}}),
+      expect.objectContaining({stage:'procedural_world_critic',status:'completed'}),
+      expect.objectContaining({stage:'procedural_world_validate',status:'completed'}),
+      expect.objectContaining({stage:'procedural_world_commit',status:'completed'})
+    ]));
+    const serialized=JSON.stringify(events); expect(serialized).not.toContain('Market day returns'); expect(serialized).not.toContain(proceduralResident);
+  });
+  it('allows one procedural repair, reuses validated checkpoints without historical usage, and accepts an exact replay receipt', async () => {
+    const repair=fixtureProvider({procedural_world_proposer:proceduralProposal(),procedural_world_critic:{decision:'repair',instructions:[{code:'entity_registry',path:'commands.entity'}]},procedural_world_repair:proceduralProposal(),procedural_world_final_critic:{decision:'accept',instructions:[]}});
+    expect(await runSettlementClaim(client({world_settlement_commit_procedural_world:proceduralReceipt}).api,proceduralClaim(),{provider:repair,heartbeatMs:99_999})).toEqual({status:'completed',kind:'procedural_world'});
+    expect(repair.calls).toEqual(['procedural_world_proposer','procedural_world_critic','procedural_world_repair','procedural_world_final_critic']);
+    const checkpoints=[
+      {stage:'proposer',payload:{proposal:proceduralProposal()},usage:{input:999,output:999},model:'old',promptVersion:'v',sourceFence:id('4')},
+      {stage:'critic',payload:{decision:{decision:'accept',instructions:[]}},usage:{input:999,output:999},model:'old',promptVersion:'v',sourceFence:id('4')}
+    ];
+    const events:unknown[]=[]; const reused=fixtureProvider({});
+    expect(await runSettlementClaim(client({world_settlement_commit_procedural_world:(args:Record<string,unknown>)=>proceduralReceipt(args,true)}).api,proceduralClaim(checkpoints),{provider:reused,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'procedural_world'});
+    expect(reused.calls).toEqual([]);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'procedural_world_proposer',status:'reused'}),expect.objectContaining({stage:'procedural_world_critic',status:'reused'})]));
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'procedural_world_commit',status:'reused',attempt:1})]));
+    expect((events as Array<Record<string,unknown>>).find((event)=>event.stage==='procedural_world_commit')).not.toHaveProperty('durationMs');
+    expect(JSON.stringify(events)).not.toContain('999');
+  });
+  it('rejects malformed procedural receipts and uses a safe fallback for provider failures without committing', async () => {
+    const malformed=client({world_settlement_commit_procedural_world:async(args:Record<string,unknown>)=>({data:{...(await proceduralReceipt(args)).data,replayed:'true'},error:null})});
+    const provider=fixtureProvider({procedural_world_proposer:proceduralProposal(),procedural_world_critic:{decision:'accept',instructions:[]}});
+    expect(await runSettlementClaim(malformed.api,proceduralClaim(),{provider,heartbeatMs:99_999})).toEqual({status:'failed',errorCode:'commit_unknown'});
+    const fallback=client(); const events:unknown[]=[]; const unavailable=fixtureProvider({procedural_world_proposer:new SettlementProviderError('provider_unavailable','private upstream detail')});
+    expect(await runSettlementClaim(fallback.api,proceduralClaim(),{provider:unavailable,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'skipped'});
+    expect(fallback.calls.map((entry)=>entry.name)).toContain('world_settlement_safe_result'); expect(fallback.calls.map((entry)=>entry.name)).not.toContain('world_settlement_commit_procedural_world');
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'procedural_world_fallback',status:'completed',errorCode:'provider_unavailable'})]));
+    expect(JSON.stringify(events)).not.toContain('private upstream detail');
   });
   it('fails closed into a social safe fallback for invalid, rejected, or unavailable social work', async () => {
     const invalid=client(); const invalidProvider=fixtureProvider({social_encounter_proposer:{invalid:true}});

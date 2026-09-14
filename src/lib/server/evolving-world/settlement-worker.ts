@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
-import { fingerprintMutationProposal, fingerprintSocialEncounterProposal, fingerprintWorldCanonEventProposal, parseFrozenSocialEncounterContext, parseMutationProposal, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
+import { canonicalizeProceduralWorldProposal, fingerprintMutationProposal, fingerprintSocialEncounterProposal, fingerprintWorldCanonEventProposal, parseFrozenProceduralWorldContext, parseFrozenSocialEncounterContext, parseMutationProposal, parseProceduralWorldCriticDecision, parseProceduralWorldProposal, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
 import type { Database } from '$lib/database.types';
 import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
 import { emitAiObservability, localAiObservabilitySink, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import {
-  CANON_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, SOCIAL_ENCOUNTER_CHECKPOINT_STAGE, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
+  CANON_CHECKPOINT_STAGE, PROCEDURAL_WORLD_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, SOCIAL_ENCOUNTER_CHECKPOINT_STAGE, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
   type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
 } from './settlement-contracts';
 
@@ -125,6 +125,21 @@ function socialEncounterCommitted(value: unknown, expected: { settlementId: stri
     && receipt.proposalFingerprint === expected.proposalFingerprint;
 }
 
+function proceduralWorldCommitReplay(value: unknown, expected: { settlementId: string; jobId: string; proposalFingerprint: string }): boolean | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const receipt=value as Record<string, unknown>;
+  if (!(receipt.status === 'completed' && receipt.rulesVersion === 'procedural-world-v1'
+    && receipt.settlementId === expected.settlementId && receipt.jobId === expected.jobId
+    && receipt.proposalFingerprint === expected.proposalFingerprint && typeof receipt.replayed === 'boolean')) return null;
+  return receipt.replayed;
+}
+
+async function fingerprintProceduralWorldProposal(proposal: unknown, context: NonNullable<ReturnType<typeof parseFrozenProceduralWorldContext>>): Promise<string | null> {
+  const canonical=canonicalizeProceduralWorldProposal(proposal,context); if (!canonical) return null;
+  const digest=await globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical));
+  return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+
 /** Runs one fenced job. A validated resident proposal is committed atomically by the server-owned mutation RPC. */
 export async function runSettlementClaim(client: SettlementWorkerClient, rawClaim: unknown, runtime: SettlementRuntime = {}): Promise<SettlementOutcome> {
   let parsed; try { parsed = parseSettlementClaim(rawClaim); } catch { return { status:'failed', errorCode:'claim_malformed' }; }
@@ -139,7 +154,8 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   const elapsed = (started: number) => Math.max(0, Math.min(24 * 60 * 60 * 1_000, Math.round(now() - started)));
   const callBudget = claim.kind === 'canon' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.canon.maximum
     : claim.kind === 'resident' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.resident.maximum
-      : claim.kind === 'social_encounter' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.social_encounter.maximum : 0;
+      : claim.kind === 'social_encounter' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.social_encounter.maximum
+        : claim.kind === 'procedural_world' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.procedural_world.maximum : 0;
   const generate = async (stage: ProviderStage, payload: unknown): Promise<ProviderResult> => {
     if (calls >= callBudget) {
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'budget'});
@@ -164,7 +180,7 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
     kind: 'no_changes' | 'rejected' | 'skipped',
     digest: string,
     reason?: SafeFallbackReason,
-    stage: 'safe_fallback' | 'social_encounter_fallback' = 'safe_fallback'
+    stage: 'safe_fallback' | 'social_encounter_fallback' | 'procedural_world_fallback' = 'safe_fallback'
   ): Promise<void> => {
     const started = now();
     await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'started',attempt:claim.attempt,errorCode:reason});
@@ -344,6 +360,89 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
           throw cause;
         }
         await completeSafely('skipped','The day settled without new world changes.',socialFallbackReason(cause),'social_encounter_fallback');
+        return {status:'completed',kind:'skipped'};
+      }
+    }
+    if (claim.kind === 'procedural_world') {
+      const context=parseFrozenProceduralWorldContext(claim.jobInputSnapshot);
+      const reject=async(reason:string):Promise<SettlementOutcome> => {
+        await saveCheckpoint(client,claim,'validated',{accepted:false,reason});
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_validate',status:'skipped',attempt:claim.attempt,errorCode:'validation_rejected'});
+        await completeSafely('rejected','The day settled without new world changes.','validation_rejected','procedural_world_fallback');
+        return {status:'completed',kind:'rejected'};
+      };
+      if (!context) return await reject('procedural_world_context_missing');
+      try {
+        let rawProposal=checkpoint(claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_proposer)?.proposal;
+        if (rawProposal) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_proposer',status:'reused',attempt:claim.attempt});
+        else {
+          const result=await generate('procedural_world_proposer',context);
+          rawProposal=result.value;
+          await saveCheckpoint(client,claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_proposer,{proposal:rawProposal},result);
+        }
+        let parsedProposal=parseProceduralWorldProposal(rawProposal,context);
+        if (!parsedProposal.ok) return await reject('procedural_world_proposal_invalid');
+
+        let rawDecision=checkpoint(claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_critic)?.decision;
+        if (rawDecision) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_critic',status:'reused',attempt:claim.attempt});
+        else {
+          const result=await generate('procedural_world_critic',{context,proposal:parsedProposal.value});
+          rawDecision=result.value;
+          await saveCheckpoint(client,claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_critic,{decision:rawDecision},result);
+        }
+        let decision=parseProceduralWorldCriticDecision(rawDecision);
+        if (!decision || decision.decision === 'reject') return await reject('procedural_world_critic_rejected');
+        if (decision.decision === 'repair') {
+          let rawRepair=checkpoint(claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_repair)?.proposal;
+          if (rawRepair) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_repair',status:'reused',attempt:claim.attempt});
+          else {
+            const result=await generate('procedural_world_repair',{context,proposal:parsedProposal.value,instructions:decision.instructions});
+            rawRepair=result.value;
+            await saveCheckpoint(client,claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_repair,{proposal:rawRepair},result);
+          }
+          parsedProposal=parseProceduralWorldProposal(rawRepair,context);
+          if (!parsedProposal.ok) return await reject('procedural_world_repair_invalid');
+          let rawFinal=checkpoint(claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_final_critic)?.decision;
+          if (rawFinal) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_final_critic',status:'reused',attempt:claim.attempt});
+          else {
+            const result=await generate('procedural_world_final_critic',{context,proposal:parsedProposal.value});
+            rawFinal=result.value;
+            await saveCheckpoint(client,claim,PROCEDURAL_WORLD_CHECKPOINT_STAGE.procedural_world_final_critic,{decision:rawFinal},result);
+          }
+          decision=parseProceduralWorldCriticDecision(rawFinal);
+          if (!decision || decision.decision !== 'accept') return await reject('procedural_world_repair_rejected');
+        }
+        if (decision.decision !== 'accept') return await reject('procedural_world_critic_malformed');
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_validate',status:'completed',attempt:claim.attempt});
+        await saveCheckpoint(client,claim,'validated',{accepted:true,proposal:parsedProposal.value});
+        const proposalFingerprint=await fingerprintProceduralWorldProposal(parsedProposal.value,context);
+        if (!proposalFingerprint) return await reject('procedural_world_fingerprint_invalid');
+        if (guard.lost || !guard.canCall()) return {status:'lease_lost',errorCode:'lease_lost'};
+        const commitStarted=now();
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:'started',attempt:claim.attempt});
+        let dispatched=false;
+        try {
+          dispatched=true;
+          const result=await rpc(client,'world_settlement_commit_procedural_world',{p_settlement_id:claim.settlementId,p_job_id:claim.jobId,p_fence:claim.fence,p_proposal:parsedProposal.value});
+          const replayed=proceduralWorldCommitReplay(result,{settlementId:claim.settlementId,jobId:claim.jobId,proposalFingerprint});
+          if (replayed === null) {
+            await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:'commit_unknown'});
+            return {status:'failed',errorCode:'commit_unknown'};
+          }
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:replayed?'reused':'completed',attempt:claim.attempt,...(replayed ? {} : {durationMs:elapsed(commitStarted)})});
+          return {status:'completed',kind:'procedural_world'};
+        } catch (cause) {
+          const code=isLeaseError(cause as Error) ? 'lease_lost' : /PT409|conflict/i.test(String(cause)) ? 'commit_conflict' : 'commit_unknown';
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:code});
+          if (isLeaseError(cause as Error)) return {status:'lease_lost',errorCode:'lease_lost'};
+          return {status:'failed',errorCode:dispatched ? 'commit_unknown' : errorCode(cause)};
+        }
+      } catch (cause) {
+        if (guard.lost || timedOut || controller.signal.aborted) {
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_fallback',status:'failed',attempt:claim.attempt,errorCode:'provider_timeout'});
+          throw cause;
+        }
+        await completeSafely('skipped','The day settled without new world changes.',socialFallbackReason(cause),'procedural_world_fallback');
         return {status:'completed',kind:'skipped'};
       }
     }
