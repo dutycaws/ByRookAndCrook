@@ -1,4 +1,6 @@
-export type PatronKey = 'lira' | 'torvin';
+/** Stable NPC identity and world-resident instance identifiers are UUIDs. */
+export type NpcId = string;
+export type NpcInstanceId = string;
 export type Approach = 'scouting' | 'combat' | 'diplomacy' | 'trade';
 export type ActionKind = 'prepare' | 'attempt' | 'wait' | 'abandon';
 export interface Intention { goal: string; motivation: string; targets: string[]; steps: Array<{ action: ActionKind; approach: Approach }> }
@@ -13,7 +15,7 @@ export interface Memory { kind: 'keeper_claim' | 'npc_statement' | 'promise' | '
 export type Offering = { kind: 'food' | 'beverage'; itemId: string };
 export interface DialogueInput {
   turnId: string;
-  patronKey: PatronKey;
+  npcId: NpcId;
   message: string;
   expectedConversationSequence: number;
   interactionVersion: 'dialogue-v2';
@@ -22,6 +24,8 @@ export interface DialogueInput {
 }
 export interface DialogueReply {
   turnId: string;
+  npcId: NpcId;
+  instanceId: NpcInstanceId;
   reply: string;
   sequence: number;
   relationship: number;
@@ -32,8 +36,10 @@ export interface DialogueReply {
   committedRevision: number;
 }
 export interface Journal {
+  instanceId: NpcInstanceId;
+  npcId: NpcId;
   sequence: number;
-  availability: 'present' | 'dead' | 'departed';
+  availability: 'present' | 'dead' | 'departed' | 'dismissed' | 'removed' | 'quarantined';
   intention: Intention | null;
   questStatus: string;
   preparation: number;
@@ -41,7 +47,7 @@ export interface Journal {
   risk: 'low' | 'moderate' | 'high' | 'none';
   warning: string | null;
   turns: Array<{ id: string; message: string; reply: string; day: number }>;
-  events: Array<{ id: string; patronKey: string; text: string; outcome: string; day: number }>;
+  events: Array<{ id?: string; text: string; outcome: string; day: number; publicNews?: boolean }>;
   pending: { turnId: string; status: string; message: string; error: string | null } | null;
 }
 

@@ -21,7 +21,7 @@ The JavaScript package versions and npm version are pinned in `package.json` and
 
 Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
 
-Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. This command does not make a billable provider request to validate the key.
+Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2`, and 60 seconds. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
 
 Then use the normal human-testing command from the repository root:
 
@@ -52,13 +52,21 @@ DO_NOT_TRACK=1 supabase stop --project-id by-rook-and-crook
 
 ## Local pilot accounts
 
-`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads the ignored Shop prototype art from `.local/media/runtime-derivatives/` into the local-only `prototype-runtime-media` Supabase Storage bucket. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The generated image bytes stay outside Git; a fresh checkout without those optional local files continues to render functional text and reviewed static fallbacks. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
+`npm run fixtures:users:local` creates or refreshes two confirmed development users and uploads ignored runtime derivatives from `.local/media/runtime-derivatives/` into local Supabase Storage. It validates each content hash before upload and after read-back, and it refuses any non-local Supabase URL. The first pilot is bootstrapped as the local Community NPC administrator and author; the second is the independent reviewer.
+
+For artwork authoring, place the approved private style references in `.local/media/source-masters/community-npcs/style-references/brac-character-look-v1/` and `CozyTavernBackground.png` in `.local/media/source-masters/community-npcs/settings/`. The fixture derives three environment-only `1600 × 900` WebPs from that setting source, uploads them under `community-settings/`, verifies their hashes, and registers the shared setting library. Reference files, source PNGs, and generated portraits remain in ignored local directories and private local Storage; browser DTOs receive only safe metadata and short-lived authorized previews.
+
+The fixture also assigns the existing Lira Nightwind and Torvin Ashbeard identities to `keeper.one@example.test` and idempotently creates open successor drafts copied from their published versions. It never edits those published versions. Keeper one may edit, submit, review, and approve its own first-party successor versions for local user testing, while the usual no-self-review rule remains in force for community identities. Keeper two remains available to exercise independent review. The existing Willow Vellum fixture continues to exercise the full author-to-publication path when its optional dedicated scene derivative exists.
+
+Generated image bytes stay outside Git. A fresh checkout without optional dedicated Community NPC runtime derivatives still renders functional text and reviewed static fallbacks; in that situation the fixture truthfully reports that it skipped the optional scene-backed publication path. The pilot emails are `keeper.one@example.test` and `keeper.two@example.test`; retrieve the generated passwords with:
 
 ```sh
 npm run credentials:local
 ```
 
 The fixture script asks the local CLI for a short-lived administrative connection, verifies `127.0.0.1:57321`, and refuses a hosted target. The credentials can be overridden with `LOCAL_PILOT_ONE_EMAIL`, `LOCAL_PILOT_ONE_PASSWORD`, `LOCAL_PILOT_TWO_EMAIL`, and `LOCAL_PILOT_TWO_PASSWORD` in `.env`.
+
+For roster-performance work only, set `FIXTURE_NPC_SCALE=1` when running the command. That opt-in fixture creates 1,000 disposable local community identities and assigns 100 of them to the first pilot's tavern. It uses the local Docker database container and never contacts a hosted service. It is deliberately excluded from normal startup so ordinary fixture runs remain quick.
 
 Public sign-up is disabled. Hosted pilot accounts must be provisioned outside the browser flow.
 
@@ -139,7 +147,7 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 | `npm run media:perf` | Report authenticated mobile cold-cache media and Core Web Vitals proxy measurements for the four scene routes. |
 | `npm run media:perf:calibration -- --directory <reports>` | Require 10 unique valid report-mode runs, calculate each route/metric p75, and prove every p75 is within the activation budgets. |
 | `npm run db:reset:local` | Destroy local application/auth data, reapply every migration, and run `supabase/seed.sql`. This cannot target a linked hosted project. |
-| `npm run fixtures:users:local` | Create or refresh the two local pilot identities, then verify and upload ignored Shop runtime art to local Supabase Storage. |
+| `npm run fixtures:users:local` | Create or refresh pilots, local Community NPC capabilities, and the Willow Vellum author→review→publish fixture; verify and upload ignored runtime derivatives to local Supabase Storage. Set `FIXTURE_NPC_SCALE=1` for the optional 1,000-identity/100-resident roster fixture. |
 | `npm run db:types` | Print TypeScript definitions generated from the migrated local public schema. |
 | `npm run db:types:check` | Generate types in memory and fail if they differ from `src/lib/database.types.ts`. |
 | `npm run check` | Run Svelte and TypeScript diagnostics. |
@@ -231,7 +239,9 @@ Only a trusted database operator may change the operational limits in `private.n
 
 Use **Check reply** after an unknown network result. **Retry the same message** keeps the entire request and resumes saved stages. **Cancel unfinished message** remains available while the reply is generating. It fences late requests and unlocks the day only after cancellation is confirmed. If the reply already committed, the UI reports the saved reply instead; if cancellation cannot be confirmed, use Check reply or cancel again. Completed retries return the saved result. A changed revision/day or unavailable NPC requires a fresh message. The status response disables retry after a rejected rewrite or exhausted unfinished turn; a fully checkpointed turn can still complete without more model calls. Persistent consistency failures should be cancelled and rephrased; replaying the same failed review does not request unlimited rewrites. A failed or expired turn never permanently prevents closing. Provider charges are not exactly-once when a network execution is uncertain; game effects are.
 
-The live script records timestamped reports in ignored `artifacts/npc-evals/`; Playwright artifacts use `test-results/`. CI never invokes the live script. The browser test server uses a non-secret sentinel key only to render the form while all provider-bound dialogue requests are intercepted by the test harness. Unit and RPC fixtures are never imported by the production runtime.
+The live script records timestamped reports in ignored `artifacts/npc-evals/`; Playwright artifacts use `test-results/`. CI never invokes the live script. The browser test server uses a non-secret sentinel key only to render provider-backed forms. Dialogue requests are intercepted by their existing test harness, while the authoring journey deterministically completes reserved jobs through service-only database functions. Production authoring assistance and sandbox conversations use the configured OpenAI provider; unit and RPC fixtures are never imported by the production runtime.
+
+The NPC authoring workspace requires `OPENAI_API_KEY` in the ignored root `.env` for live assistance and sandbox replies. It displays the provider as unavailable when the key is absent. Assistance and sandbox work run outside database transactions, then persist validated results against the reserved job and captured draft revision. Use the workspace status and retry controls after a timeout or uncertain network result. Draft saves and accepted assistance invalidate any active sandbox while keeping its transcript available under preserved conversations.
 
 ## Editing and publishing character content
 

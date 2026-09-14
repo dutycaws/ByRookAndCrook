@@ -5,7 +5,9 @@
   import { onMount, tick } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
   import type { GardenCommandKind, GardenCommandPayload, GardenCommandPreview, GameSnapshot, GardenInventoryItem } from '$lib/game/contracts';
-  import { shopItemAssetPublicUrl, shopRuntimeAssetPublicUrl } from '$lib/game/shop-runtime-assets';
+  import ShopScene from '$lib/components/shop/ShopScene.svelte';
+  import { shopItemAssetPublicUrl } from '$lib/game/shop-runtime-assets';
+  import { sceneRuntimeAssetPublicUrl, type SceneRuntimeAssetId } from '$lib/game/scene-runtime-assets';
 
   type ShopCategory = 'all' | 'seeds' | 'garden' | 'apiary';
   type ShopCommand = Extract<GardenCommandKind, 'purchase' | 'expand'>;
@@ -58,8 +60,17 @@
     all: 'All', seeds: 'Seeds', garden: 'Garden', apiary: 'Apiary'
   };
 
-  const heroAssetUrl = shopRuntimeAssetPublicUrl('elara-counter-hero', PUBLIC_SUPABASE_URL);
   const portraitAssetUrl = '/assets/scenes/shop/elara-portrait.webp';
+  /**
+   * Composition keys are stable presentation IDs. Their WebP URLs are local
+   * fixture media, so an unseeded environment falls back inside ShopScene.
+   */
+  const sceneAsset = (id: SceneRuntimeAssetId) => sceneRuntimeAssetPublicUrl(id, PUBLIC_SUPABASE_URL);
+  const shopSceneAssets = $derived({
+    'shop-background': { src: sceneAsset('shop-background'), alt: 'A warm garden shop counter' },
+    'shop-elara': { src: sceneAsset('shop-elara'), alt: 'Elara Greenbloom at her garden shop counter' },
+    'shop-counter-occlusion': { src: sceneAsset('shop-counter-occlusion'), alt: '' }
+  });
 
   onMount(() => {
     hydrated = true;
@@ -495,10 +506,7 @@
         <span><strong>Elara Greenbloom</strong><small>Shopkeeper</small></span>
       </div>
     {/if}
-    <div class="shop-scene-art" role="img" aria-label="Elara Greenbloom at her garden shop counter">
-      <span class="scene-fallback">Elara Greenbloom</span>
-      {#if heroAssetUrl}<img class="shop-merchant" src={heroAssetUrl} alt="" onerror={(event) => event.currentTarget.remove()} />{/if}
-    </div>
+    <ShopScene assets={shopSceneAssets} detailMode={!!detailMode} />
   </section>
 
   <aside class="shop-goods panel" data-shop-catalog aria-labelledby="goods-title">
@@ -636,10 +644,7 @@
   .status-more dl div { display: grid; gap: .2rem; }
   .status-more dt { color: var(--muted); font-size: .78rem; }
   .status-more dd { margin: 0; color: var(--gold-bright); font-size: .9rem; }
-  .shop-scene { min-width: 0; overflow: hidden; background: radial-gradient(circle at 50% 30%, #6c4b25, #1c1209 64%, #090603); view-transition-name: shop-merchant; }
-  .shop-scene-art { position: relative; display: grid; width: 100%; aspect-ratio: 4 / 3; place-items: center; overflow: hidden; isolation: isolate; }
-  .scene-fallback { z-index: 0; padding: 1rem; color: #d7bd7a; font: 600 1rem 'Cinzel', serif; text-align: center; }
-  .shop-merchant { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; }
+  .shop-scene { min-width: 0; overflow: hidden; padding: 0; background: transparent; }
   .compact-identity, .opening-identity { display: flex; align-items: center; gap: .7rem; padding: .65rem .8rem; color: #d9c28b; background: #100b07; }
   .compact-identity { border-bottom: 1px solid #6b4e24; }
   .opening-identity { margin: -.2rem -.2rem .25rem; border-bottom: 1px solid #493719; }

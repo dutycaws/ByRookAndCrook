@@ -9,7 +9,10 @@ import { mediaPolicy } from '../../scripts/media/policy';
 const roots: string[] = [];
 
 function git(root: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  return execFileSync('git', ['-c', 'commit.gpgSign=false', ...args], {
+    cwd: root,
+    encoding: 'utf8'
+  }).trim();
 }
 
 function gitBlobFromWorkspace(oid: string): Buffer {

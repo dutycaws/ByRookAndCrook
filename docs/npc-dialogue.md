@@ -23,7 +23,7 @@ flowchart TD
 
 The diagram's correction edge runs at most once. Day advancement never invokes a model. All provider work happens outside database transactions. SvelteKit derives the actor from `getVerifiedUser()`; request bodies cannot choose a save or player. Supabase's service-role credential is used only inside server modules. Authenticated players cannot read the narrative schema, inspect raw processing records, or call generation/checkpoint/completion RPCs.
 
-The legacy patron catalog retains historical prices and receipts but has no direct player SELECT grant. Owned snapshot functions project only the public/current story fields. `get_tavern_snapshot()` and `get_bar_snapshot()` run with a fixed empty search path and explicitly filter the caller's save.
+The UUID community-NPC runtime supersedes the fixed patron catalog for current conversations. Historical prices and receipts remain readable through owner-scoped projections. `get_tavern_snapshot()` and the bounded `npc_bar_summary()`/`npc_roster()` functions run with a fixed empty search path and explicitly filter the caller's save.
 
 ## Public and internal contracts
 
@@ -32,7 +32,7 @@ The legacy patron catalog retains historical prices and receipts but has no dire
 ```json
 {
   "turnId": "client-generated UUID",
-  "patronKey": "lira",
+  "npcId": "18181818-1818-4181-8181-181818181818",
   "message": "How is the quest going?",
   "expectedConversationSequence": 0,
   "interactionVersion": "dialogue-v2",
@@ -45,25 +45,22 @@ Messages contain 1–2,000 characters. `intentCardId` and `offering` may each be
 
 `GET /api/dialogue/:turnId` returns owned status, frozen input, any saved result, a sanitized error code and `canRetry`. `DELETE` cancels unfinished work and replaces its fence. Mutation endpoints require the same origin. Responses with game data use `private, no-store` caching.
 
-The application service alone calls `dialogue_begin`, `dialogue_context`, `dialogue_checkpoint` and `dialogue_complete`. The browser uses the status endpoint and `get_npc_journal` projection. The latter exposes availability, current intention/step, qualitative risk, preparation, authored loss warning, the last 40 completed exchanges and recent visible events.
+The application service alone calls `npc_dialogue_begin`, `npc_dialogue_context`, `npc_dialogue_checkpoint` and `npc_dialogue_complete`. The browser uses the status endpoint and the owner-scoped `npc_journals` projection. The latter exposes availability, current intention/step, qualitative risk, preparation, authored loss warning, the last 40 completed exchanges and recent visible events for selected world-instance UUIDs.
 
 ## Records and authority
 
 | Record | Authority and visibility |
 | --- | --- |
-| `private.npc_content_versions` | Immutable authored sheets keyed by character + version; never sent whole to the browser or model. |
-| `private.npc_content` | Current-version selector and checked sheet copy used when initializing a character. |
-| `private.npc_lives` | Save-specific availability and conversation sequence. |
-| `private.npc_quests` | Goal, motivation, targets, ordered steps, preparation and terminal state; frozen content/rule versions. |
-| `private.npc_events` | Committed game facts, random draws and probabilities; only designated news is shared. |
-| `private.npc_retired_targets` | Lost/finished opportunity targets and their source quest; blocks mechanical reuse. |
-| `public.dialogue_turns` | Server-only input, lease/fence, checkpoints, cumulative calls, error and exact final receipt. |
-| `private.npc_attempts` | One record per fenced processing attempt, including call count, terminal status and finish time. |
-| `private.npc_memories` | Attributed statements/claims/promises/interactions with exact source quote and turn FK. |
-| `private.npc_reactions` | Daily subject deduplication and relationship-change accounting. |
-| `private.npc_usage` | Per-player UTC-day attempt and call counters. |
-| `public.intent_cards` / `public.intent_card_plays` | Versioned player-selected dialogue framing and its one-use ledger. |
-| `public.hospitality_events` | Canonical food/drink receipt and consumption ledger shared by dialogue and standalone serving. |
+| `private.npc_identities` / `private.npc_versions` | Stable UUID identity and immutable reviewed sheets; a world resident remains pinned to its assigned version. |
+| `private.world_npc_instances` | Save-specific availability, relationship, conversation sequence, campaign state and version assignment. |
+| `private.world_npc_quest_events` | Committed quest facts and outcomes; only designated news is projected publicly. |
+| `private.world_npc_tombstones` | Permanent no-return records for dismissed, departed, purged or otherwise removed identities. |
+| `private.world_npc_dialogue_turns` | Server-only input, lease/fence, checkpoints, cumulative calls, error and exact final receipt. |
+| `private.world_npc_dialogue_attempts` | Fenced processing attempts, including call count, terminal status and finish time. |
+| `private.world_npc_memories` | Attributed statements, claims, promises and interactions with exact source exchange references. |
+| `private.world_npc_reactions` | Daily subject deduplication and relationship-change accounting. |
+| `private.world_npc_intent_card_plays` | Versioned player-selected dialogue framing and its one-use ledger. |
+| `private.world_npc_hospitality_events` | Canonical food/drink receipt and consumption ledger shared by dialogue and standalone serving. |
 
 Content-version foreign keys make historical sheets resolvable. Existing characters stay pinned when new content is published. A memory never updates a quest, content sheet, event or character availability. The keeper's claim remains a claim even if it asserts success. Memory summaries with invalid source quotes or system-style person references are discarded.
 

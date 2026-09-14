@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
+import sharp from 'sharp';
 import { mediaPolicy } from './media/policy.js';
 import { localMasterPath, readCatalog, validateRuntimeDerivativeInventory } from './media/master-lib.js';
+import { LOCAL_SCENE_RUNTIME_ASSET_DIRECTORY, SCENE_RUNTIME_ASSETS } from '../src/lib/game/scene-runtime-assets.js';
+import { SCENE_COMPOSITIONS, validateSceneComposition } from '../src/lib/presentation/scene-composition.js';
 
 const RUNTIME_ASSET_DIRECTORY = 'static/assets';
 const RUNTIME_METADATA_FILES = new Set([
@@ -301,6 +304,68 @@ async function assertLocalArt6Catalog() {
   }
 }
 
+/** Local scene fixture files are optional, but when present must remain usable art. */
+async function assertLocalIssue24SceneAssets() {
+  for (const asset of SCENE_RUNTIME_ASSETS) {
+    const path = join(LOCAL_SCENE_RUNTIME_ASSET_DIRECTORY, asset.filename);
+    try {
+      const bytes = await readFile(path);
+      const metadata = webpMetadata(bytes);
+      if (bytes.length > 500_000 || metadata.width !== asset.width || metadata.height !== asset.height || metadata.alpha !== asset.alpha) {
+        throw new Error(`${path}: expected ${asset.width}x${asset.height} alpha=${asset.alpha} WebP below 500000 bytes`);
+      }
+      if (asset.alpha) {
+        const raw = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        const alphaIndex = raw.info.channels - 1;
+        let hasTransparentPixel = false;
+        let hasVisiblePixel = false;
+        for (let index = alphaIndex; index < raw.data.length; index += raw.info.channels) {
+          hasTransparentPixel ||= raw.data[index] < 255;
+          hasVisiblePixel ||= raw.data[index] > 0;
+          if (hasTransparentPixel && hasVisiblePixel) break;
+        }
+        if (!hasTransparentPixel || !hasVisiblePixel) throw new Error(`${path}: alpha scene layer must contain genuine transparency and visible content`);
+      }
+      console.log(`ok optional local scene fixture ${asset.id} ${bytes.length} bytes`);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        console.log(`local scene fixture unavailable (expected in a fresh checkout): ${asset.id}`);
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/**
+ * Issue #24 composition definitions are the source of truth for runtime media
+ * keys. Keep the validator coupled to that contract rather than duplicating a
+ * parallel list of scene layers here.
+ */
+function assertIssue24CompositionMediaContract() {
+  const assetsById = new Map(SCENE_RUNTIME_ASSETS.map((asset) => [asset.id, asset]));
+  const referenced = new Set<string>();
+  for (const composition of Object.values(SCENE_COMPOSITIONS)) {
+    const compositionErrors = validateSceneComposition(composition);
+    if (compositionErrors.length) throw new Error(`${composition.id} scene composition is invalid: ${compositionErrors.join('; ')}`);
+    const layers = [composition.background, ...composition.actors, ...composition.foreground];
+    for (const layer of layers) {
+      const asset = assetsById.get(layer.key as (typeof SCENE_RUNTIME_ASSETS)[number]['id']);
+      if (!asset) throw new Error(`${composition.id} scene layer ${layer.key} has no SCENE_RUNTIME_ASSETS entry`);
+      if (asset.scene !== composition.id) throw new Error(`${composition.id} scene layer ${layer.key} resolves to the ${asset.scene} pack`);
+      const requiresAlpha = layer.kind === 'actor' || layer.kind === 'foreground';
+      if (asset.alpha !== requiresAlpha) throw new Error(`${composition.id} scene layer ${layer.key} must have alpha=${requiresAlpha} for its ${layer.kind} role`);
+      if (layer.kind === 'background' && (asset.width !== composition.plane.width || asset.height !== composition.plane.height)) {
+        throw new Error(`${composition.id} background ${layer.key} must match its ${composition.plane.width}x${composition.plane.height} design plane`);
+      }
+      referenced.add(asset.id);
+    }
+  }
+  const orphaned = SCENE_RUNTIME_ASSETS.filter((asset) => !referenced.has(asset.id));
+  if (orphaned.length) throw new Error(`SCENE_RUNTIME_ASSETS has uncomposed media: ${orphaned.map((asset) => asset.id).join(', ')}`);
+  console.log(`ok issue #24 scene composition media contract ${referenced.size} assets`);
+}
+
 type RuntimeFile = {
   path: string;
   bytes: number;
@@ -440,6 +505,8 @@ async function assertContract() {
 
 await Promise.all([...references, ...runtimeAssets].map(assertAsset));
 await assertLocalArt6Catalog();
+await assertLocalIssue24SceneAssets();
+assertIssue24CompositionMediaContract();
 const runtimeFiles = await inventoryRuntimeFiles(RUNTIME_ASSET_DIRECTORY);
 assertRuntimeInventory(runtimeFiles);
 await stat('static/assets/scenes/motion-proof-contract.json');

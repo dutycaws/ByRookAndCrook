@@ -4,6 +4,7 @@ import { lstat, readFile, realpath, stat } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
 import { mimeFor, runtimeAssetHashes, type CaptureManifest } from './capture-artifacts';
 import { mediaPolicy } from './policy.js';
+import { ISSUE_24_REQUIRED_CAPTURE_OUTPUTS, ISSUE_24_SCENE_CAPTURE_KIND } from '../issue-24-scene-acceptance-contract.js';
 
 export const maxStillBytes = mediaPolicy.evidence.maxStillBytes;
 export const maxCuratedStills = mediaPolicy.evidence.maxStillsPerSet;
@@ -24,13 +25,14 @@ export function containsServerCredential(value: string) {
   return false;
 }
 
-const knownKinds = new Set(['screenshots', 'motion-proofs', 'scene-acceptance']);
+const knownKinds = new Set(['screenshots', 'motion-proofs', 'scene-acceptance', ISSUE_24_SCENE_CAPTURE_KIND]);
 const knownMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'video/webm', 'application/json']);
 const serverCredential = /(?:sb_secret_|sk-)[A-Za-z0-9_-]{16,}|MEDIA_SUPABASE_(?:SECRET|SERVICE_ROLE)_KEY/i;
 const requiredOutputsByKind: Record<string, readonly string[]> = {
   screenshots: ['garden.png', 'ingredients.png', 'brewery-setup.png', 'brewery-active.png', 'brewery-result.png', 'bar-1440.png', 'bar-1672.png', 'bar-768.png', 'bar-result.png', 'bar-390.png'],
   'motion-proofs': ['brewery-desktop-1x.png', 'brewery-desktop-2x.png', 'brewery-phone-1x.png', 'brewery-phone-2x.png', 'brewery-demo.webm', 'bakery-fold-desktop-1x.png', 'bakery-score-desktop-2x.png', 'bakery-score-phone-1x.png', 'bakery-score-phone-2x.png', 'bakery-demo.webm'],
-  'scene-acceptance': ['garden-1672x941.png', 'garden-1440x900.png', 'garden-768x1024.png', 'garden-390x844.png', 'brewery-1672x941.png', 'brewery-1440x900.png', 'brewery-768x1024.png', 'brewery-390x844.png', 'bakery-1672x941.png', 'bakery-1440x900.png', 'bakery-768x1024.png', 'bakery-390x844.png', 'garden-interaction.webm', 'brewery-interaction.webm', 'bakery-interaction.webm', 'acceptance-results.json']
+  'scene-acceptance': ['garden-1672x941.png', 'garden-1440x900.png', 'garden-768x1024.png', 'garden-390x844.png', 'brewery-1672x941.png', 'brewery-1440x900.png', 'brewery-768x1024.png', 'brewery-390x844.png', 'bakery-1672x941.png', 'bakery-1440x900.png', 'bakery-768x1024.png', 'bakery-390x844.png', 'garden-interaction.webm', 'brewery-interaction.webm', 'bakery-interaction.webm', 'acceptance-results.json'],
+  [ISSUE_24_SCENE_CAPTURE_KIND]: ISSUE_24_REQUIRED_CAPTURE_OUTPUTS
 };
 
 export function requiredOutputsFor(kind: string) { return requiredOutputsByKind[kind] ?? []; }

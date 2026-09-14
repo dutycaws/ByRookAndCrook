@@ -11,15 +11,18 @@ async function login(page: Page, email: string, password: string) {
 
 async function harvestFromGarden(page: Page) {
   const fennel = page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i });
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
   if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await fennel.tap(); else await fennel.click();
   await expect(fennel).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
-  await page.getByRole('button', { name: 'Actions', exact: true }).click();
+  // Plot selection opens the current contextual action menu. Waiting for it
+  // also ensures the interactive Svelte scene has hydrated before submitting.
+  await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
   await page.getByRole('button', { name: 'Harvest crop' }).click();
   await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
-  if (page.viewportSize()?.width && page.viewportSize()!.width <= 620) {
-    await page.getByRole('button', { name: 'Close actions' }).click();
-  }
+  const close = page.getByRole('button', { name: 'Close plot actions' });
+  if (await close.isVisible()) await close.click();
+  await expect(page.locator('[data-garden-action-menu]')).toHaveCount(0);
 }
 
 test('harvested ingredients become persistent food through the reload-safe bakery', async ({ page }) => {

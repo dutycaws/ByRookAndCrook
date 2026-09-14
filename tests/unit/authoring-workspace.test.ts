@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'vitest';
+import { decodeAuthoringWorkspace, normalizeAuthoringError, providerFailure } from '../../src/lib/game/authoring-workspace';
+import { createNpcSheet } from '../../src/lib/game/community-npc-ui';
+
+describe('authoring workspace view model', () => {
+  it('keeps expression selections as an authoritative slot map and preserves candidate provenance', () => {
+    const sheet = createNpcSheet('Tormund');
+    const detail = decodeAuthoringWorkspace({
+      npcId: 'npc-id', draft: { id: 'draft-id', revision: 2, lifecycle: 'open', editable: true, sheet }, capabilities: {}, scenes: { selectedAssetId: null, candidates: [] }, assistance: [], versions: [], retirement: null, eligibleNpcs: [], sandbox: {},
+      portrait: {
+        providerAvailable: true, selectedSlots: { neutral: { candidateId: 'neutral-candidate' }, happy: { candidateId: 'happy-candidate' } }, resolvedSlots: { neutral: { candidateId: 'neutral-candidate' }, sad: { candidateId: 'neutral-candidate' } },
+        candidates: [
+          { id: 'neutral-candidate', assetId: 'neutral-asset', ordinal: 1, state: 'selected', slot: 'neutral', source: 'author_upload', alphaValid: true, visualInputHash: null },
+          { id: 'happy-candidate', assetId: 'happy-asset', ordinal: 1, state: 'ready', slot: 'happy', source: 'ai_generated', staleNeutralAnchor: true, alphaValid: true, visualInputHash: null }
+        ]
+      }
+    }, { available: true, reason: null });
+    expect(detail.portrait.selectedCandidateIds).toEqual({ neutral: 'neutral-candidate', happy: 'happy-candidate' });
+    expect(detail.portrait.resolvedCandidateIds.sad).toBe('neutral-candidate');
+    expect(detail.portrait.candidates[0]).toMatchObject({ slot: 'neutral', source: 'author_upload' });
+    expect(detail.portrait.candidates[1]).toMatchObject({ slot: 'happy', source: 'ai_generated', staleNeutralAnchor: true });
+  });
+
+  it('decodes the active and preserved revision-pinned sandbox transcripts', () => {
+    const sheet = createNpcSheet('Tormund');
+    const detail = decodeAuthoringWorkspace({
+      npcId: 'npc-id',
+      draft: { id: 'draft-id', revision: 4, lifecycle: 'open', editable: true, sheet, fieldPaths: ['identity.name'] },
+      capabilities: {
+        canEdit: true, canSubmit: false, canRequestAssistance: true, canUseSandbox: true, canRequestRetirement: true,
+        submitReason: 'Choose a scene before submitting.'
+      },
+      scenes: { selectedAssetId: null, candidates: [] },
+      assistance: [], versions: [], retirement: null, eligibleNpcs: [],
+      sandbox: {
+        active: {
+          id: 'active', draftRevision: 4, active: true, pending: false,
+          turns: [
+            { id: 'turn-1', ordinal: 1, role: 'keeper', content: 'What brought you here?', status: 'completed' },
+            { id: 'turn-2', ordinal: 2, role: 'npc', content: 'A promise on the old road.', status: 'completed' }
+          ]
+        },
+        preserved: [{
+          id: 'old', draftRevision: 3, active: false, invalidatedAt: '2026-09-12T00:00:00Z', pending: false,
+          turns: [{ id: 'old-turn', ordinal: 1, role: 'keeper', content: 'Earlier question', status: 'completed' }]
+        }]
+      }
+    }, { available: true, reason: null });
+
+    expect(detail.sandbox.active?.turns.map((turn) => turn.content)).toEqual([
+      'What brought you here?', 'A promise on the old road.'
+    ]);
+    expect(detail.sandbox.preserved).toHaveLength(1);
+    expect(detail.sandbox.preserved[0]).toMatchObject({ draftRevision: 3, active: false });
+    expect(detail.capabilities.reasons.submit).toBe('Choose a scene before submitting.');
+    expect(detail.preflight.some((issue) => issue.path === 'setting')).toBe(true);
+    expect(detail.preflight.some((issue) => issue.path === 'portrait')).toBe(true);
+  });
+
+  it('turns section proposals into a readable comparison without exposing raw JSON to components', () => {
+    const sheet = createNpcSheet('Tormund');
+    const detail = decodeAuthoringWorkspace({
+      npcId: 'npc-id', draft: { id: 'draft-id', revision: 2, lifecycle: 'open', editable: true, sheet },
+      capabilities: {}, scenes: { selectedAssetId: null, candidates: [] }, eligibleNpcs: [], sandbox: { active: null, preserved: [] },
+      versions: [], retirement: null,
+      assistance: [{
+        id: 'suggestion', sectionPath: 'identity', sourceRevision: 2, disposition: 'proposed', actionable: true,
+        proposal: { replacement: { ...sheet.identity, title: 'Road Warden' }, explanation: 'Clarifies the role.' }
+      }]
+    }, { available: true, reason: null });
+
+    expect(detail.assistance[0]).toMatchObject({ state: 'suggested', explanation: 'Clarifies the role.' });
+    expect(detail.assistance[0].comparison.find((row) => row.label === 'Name and role')).toEqual({
+      label: 'Name and role', current: ['Tormund', 'Wayfarer'], suggested: ['Tormund', 'Road Warden']
+    });
+  });
+
+  it('normalizes database and provider failures into actionable categories', () => {
+    expect(normalizeAuthoringError({ code: 'PT409', message: 'Draft revision changed' }, 'Failed')).toMatchObject({ category: 'stale_revision', status: 'stale', conflict: true });
+    expect(normalizeAuthoringError({ code: 'PT422', message: 'Select a scene first' }, 'Failed')).toMatchObject({ category: 'missing_prerequisite', status: 'failure' });
+    expect(providerFailure('provider_no_change')).toMatchObject({ category: 'provider_no_change' });
+    expect(providerFailure('provider_unavailable')).toMatchObject({ category: 'provider_unavailable', status: 'unavailable' });
+  });
+
+  it('keeps portrait and curated-setting metadata separate and browser safe', () => {
+    const sheet = createNpcSheet('Tormund');
+    const detail = decodeAuthoringWorkspace({
+      npcId: 'npc-id', draft: { id: 'draft-id', revision: 7, lifecycle: 'open', editable: true, sheet },
+      capabilities: {}, eligibleNpcs: [], assistance: [], sandbox: { active: null, preserved: [] }, versions: [], retirement: null,
+      settings: {
+        selectedAssetId: 'setting-1', available: [{ id: 'setting-1', key: 'private/library/hearth.webp', label: 'Hearth-side booth', description: 'A warm booth.', altText: 'A booth beside a hearth.' }]
+      },
+      portrait: {
+        providerAvailable: true, styleLabel: 'Community character look', styleVersion: 'community-npc-portrait-sprite-v1', visualInputHash: 'visual-7',
+        selectedAssetId: 'portrait-asset-1', remainingCredits: 8,
+        candidates: [{ id: 'portrait-1', assetId: 'portrait-asset-1', ordinal: 1, state: 'selected', previewToken: 'preview-token', altText: 'Tormund full-body portrait', dimensions: { width: 1024, height: 1536 }, alphaValid: true, visualInputHash: 'visual-7', failureCode: null }],
+        activeBatch: { jobId: 'batch-1', status: 'running', requestedAlternatives: 2, completedCount: 1, failedCount: 1, errorCode: null }
+      }
+    }, { available: true, reason: null }, (key) => `/setting-preview/${key}`);
+
+    expect(detail.settings).toMatchObject({ available: true, selectedSettingId: 'setting-1' });
+    expect(detail.settings.settings[0]).toEqual({
+      id: 'setting-1', name: 'Hearth-side booth', description: 'A warm booth.', altText: 'A booth beside a hearth.', previewUrl: '/setting-preview/private/library/hearth.webp', selected: true
+    });
+    expect(detail.portrait).toMatchObject({ selectedCandidateId: 'portrait-1', creditsRemaining: 8, visualInputHash: 'visual-7' });
+    expect(detail.portrait.candidates[0]).toMatchObject({ id: 'portrait-1', assetId: 'portrait-asset-1', state: 'selected', width: 1024, height: 1536, hasAlpha: true });
+    expect(detail.portrait.candidates[0].previewUrl).toBeNull();
+    expect(detail.portrait.candidates[0]).not.toHaveProperty('storageKey');
+    expect(detail.portrait.activeBatch).toMatchObject({ id: 'batch-1', status: 'generating', requested: 2 });
+    expect(detail.preflight.map((issue) => issue.path)).not.toContain('portrait');
+    expect(detail.preflight.map((issue) => issue.path)).not.toContain('setting');
+  });
+});

@@ -120,6 +120,22 @@ The current Art6 reference is cataloged as `design-reference-cozy-tavern-art-6@2
 
 The Shop has two responsive compositions driven by its existing detail state. With no item or expansion selected, the Art6 opening view presents status, the integrated 4:3 Elara counter scene, and the identity/catalog rail without reserving a detail column. Selecting an item or garden expansion moves the same scene and catalog into the Art8 merchant/catalog/detail composition. Closing details restores the prior filter, catalog position, and focus; reduced-motion users receive the same state change without spatial animation.
 
+### Issue #24 local layered-scene fixture pack
+
+The Shop and Bar compositor reads this optional pack from local Supabase Storage rather than from Git. Its source PNG masters and all derived WebPs live beneath Git-ignored `.local/media/`; `npm run fixtures:users:local` regenerates and uploads the WebPs to the public local-only `prototype-runtime-media` bucket. A clean checkout deliberately has none of these files, so the composition renderer must retain its styled fallback room and named actor placeholders.
+
+| Runtime asset ID | Local derivative | Storage key | Dimensions | Alpha | Source / export |
+| --- | --- | --- | ---: | :---: | --- |
+| `shop-background` | `.local/media/runtime-derivatives/scene-compositions/shop/v1/shop-background.webp` | `scenes/shop/v1/shop-background.webp` | 1,200 × 900 | No | Reviewed `shop-environment.webp`, center-cropped to Shop’s 4:3 design plane. |
+| `shop-elara` | `.local/media/runtime-derivatives/scene-compositions/shop/v1/shop-elara.webp` | `scenes/shop/v1/shop-elara.webp` | 600 × 900 | Yes | Generated Elara Greenbloom RGBA source master, optimized at WebP quality 82. |
+| `shop-counter-occlusion` | `.local/media/runtime-derivatives/scene-compositions/shop/v1/shop-counter-occlusion.webp` | `scenes/shop/v1/shop-counter-occlusion.webp` | 1,200 × 350 | Yes | Generated low shop counter source master, bottom extraction with retained alpha. |
+| `bar-background` | `.local/media/runtime-derivatives/scene-compositions/bar/v1/bar-background.webp` | `scenes/bar/v1/bar-background.webp` | 1,672 × 941 | No | User-supplied `CozyTavernBackground.png`, which remains ignored, re-encoded at WebP quality 84. |
+| `bar-lira` | `.local/media/runtime-derivatives/scene-compositions/bar/v1/bar-lira.webp` | `scenes/bar/v1/bar-lira.webp` | 600 × 900 | Yes | Generated Lira Nightwind RGBA source master, optimized at WebP quality 82. |
+| `bar-torvin` | `.local/media/runtime-derivatives/scene-compositions/bar/v1/bar-torvin.webp` | `scenes/bar/v1/bar-torvin.webp` | 600 × 900 | Yes | Generated Torvin Ashbeard RGBA source master, optimized at WebP quality 82. |
+| `bar-counter-occlusion` | `.local/media/runtime-derivatives/scene-compositions/bar/v1/bar-counter-occlusion.webp` | `scenes/bar/v1/bar-counter-occlusion.webp` | 1,672 × 460 | Yes | Generated low bar counter source master, bottom extraction with retained alpha. |
+
+Each local derivative is constrained to 500,000 bytes, checked for its declared dimensions, and for alpha layers verified to contain both visible and genuinely transparent pixels. The source-master catalog records the generated sprite and foreground provenance and source checksums; the local runtime manifest records each derived upload checksum. `npm run art:assets:check` validates present local files without making them required in a clean checkout.
+
 ### Current Shop SKU illustration inventory
 
 This inventory maps only existing catalog goods. Every local fixture key below is stored beneath ignored `.local/media/runtime-derivatives/` and is intended for `npm run fixtures:users:local` to upload to the local `prototype-runtime-media` bucket under `shop/<fixture key>`. The fixture assets are presentational only and do not add merchandise, prices, or mechanics.

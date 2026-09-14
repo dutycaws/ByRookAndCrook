@@ -77,7 +77,7 @@ describe('mobile media performance policy', () => {
       '/garden': expect.stringContaining('onselect'),
       '/brewery': expect.stringContaining('selectedIngredientId'),
       '/bakery': expect.stringContaining('selectedIngredientId'),
-      '/bar': expect.stringContaining('GuestInspector')
+      '/bar': expect.stringContaining('ComposedScene')
     });
   });
 

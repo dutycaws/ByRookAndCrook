@@ -9,12 +9,12 @@ export class DialogueError extends Error { constructor(message:string,public sta
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function parseInput(value:unknown): DialogueInput {
   const v=value as DialogueInput;
-  if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !['lira','torvin'].includes(v.patronKey) || typeof v.message!=='string'
+  if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !uuid.test(v.npcId??'') || typeof v.message!=='string'
     || !v.message.trim() || v.message.length>2000 || !Number.isSafeInteger(v.expectedConversationSequence) || v.expectedConversationSequence<0
     || v.interactionVersion!=='dialogue-v2' || v.intentCardId!=null&&!uuid.test(v.intentCardId)
     || v.offering!=null&&(!['food','beverage'].includes(v.offering.kind)||!uuid.test(v.offering.itemId)))
     throw new DialogueError('Enter a message and choose an available intent card or offering.',400,'INVALID_INPUT');
-  return {turnId:v.turnId,patronKey:v.patronKey,message:v.message,expectedConversationSequence:v.expectedConversationSequence,
+  return {turnId:v.turnId,npcId:v.npcId,message:v.message,expectedConversationSequence:v.expectedConversationSequence,
     interactionVersion:'dialogue-v2',intentCardId:v.intentCardId??null,offering:v.offering??null};
 }
 export function databaseError(e:{message:string;code:string}): DialogueError {
@@ -36,11 +36,12 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
 }
 export async function runDialogue(client:SupabaseClient<Database>,actor:string,input:DialogueInput,provider:DialogueProvider,
   options:{maxCalls?:number;rounds?:number;deadlineMs?:number}={}) {
+  const npcId = input.npcId;
   const started=performance.now();
   const signal=AbortSignal.timeout(Math.min(90000,Math.max(1000,options.deadlineMs??90000)));
-  const begun=await client.rpc('dialogue_begin',{p_actor:actor,p_turn:input.turnId,p_patron:input.patronKey,p_message:input.message,
-    p_sequence:input.expectedConversationSequence,p_intent_card:input.intentCardId??undefined,
-    p_offering_kind:input.offering?.kind,p_offering_item:input.offering?.itemId}).abortSignal(signal);
+  const begun=await client.rpc('npc_dialogue_begin',{p_actor:actor,p_turn_id:input.turnId,p_npc_id:npcId,p_message:input.message,
+    p_expected_sequence:input.expectedConversationSequence,p_intent_card_id:input.intentCardId??undefined,
+    p_offering_kind:input.offering?.kind,p_offering_item_id:input.offering?.itemId}).abortSignal(signal);
   if(begun.error) throw databaseError(begun.error);
   const turn=begun.data as any;
   if(turn.status==='completed') return {status:'completed',result:turn.result};
@@ -50,7 +51,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   const checkpoints=turn.checkpoints as Record<string,any>;
   let calls=0;
   async function checkpoint(stage:string,value:unknown) {
-    const r=await client.rpc('dialogue_checkpoint',{p_actor:actor,p_turn:input.turnId,p_fence:fence,p_stage:stage,p_value:value as Json})
+    const r=await client.rpc('npc_dialogue_checkpoint',{p_actor:actor,p_turn_id:input.turnId,p_fence:fence,p_stage:stage,p_value:value as Json})
       .abortSignal(stage==='fail'?AbortSignal.timeout(1000):signal);
     if(r.error) throw databaseError(r.error);
   }
@@ -67,7 +68,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     return out.value;
   }
   async function retrieve(category:string,query='') {
-    const r=await client.rpc('dialogue_context',{p_actor:actor,p_turn:input.turnId,p_category:category,p_query:query.slice(0,200)}).abortSignal(signal);
+    const r=await client.rpc('npc_dialogue_context',{p_actor:actor,p_turn_id:input.turnId,p_category:category,p_query:query.slice(0,200)}).abortSignal(signal);
     if(r.error) throw databaseError(r.error); return r.data;
   }
   try {
@@ -117,15 +118,15 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       await generate('remember','remember',{keeper:input.message,npc:speech.text,npcName:base.name,decision});
     }
     if(signal.aborted) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
-    const committed=await client.rpc('dialogue_complete',{p_actor:actor,p_turn:input.turnId,p_fence:fence}).abortSignal(signal);
+    const committed=await client.rpc('npc_dialogue_complete',{p_actor:actor,p_turn_id:input.turnId,p_fence:fence}).abortSignal(signal);
     if(committed.error) throw databaseError(committed.error);
     if((committed.data as any)?.status==='stale') throw new DialogueError('The tavern changed before the reply could be saved. Send a new message.',409,'STATE_CHANGED');
-    console.info('npc_turn',{turnId:input.turnId,patron:input.patronKey,calls,durationMs:Math.round(performance.now()-started),outcome:'completed'});
+    console.info('npc_turn',{turnId:input.turnId,npcId:input.npcId,calls,durationMs:Math.round(performance.now()-started),outcome:'completed'});
     return {status:'completed',result:committed.data};
   } catch(cause) {
     if(cause instanceof ContextBudgetError)cause=new DialogueError(cause.message,503,'CONTEXT_BUDGET');
     await checkpoint('fail',{code:cause instanceof DialogueError?cause.code:'PROVIDER_FAILED'}).catch(()=>{});
-    console.info('npc_turn',{turnId:input.turnId,patron:input.patronKey,calls,outcome:cause instanceof DialogueError?cause.code:'PROVIDER_FAILED'});
+    console.info('npc_turn',{turnId:input.turnId,npcId:input.npcId,calls,outcome:cause instanceof DialogueError?cause.code:'PROVIDER_FAILED'});
     if(cause instanceof DialogueError) throw cause;
     throw new DialogueError(cause instanceof Error&&cause.name==='ProviderUnavailable'?cause.message:'Dialogue generation is unavailable. Please retry.',503,'PROVIDER_FAILED');
   }

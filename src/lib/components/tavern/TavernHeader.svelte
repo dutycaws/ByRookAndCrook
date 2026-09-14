@@ -1,7 +1,8 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import CapabilityMenu from '$lib/components/community/CapabilityMenu.svelte';
 
-  let { userEmail }: { userEmail: string } = $props();
+  let { userEmail, capabilities = [] }: { userEmail: string; capabilities?: string[] } = $props();
   const primary = [
     { href: '/garden', label: 'Garden', icon: 'leaf' },
     { href: '/bar', label: 'Bar', icon: 'mug' },
@@ -47,7 +48,7 @@
     </a>
     <details class="account-menu">
       <summary aria-label="Keeper menu"><span aria-hidden="true">K</span></summary>
-      <div><small>{userEmail}</small><a class="account-pantry-link" href="/ingredients">Open pantry</a><form method="POST" action="/garden?/signout"><button class="text-button" type="submit">Sign out</button></form></div>
+      <div><small>{userEmail}</small><CapabilityMenu {capabilities} /><a class="account-pantry-link" href="/ingredients">Open pantry</a><form method="POST" action="/garden?/signout"><button class="text-button" type="submit">Sign out</button></form></div>
     </details>
   </div>
 </header>

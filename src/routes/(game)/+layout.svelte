@@ -6,7 +6,7 @@
 </script>
 
 <div class="game-shell">
-  <TavernHeader userEmail={data.userEmail} />
+  <TavernHeader userEmail={data.userEmail} capabilities={data.community.capabilities} />
 
   {@render children()}
 </div>

@@ -14,7 +14,7 @@ export const REPRESENTATIVE_INTERACTION_STRATEGIES: Record<MediaRoute, string> =
   '/garden': 'Click the c2 hex-cell selection button (GardenScene onselect).',
   '/brewery': 'Check the first ingredient radio (Brewery selectedIngredientId binding).',
   '/bakery': 'Check the first ingredient radio (Bakery selectedIngredientId binding).',
-  '/bar': 'Select the second patron in the Choose a patron guest switcher (GuestInspector onselect).'
+  '/bar': 'Select the second patron directly in the layered Bar scene (ComposedScene onactorselect).'
 };
 
 export interface MediaPerformanceBudgets {

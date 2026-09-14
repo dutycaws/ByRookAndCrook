@@ -47,6 +47,11 @@ const generated = [
   `LOCAL_PILOT_TWO_EMAIL=${process.env.LOCAL_PILOT_TWO_EMAIL ?? 'keeper.two@example.test'}`,
   `LOCAL_PILOT_TWO_PASSWORD=${generatedPassword('LOCAL_PILOT_TWO_PASSWORD', rotate)}`,
   `LOCAL_TEST_USER_PASSWORD=${generatedPassword('LOCAL_TEST_USER_PASSWORD', rotate)}`,
+  '',
+  `NPC_IMAGE_API_KEY=${process.env.NPC_IMAGE_API_KEY ?? ''}`,
+  `NPC_IMAGE_PROVIDER=${process.env.NPC_IMAGE_PROVIDER ?? 'openai'}`,
+  `NPC_IMAGE_MODEL=${process.env.NPC_IMAGE_MODEL ?? 'gpt-image-2'}`,
+  `NPC_IMAGE_DEADLINE_MS=${process.env.NPC_IMAGE_DEADLINE_MS ?? '60000'}`,
   ''
 ].join('\n');
 if (!status.SERVICE_ROLE_KEY) throw new Error('Local server credential is unavailable.');

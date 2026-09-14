@@ -29,6 +29,7 @@ async function closeMobileGardenActions(page: Page) {
 }
 
 async function selectPlot(page: Page, plot: Locator) {
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
   if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await plot.tap(); else await plot.click();
   await expect(plot).toHaveAttribute('aria-pressed', 'true');
 }
@@ -272,14 +273,23 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
 
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('link', { name: /Serve it at the bar/ }).click();
+    const rosterResult = await player.client.rpc('npc_roster', { p_limit: 20 });
+    expect(rosterResult.error).toBeNull();
+    const resident = (rosterResult.data as unknown[]).find((entry): entry is { instanceId: string; name: string } => {
+      return Boolean(entry && typeof entry === 'object'
+        && typeof (entry as { instanceId?: unknown }).instanceId === 'string'
+        && typeof (entry as { name?: unknown }).name === 'string');
+    });
+    expect(resident).toBeDefined();
+    await page.goto(`/bar?npc=${resident!.instanceId}`);
     await expect(page.locator('.tavern-scene')).toBeVisible();
-    await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
-    await expect(page.getByRole('status')).toContainText('Earned 12 gold');
-    await expect(page.getByLabel('Tavern gold')).toContainText('12 gold');
+    await page.getByRole('button', { name: `Serve to ${resident!.name}`, exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('Earned 10 gold');
+    await expect(page.getByLabel('Tavern gold')).toContainText('10 gold');
     await expect(page.getByRole('heading', { name: 'No hospitality ready to serve' })).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel('Tavern gold')).toContainText('12 gold');
-    await expect(page.getByText('Relationship +3 · Story 0', { exact: false })).toBeVisible();
+    await expect(page.getByLabel('Tavern gold')).toContainText('10 gold');
+    await expect(page.locator('.serving-history li')).toContainText('Relationship +1');
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('button', { name: 'Rest and begin next day' }).click();
     await expect(page.getByText('Tavern day 2 · Daily craft')).toBeVisible();
