@@ -1,13 +1,38 @@
 import {
   SALIENCE_BANDS, WORLD_ENTITY_KINDS, primitiveRegistry,
+  parseWorldCanonEventProposal,
   validatePersonalityProfile, validatePersonalitySchema,
-  type BeliefOperation, type CapabilityEnvelope, type EvolutionEvidenceKind, type PersonalityProfile, type PersonalitySchema, type SalienceBand, type WorldEntityKind, type WorldValidationSnapshot
+  type BeliefOperation, type CapabilityEnvelope, type EvolutionEvidenceKind, type PersonalityProfile, type PersonalitySchema, type PublicWorldCanonEventSummary, type SalienceBand, type WorldCanonEventProposal, type WorldCanonEventValidationContext, type WorldEntityKind, type WorldValidationSnapshot
 } from '$lib/game/evolving-world';
 
 export const SETTLEMENT_PROMPT_VERSION = 'world-settlement-v1' as const;
+export const CANON_SETTLEMENT_PROMPT_VERSION = 'world-canon-event-v1' as const;
 export const SETTLEMENT_STAGES = ['proposer', 'critic', 'repair', 'final_critic', 'digest', 'validated'] as const;
 export type SettlementStage = (typeof SETTLEMENT_STAGES)[number];
-export type ProviderStage = Exclude<SettlementStage, 'validated'>;
+export const CANON_PROVIDER_STAGES = ['canon_proposer', 'canon_critic', 'canon_repair', 'canon_final_critic'] as const;
+export type CanonProviderStage = (typeof CANON_PROVIDER_STAGES)[number];
+/**
+ * Versioned provider-call ceilings for the two settlement flows. Canon admits
+ * no provider-produced digest or news: a straight acceptance is proposer plus
+ * critic, while one repair adds repair plus final critic.
+ */
+export const SETTLEMENT_PROVIDER_CALL_BUDGETS = {
+  resident: { maximum: 5, stages: ['proposer', 'critic', 'repair', 'final_critic', 'digest'] },
+  canon: { maximum: 4, accepted: 2, stages: CANON_PROVIDER_STAGES },
+  news: { maximum: 0, stages: [] }
+} as const;
+export type ResidentProviderStage = Exclude<SettlementStage, 'validated'>;
+export type ProviderStage = ResidentProviderStage | CanonProviderStage;
+/** Provider stages remain namespaced while durable checkpoints retain their frozen original names. */
+export const CANON_CHECKPOINT_STAGE: Readonly<Record<CanonProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
+  canon_proposer:'proposer', canon_critic:'critic', canon_repair:'repair', canon_final_critic:'final_critic'
+};
+export function checkpointStageForProviderStage(stage: ProviderStage): SettlementStage {
+  return stage in CANON_CHECKPOINT_STAGE ? CANON_CHECKPOINT_STAGE[stage as CanonProviderStage] : stage as SettlementStage;
+}
+export function promptVersionForProviderStage(stage: ProviderStage): string {
+  return stage in CANON_CHECKPOINT_STAGE ? CANON_SETTLEMENT_PROMPT_VERSION : SETTLEMENT_PROMPT_VERSION;
+}
 export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'quest' | 'effects' | 'news' | 'finalize';
 
 export type ProviderUsage = { input: number; output: number };
@@ -40,6 +65,59 @@ function string(value: unknown, max = 16_384): value is string { return typeof v
 function byteSize(value: unknown): number { return new TextEncoder().encode(JSON.stringify(value)).byteLength; }
 function futureIso(value: unknown): { text: string; ms: number } | null {
   if (!string(value, 64)) return null; const ms = Date.parse(value); return Number.isFinite(ms) && ms > Date.now() ? { text:value, ms } : null;
+}
+function lexicographicallySorted(values: readonly string[]): boolean {
+  return values.every((value, index) => index === 0 || values[index - 1].localeCompare(value) <= 0);
+}
+
+/**
+ * Canon workers must use the day-close world snapshot verbatim. This fails
+ * closed until the snapshot includes the entity-count and reuse-key facts that
+ * the game contract requires; it never trusts model-supplied validation data.
+ */
+function authoritativeCanonSnapshot(value: unknown): Record<string, unknown> | null {
+  if (!object(value)) return null;
+  return object(value.worldSnapshot) ? value.worldSnapshot : value;
+}
+export function frozenCanonEventContext(value: unknown): WorldCanonEventValidationContext | null {
+  const snapshot=authoritativeCanonSnapshot(value);
+  const activeCount=snapshot?.activeGeneratedEntityCount;
+  if (!snapshot || !object(snapshot.entityKinds) || !Array.isArray(snapshot.registeredTemplateKeys)
+    || typeof activeCount !== 'number' || !Number.isSafeInteger(activeCount) || activeCount < 0
+    || !Array.isArray(snapshot.existingPublicEventReuseKeys)
+    || activeCount > primitiveRegistry.worldBudgets.activeGeneratedEntities
+    || Object.keys(snapshot.entityKinds).length > 64 || snapshot.registeredTemplateKeys.length < 1 || snapshot.registeredTemplateKeys.length > primitiveRegistry.worldEventTemplates.length
+    || snapshot.existingPublicEventReuseKeys.length > primitiveRegistry.worldBudgets.activeGeneratedEntities
+    || !snapshot.registeredTemplateKeys.every((key) => typeof key === 'string' && primitiveRegistry.worldEventTemplates.includes(key))
+    || new Set(snapshot.registeredTemplateKeys).size !== snapshot.registeredTemplateKeys.length
+    || !lexicographicallySorted(snapshot.registeredTemplateKeys as string[])
+    || !snapshot.existingPublicEventReuseKeys.every((key) => typeof key === 'string' && /^[a-z][a-z0-9-]{1,63}$/.test(key))
+    || new Set(snapshot.existingPublicEventReuseKeys).size !== snapshot.existingPublicEventReuseKeys.length
+    || !lexicographicallySorted(snapshot.existingPublicEventReuseKeys as string[])
+    || !Object.entries(snapshot.entityKinds).every(([id, kind]) => entityRef.test(id) && WORLD_ENTITY_KINDS.includes(kind as WorldEntityKind))) return null;
+  return {
+    entityKinds:snapshot.entityKinds as Record<string, WorldEntityKind>,
+    activeGeneratedEntityCount:activeCount,
+    existingPublicEventReuseKeys:snapshot.existingPublicEventReuseKeys as string[]
+  };
+}
+
+/** Parse model output only after validating it against the frozen day-close snapshot and application contract. */
+export function parseFrozenCanonEventProposal(value: unknown, frozenSnapshot: unknown): WorldCanonEventProposal | null {
+  const context=frozenCanonEventContext(frozenSnapshot);
+  const snapshot=authoritativeCanonSnapshot(frozenSnapshot);
+  if (!context || !snapshot || !Array.isArray(snapshot.registeredTemplateKeys)) return null;
+  const parsed=parseWorldCanonEventProposal(value, context);
+  return parsed.ok && snapshot.registeredTemplateKeys.includes(parsed.value.templateKey) ? parsed.value : null;
+}
+
+export function publicCanonEventSummary(value: unknown, frozenSnapshot: unknown): PublicWorldCanonEventSummary | null {
+  const proposal=parseFrozenCanonEventProposal(value, frozenSnapshot);
+  return proposal ? {
+    version:proposal.version, kind:proposal.kind, templateKey:proposal.templateKey,
+    participantEntityIds:[...proposal.participantEntityIds], title:proposal.title, summary:proposal.summary,
+    ...(proposal.reuseKey === undefined ? {} : { reuseKey:proposal.reuseKey })
+  } : null;
 }
 
 /** Reject untrusted RPC JSON before any provider call or completion side effect. */
