@@ -184,8 +184,8 @@ select is((
   select array_agg(job_kind order by ordinal)
   from private.world_settlement_jobs
   where settlement_id = (select id from pg_temp.settlement)
-), array['snapshot', 'canon', 'resident', 'resident', 'quest', 'effects', 'news', 'finalize']::text[],
-  'two deterministic resident jobs sit between canon and dependent work');
+), array['snapshot', 'canon', 'resident', 'resident', 'quest', 'effects', 'news', 'finalize', 'social_encounter']::text[],
+  'two deterministic resident jobs and one attributable social encounter are queued in order');
 select is((
   select count(*) from private.world_settlement_jobs
   where settlement_id = (select id from pg_temp.settlement) and job_kind = 'resident'
