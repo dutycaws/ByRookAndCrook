@@ -31,11 +31,17 @@ describe('world settlement worker', () => {
   });
   it('atomically commits an accepted resident proposal with its canonical fingerprint and digest', async () => {
     const mock=client({world_settlement_commit_mutation:(args:Record<string,unknown>)=>committedReceipt(args)}); const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest});
-    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'pressure_only'});
+    const operationalEvents: unknown[]=[];
+    expect(await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999,observability:(event)=>{operationalEvents.push(event);}})).toMatchObject({status:'completed',kind:'pressure_only'});
     expect(provider.calls).toEqual(['proposer','critic','digest']);
     const commit=mock.calls.find((call)=>call.name==='world_settlement_commit_mutation');
     expect(commit?.args).toMatchObject({p_settlement_id:id('1'),p_job_id:id('2'),p_fence:id('3'),p_proposal:proposal,p_proposal_fingerprint:await fingerprintMutationProposal(proposal),p_public_digest:'The tavern rests quietly. No new world changes were committed.'});
     expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
+    expect(operationalEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({correlationId:id('1'),workflow:'world_settlement',stage:'proposer',status:'completed',attempt:1,model:'fixture-model',tokenUsage:{input:1,output:1}}),
+      expect.objectContaining({stage:'critic',status:'completed'}), expect.objectContaining({stage:'digest',status:'completed'})
+    ]));
+    expect(JSON.stringify(operationalEvents)).not.toContain('The keeper promised a safe place to rest.');
   });
   it('safely skips non-resident jobs without provider work or mutation commits', async () => {
     const raw=claim() as any; raw.kind='canon';
@@ -178,8 +184,10 @@ describe('world settlement worker', () => {
   });
   it('fails and yields its lease after the bounded provider deadline', async () => {
     const mock=client(); const provider={ async generate(_stage:unknown,_payload:unknown,signal:AbortSignal) { await new Promise<void>((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true})); throw new Error('unreachable'); } };
-    expect(await runSettlementClaim(mock.api, claim(), {provider,timeoutMs:5,heartbeatMs:99_999})).toMatchObject({status:'failed',errorCode:'provider_timeout'});
+    const operationalEvents: unknown[]=[];
+    expect(await runSettlementClaim(mock.api, claim(), {provider,timeoutMs:5,heartbeatMs:99_999,observability:(event)=>{operationalEvents.push(event);}})).toMatchObject({status:'failed',errorCode:'provider_timeout'});
     expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_fail');
+    expect(operationalEvents).toEqual([expect.objectContaining({workflow:'world_settlement',stage:'proposer',status:'failed',attempt:1,errorCode:'provider_timeout'})]);
   });
   it('does not leak private frozen state into the digest payload', async () => {
     const mock=client(); let payload:unknown; const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest}); const original=provider.generate.bind(provider); provider.generate=async(stage,input,signal)=>{if(stage==='digest')payload=input;return original(stage,input,signal);};

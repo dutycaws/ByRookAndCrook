@@ -35,6 +35,25 @@ export interface DialogueReply {
   intention: Intention | null;
   committedRevision: number;
 }
+/**
+ * A deliberately qualitative, player-visible view of a resident's recent
+ * change. It never contains the mutable profile, beliefs, social scores, or
+ * settlement inputs used to arrive at the change.
+ */
+export interface PublicDisposition {
+  summary: string;
+  state: string;
+  version: string;
+}
+
+/** A bounded, public journal entry emitted by an overnight settlement. */
+export interface PublicEvolutionEntry {
+  day: number;
+  profileRevision: number;
+  createdAt: string;
+  disposition: PublicDisposition;
+}
+
 export interface Journal {
   instanceId: NpcInstanceId;
   npcId: NpcId;
@@ -49,6 +68,8 @@ export interface Journal {
   turns: Array<{ id: string; message: string; reply: string; day: number }>;
   events: Array<{ id?: string; text: string; outcome: string; day: number; publicNews?: boolean }>;
   pending: { turnId: string; status: string; message: string; error: string | null } | null;
+  disposition: PublicDisposition | null;
+  evolution: PublicEvolutionEntry[];
 }
 
 /** Attempts and abandonment end a quest, so later daily steps cannot execute. */

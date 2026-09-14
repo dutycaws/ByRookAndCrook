@@ -2,11 +2,46 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '$lib/database.types';
 import { hasExecutableSteps, type Decision, type DialogueInput } from '$lib/game/dialogue';
 import type { DialogueProvider } from './provider';
-import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload } from './context';
+import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, type ContextWindow } from './context';
 import { matchesSchema, schemas, type Stage } from './schemas';
+import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 
 export class DialogueError extends Error { constructor(message:string,public status=500,public code='DIALOGUE_FAILED'){super(message);} }
+export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink };
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PRIVATE_COGNITION_KEYS=new Set(['evolvingProfile','profileRevision','beliefs','currentSocial','social','pressure','roll','rolls','critic','privateIntent','privateCognition']);
+
+/**
+ * The investigation and decision stages are server-only cognition work. Speech
+ * and review receive a separately constructed public window so private beliefs
+ * cannot accidentally become a model-visible source for a factual statement.
+ */
+function stripPrivateCognition(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripPrivateCognition);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !PRIVATE_COGNITION_KEYS.has(key))
+    .map(([key, child]) => [key, stripPrivateCognition(child)]));
+}
+
+function privateCognition(window: ContextWindow) {
+  const base=window.base as Record<string, unknown>;
+  return {
+    profileRevision:base.profileRevision ?? null,
+    evolvingProfile:base.evolvingProfile ?? null,
+    beliefs:window.context.filter(item=>item.category==='beliefs').map(item=>item.data),
+    currentSocial:window.context.filter(item=>item.category==='relationships').map(item=>
+      item.data && typeof item.data==='object' ? (item.data as Record<string, unknown>).currentSocial ?? null : null)
+  };
+}
+
+export function publicDialogueWindow(window: ContextWindow): ContextWindow {
+  return stripPrivateCognition({
+    ...window,
+    // Beliefs are private character interpretation, never public evidence.
+    context:window.context.filter(item=>item.category!=='beliefs')
+  }) as ContextWindow;
+}
 export function parseInput(value:unknown): DialogueInput {
   const v=value as DialogueInput;
   if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !uuid.test(v.npcId??'') || typeof v.message!=='string'
@@ -34,8 +69,13 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
   }
   return d;
 }
+function observabilityErrorCode(cause: unknown): string {
+  if (cause instanceof DialogueError) return cause.code;
+  if (cause instanceof Error && cause.name === 'ProviderUnavailable') return 'provider_unavailable';
+  return 'provider_failed';
+}
 export async function runDialogue(client:SupabaseClient<Database>,actor:string,input:DialogueInput,provider:DialogueProvider,
-  options:{maxCalls?:number;rounds?:number;deadlineMs?:number}={}) {
+  options:DialogueRuntimeOptions={}) {
   const npcId = input.npcId;
   const started=performance.now();
   const signal=AbortSignal.timeout(Math.min(90000,Math.max(1000,options.deadlineMs??90000)));
@@ -60,9 +100,21 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     if(signal.aborted || calls>=Math.min(8,options.maxCalls??8)) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
     requirePayloadBudget(payload);
     await checkpoint('reserve',null); calls++;
-    const out=await provider.generate(stage,payload,signal);
-    if(signal.aborted) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
-    if(!matchesSchema(out.value,schemas[stage])) throw new DialogueError('A response stage was invalid. Please retry.',503,'STRUCTURE');
+    let out: Awaited<ReturnType<DialogueProvider['generate']>>;
+    try { out=await provider.generate(stage,payload,signal); }
+    catch (cause) {
+      await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:signal.aborted?'provider_timeout':observabilityErrorCode(cause)});
+      throw cause;
+    }
+    if(signal.aborted) {
+      await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'budget'});
+      throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
+    }
+    if(!matchesSchema(out.value,schemas[stage])) {
+      await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'structure'});
+      throw new DialogueError('A response stage was invalid. Please retry.',503,'STRUCTURE');
+    }
+    await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage});
     const recorded={...out,inputContext:describePayload(payload)};
     await checkpoint(name,recorded); checkpoints[name]=recorded;
     return out.value;
@@ -77,7 +129,8 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     const context:any[]=[]; const fetched=new Set<string>();
     let consequential=!!base.hospitality||!!base.playerIntent; let remember=false;
     for(let i=0;i<Math.min(2,Math.max(1,options.rounds??2));i++) {
-      const selected=await generate(`investigate${i}`,'investigate',stagePayload(prepareContext(base,context)));
+      const investigationWindow=prepareContext(base,context);
+      const selected=await generate(`investigate${i}`,'investigate',stagePayload(investigationWindow,{privateCognition:privateCognition(investigationWindow)}));
       consequential ||= selected.kind!=='informational'; remember ||= selected.remember;
       const evidenceName=`context${i}`;
       const evidence:any[]=checkpoints[evidenceName]?.value ?? [];
@@ -100,18 +153,19 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     let decision:Decision;
     if(checkpoints.decision) decision=checkpoints.decision.value as Decision;
     else {
-      const proposed=consequential ? await generate('deliberate','deliberate',stagePayload(window))
+      const proposed=consequential ? await generate('deliberate','deliberate',stagePayload(window,{privateCognition:privateCognition(window)}))
         : {stance:'respond',reaction:0,subject:'quest',evidence:'',intention:null};
       decision=validateDecision(proposed,base,input.message);
       await checkpoint('decision',{value:decision,contextWindow:window,ruleVersion:turn.rule_version,validated:true,sourceStage:consequential?'deliberate':null,
         evidenceCheckpoints:['base','context0',...(checkpoints.investigate1?['context1']:[])]});
     }
     const decisionContext={decision,effectiveIntention:decision.intention??window.base.intention};
-    let speech=await generate('speak','speak',stagePayload(window,decisionContext));
-    let review=await generate('review','review',stagePayload(window,{...decisionContext,reply:speech.text}));
+    const speechWindow=publicDialogueWindow(window);
+    let speech=await generate('speak','speak',stagePayload(speechWindow,decisionContext));
+    let review=await generate('review','review',stagePayload(speechWindow,{...decisionContext,reply:speech.text}));
     if(!review.ok) {
-      speech=await generate('rewrite','speak',stagePayload(window,{...decisionContext,previousReply:speech.text,corrections:review.issues}));
-      review=await generate('rereview','review',stagePayload(window,{...decisionContext,reply:speech.text}));
+      speech=await generate('rewrite','speak',stagePayload(speechWindow,{...decisionContext,previousReply:speech.text,corrections:review.issues}));
+      review=await generate('rereview','review',stagePayload(speechWindow,{...decisionContext,reply:speech.text}));
       if(!review.ok) throw new DialogueError('The reply could not be verified. Cancel this message and rephrase it.',503,'CONSISTENCY');
     }
     if(remember||decision.intention||decision.reaction) {

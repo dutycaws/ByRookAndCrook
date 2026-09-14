@@ -6,10 +6,55 @@ import { dialogueAvailability } from '$lib/server/dialogue/runtime';
 import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { presentBarPatrons } from '$lib/game/bar-scene';
-import type { Journal } from '$lib/game/dialogue';
+import type { Journal, PublicDisposition, PublicEvolutionEntry } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function shortText(value: unknown, limit: number): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text.length > 0 && text.length <= limit ? text : null;
+}
+
+function nonNegativeInteger(value: unknown, minimum = 0): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
+    ? value
+    : null;
+}
+
+/**
+ * Treat this projection as a narrow allow-list even though the RPC is owner
+ * scoped. That keeps future internal settlement fields out of page data by
+ * default and gives the UI one stable, player-safe vocabulary.
+ */
+function publicDisposition(value: unknown): PublicDisposition | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  const summary = shortText(candidate.summary, 240);
+  const state = shortText(candidate.state, 48);
+  const version = shortText(candidate.version, 64);
+  return summary && state && version ? { summary, state, version } : null;
+}
+
+function publicEvolution(value: unknown): PublicEvolutionEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 6).flatMap((entry) => {
+    const candidate = record(entry);
+    const disposition = publicDisposition(candidate?.disposition);
+    const day = nonNegativeInteger(candidate?.day);
+    const profileRevision = nonNegativeInteger(candidate?.profileRevision, 1);
+    const createdAt = shortText(candidate?.createdAt, 64);
+    if (!disposition || day === null || profileRevision === null || !createdAt) return [];
+    return [{ day, profileRevision, createdAt, disposition }];
+  });
+}
 
 export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
   if (!await locals.getVerifiedUser()) redirect(303, '/login');
@@ -54,7 +99,9 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
           questStatus:journal.status, preparation:Number(journal.campaign?.preparation ?? 0), nextStep:Number(journal.campaign?.step ?? 0), risk:journal.risk ?? 'none', warning:null,
           turns:(journal.turns ?? []).map((turn:any)=>({id:turn.turnId, message:turn.keeper, reply:turn.npc, day:turn.day})),
           events:(journal.events ?? []).map((event:any)=>({id:event.id,text:event.text,outcome:event.outcome,day:event.day,publicNews:event.publicNews})),
-          pending:journal.pending ? {turnId:journal.pending.turnId,status:journal.pending.status,message:journal.pending.message,error:journal.pending.error} : null
+          pending:journal.pending ? {turnId:journal.pending.turnId,status:journal.pending.status,message:journal.pending.message,error:journal.pending.error} : null,
+          disposition: publicDisposition(journal.disposition),
+          evolution: publicEvolution(journal.evolution)
         };
       }
       }

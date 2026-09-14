@@ -5,6 +5,7 @@ import type { Database } from '$lib/database.types';
 import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
+import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import {
   frozenEvolutionContext, parseCriticOutput, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
   type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
@@ -13,7 +14,7 @@ import {
 type RpcResult = { data: unknown; error: { message: string } | null };
 export type SettlementWorkerClient = { rpc(name: string, args?: Record<string, unknown>): Promise<RpcResult> };
 export type SettlementOutcome = { status: 'idle' | 'completed' | 'lease_lost' | 'failed'; kind?: string; errorCode?: string };
-export type SettlementRuntime = { provider?: SettlementProvider; now?: () => number; timeoutMs?: number; heartbeatMs?: number };
+export type SettlementRuntime = { provider?: SettlementProvider; now?: () => number; timeoutMs?: number; heartbeatMs?: number; observability?: AiObservabilitySink };
 const MAX_CALLS = 5;
 const MAX_TOTAL_MS = 90_000;
 
@@ -103,9 +104,23 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   const guard = new LeaseGuard(client, claim, controller, Math.max(1_000, Math.min(runtime.heartbeatMs ?? 20_000, 45_000)));
   const provider = runtime.provider ?? createSettlementProvider(runtimeConfig()); let calls = 0;
   const generate = async (stage: ProviderStage, payload: unknown): Promise<ProviderResult> => {
-    if (calls >= MAX_CALLS) throw new SettlementProviderError('provider_failed', 'Settlement model-call budget exhausted.');
-    if (!guard.canCall() || !await guard.establish()) throw new SettlementProviderError('provider_timeout', 'Settlement lease was lost.');
-    calls += 1; return provider.generate(stage, payload, controller.signal);
+    if (calls >= MAX_CALLS) {
+      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'provider_failed'});
+      throw new SettlementProviderError('provider_failed', 'Settlement model-call budget exhausted.');
+    }
+    if (!guard.canCall() || !await guard.establish()) {
+      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'provider_timeout'});
+      throw new SettlementProviderError('provider_timeout', 'Settlement lease was lost.');
+    }
+    calls += 1;
+    try {
+      const result = await provider.generate(stage, payload, controller.signal);
+      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'completed',attempt:claim.attempt,durationMs:result.durationMs,model:result.model,tokenUsage:result.usage});
+      return result;
+    } catch (cause) {
+      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:controller.signal.aborted?'provider_timeout':errorCode(cause)});
+      throw cause;
+    }
   };
   try {
     if (!await guard.establish()) return { status:'lease_lost', errorCode:'lease_unavailable' };

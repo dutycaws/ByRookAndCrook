@@ -7,7 +7,7 @@ export const intentionSchema = object({ goal: string, motivation: string, target
 })) });
 export const schemas = {
   investigate: object({ kind: enumeration(['informational','social','planning']), needsMore: { type:'boolean' }, remember: { type:'boolean' },
-    requests: array(object({ category: enumeration(['quests','history','relationships','memories','news']), query: string })) }),
+    requests: array(object({ category: enumeration(['quests','history','relationships','memories','news','beliefs']), query: string })) }),
   deliberate: object({ stance: enumeration(['agree','refuse','clarify','respond']), reaction: { type:'integer', enum:[-1,0,1] },
     subject: enumeration(['quest','personal','hospitality']), evidence: string, intention: { anyOf:[intentionSchema,{type:'null'}] } }),
   speak: object({ text: string }),
