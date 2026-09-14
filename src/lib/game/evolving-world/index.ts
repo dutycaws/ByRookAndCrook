@@ -6,3 +6,4 @@ export * from './canon-event-contracts';
 export * from './social-encounter-contracts';
 export * from './procedural-world-contracts';
 export * from './settlement-public';
+export * from './public-codex';
