@@ -16,6 +16,25 @@ export interface PublicCodexEntity {
   summary: string;
   day: number;
   provenance: PublicCodexProvenance;
+  art: PublicCodexArt;
+}
+
+/** Browser-safe art state. Render identities, storage keys, and job details stay server-only. */
+export interface PublicCodexArt {
+  status: 'placeholder' | 'accepted';
+  placeholder: { style: 'world-runtime-art-v1' };
+  mimeType?: 'image/png';
+  previewUrl?: string;
+}
+
+/** Server-only result from the strict runtime-art RPC projection. */
+export interface RuntimeArtProjection {
+  entityId: string;
+  appearanceVersion: string;
+  status: 'placeholder' | 'accepted';
+  placeholder: { style: 'world-runtime-art-v1' };
+  renderId?: string;
+  mimeType?: 'image/png';
 }
 
 export interface PublicCodexEvent {
@@ -57,6 +76,10 @@ function text(value: unknown, maximum: number): value is string { return typeof 
 function day(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1; }
 function uuid(value: unknown): value is string { return typeof value === 'string' && UUID.test(value); }
 
+export function publicCodexArtPlaceholder(): PublicCodexArt {
+  return { status: 'placeholder', placeholder: { style: 'world-runtime-art-v1' } };
+}
+
 function provenance(value: unknown, kind: PublicCodexProvenance['kind'], includeRevision = false): PublicCodexProvenance | null {
   if (!object(value) || !exact(value, includeRevision ? ['kind', 'day', 'profileRevision'] : ['kind', 'day']) || value.kind !== kind || !day(value.day)) return null;
   if (includeRevision && (!Number.isSafeInteger(value.profileRevision) || (value.profileRevision as number) < 1)) return null;
@@ -65,12 +88,33 @@ function provenance(value: unknown, kind: PublicCodexProvenance['kind'], include
     : { kind, day: value.day };
 }
 
-function entity(value: unknown): PublicCodexEntity | null {
+function entity(value: unknown): Omit<PublicCodexEntity, 'art'> | null {
   if (!object(value) || !exact(value, ['id', 'kind', 'title', 'summary', 'day', 'provenance']) || !uuid(value.id) || !ENTITY_KINDS.has(value.kind as PublicCodexEntityKind) || !text(value.title, 120) || !text(value.summary, 500) || !day(value.day)) return null;
   const sourceKind = object(value.provenance) && value.provenance.kind === 'procedural_entity_outcome'
     ? 'procedural_entity_outcome' : 'canonical_discovery';
   const source = provenance(value.provenance, sourceKind);
   return source ? { id:value.id, kind:value.kind as PublicCodexEntityKind, title:value.title.trim(), summary:value.summary.trim(), day:value.day, provenance:source } : null;
+}
+
+function runtimeArt(value: unknown): RuntimeArtProjection | null {
+  if (!object(value) || !exact(value, ['entityId', 'appearanceVersion', 'status', 'placeholder', 'render'])
+    || !uuid(value.entityId) || !text(value.appearanceVersion, 128)
+    || !object(value.placeholder) || !exact(value.placeholder, ['style']) || value.placeholder.style !== 'world-runtime-art-v1') return null;
+  if (value.status === 'placeholder' && value.render === null) {
+    return { entityId: value.entityId, appearanceVersion: value.appearanceVersion.trim(), status: 'placeholder', placeholder: { style: 'world-runtime-art-v1' } };
+  }
+  if (value.status !== 'accepted' || !object(value.render) || !exact(value.render, ['renderId', 'mimeType'])
+    || !uuid(value.render.renderId) || value.render.mimeType !== 'image/png') return null;
+  return { entityId: value.entityId, appearanceVersion: value.appearanceVersion.trim(), status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, renderId: value.render.renderId, mimeType: 'image/png' };
+}
+
+/** Strictly accepts the exact owner-scoped RPC projection before preview signing. */
+export function parseRuntimeArtProjection(value: unknown): RuntimeArtProjection[] {
+  if (!Array.isArray(value) || value.length > 150) return [];
+  const parsed = value.map(runtimeArt);
+  if (parsed.some((entry) => !entry)) return [];
+  const entries = parsed as RuntimeArtProjection[];
+  return new Set(entries.map((entry) => entry.entityId)).size === entries.length ? entries : [];
 }
 
 function publicEvent(value: unknown): PublicCodexEvent | null {
@@ -92,7 +136,11 @@ export function parsePublicWorldCodex(value: unknown): PublicWorldCodex {
   const publicEvents = value.publicEvents.map(publicEvent);
   const dispositions = value.dispositions.map(disposition);
   if (entities.some((entry) => !entry) || publicEvents.some((entry) => !entry) || dispositions.some((entry) => !entry)) throw new Error('Invalid world codex projection');
-  return { version: WORLD_PUBLIC_CODEX_VERSION, entities: entities as PublicCodexEntity[], publicEvents: publicEvents as PublicCodexEvent[], dispositions: dispositions as PublicCodexDisposition[] };
+  return {
+    version: WORLD_PUBLIC_CODEX_VERSION,
+    entities: (entities as Array<Omit<PublicCodexEntity, 'art'>>).map((entry) => ({ ...entry, art: publicCodexArtPlaceholder() })),
+    publicEvents: publicEvents as PublicCodexEvent[], dispositions: dispositions as PublicCodexDisposition[]
+  };
 }
 
 export function publicCodexGroup(kind: PublicCodexEntityKind): PublicCodexGroup { return GROUP_BY_KIND[kind]; }

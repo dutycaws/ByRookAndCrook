@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePublicWorldCodex, publicCodexGroup } from '$lib/game/evolving-world';
+import { parsePublicWorldCodex, parseRuntimeArtProjection, publicCodexArtPlaceholder, publicCodexGroup } from '$lib/game/evolving-world';
 
 const entityId = '11111111-1111-4111-8111-111111111111';
 const residentId = '22222222-2222-4222-8222-222222222222';
@@ -12,9 +12,23 @@ const projection = {
 
 describe('public world codex projection', () => {
   it('parses only the exact player-safe allow-list', () => {
-    expect(parsePublicWorldCodex(projection)).toEqual(projection);
+    expect(parsePublicWorldCodex(projection)).toEqual({ ...projection, entities: [{ ...projection.entities[0], art: publicCodexArtPlaceholder() }] });
     expect(publicCodexGroup('location')).toBe('locations');
     expect(publicCodexGroup('npc')).toBe('people');
+  });
+
+  it('accepts only opaque runtime-art state and rejects private render details', () => {
+    expect(parseRuntimeArtProjection([{
+      entityId, appearanceVersion: 'world-v1', status: 'accepted', placeholder: { style: 'world-runtime-art-v1' },
+      render: { renderId: residentId, mimeType: 'image/png' }
+    }])).toEqual([{
+      entityId, appearanceVersion: 'world-v1', status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, renderId: residentId, mimeType: 'image/png'
+    }]);
+    expect(parseRuntimeArtProjection([{
+      entityId, appearanceVersion: 'world-v1', status: 'accepted', placeholder: { style: 'world-runtime-art-v1' },
+      render: { renderId: residentId, mimeType: 'image/png', runtimeKey: 'private/key' }
+    }])).toEqual([]);
+    expect(parseRuntimeArtProjection([{ entityId, appearanceVersion: 'world-v1', status: 'placeholder', placeholder: { style: 'world-runtime-art-v1' }, render: { jobId: entityId } }])).toEqual([]);
   });
 
   it('accepts a generated entity only through explicit public-outcome provenance', () => {

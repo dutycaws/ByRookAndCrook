@@ -21,6 +21,14 @@
           {#each entries as entity (entity.id)}
             <li>
               <article>
+                <div class="codex-entity-art" aria-label={`${entity.kind} illustration`}>
+                  {#if entity.art.status === 'accepted' && entity.art.previewUrl}
+                    <img src={entity.art.previewUrl} alt={`${entity.title}, ${entity.kind} illustration`} />
+                  {:else}
+                    <span aria-hidden="true">{entity.kind}</span>
+                    <span class="sr-only">Illustration for {entity.title} is not available yet.</span>
+                  {/if}
+                </div>
                 <p class="eyebrow">Discovered day {entity.day}</p>
                 <h3>{entity.title}</h3>
                 <p>{entity.summary}</p>
@@ -33,3 +41,9 @@
     </section>
   {/each}
 </div>
+
+<style>
+  .codex-entity-art { display:grid; place-items:center; width:100%; aspect-ratio:16 / 9; margin-bottom:.75rem; overflow:hidden; border:1px solid rgba(194,148,53,.55); background:linear-gradient(135deg, rgba(90,61,22,.85), rgba(27,19,9,.95)); color:#e8cc84; text-transform:capitalize; font-family:'Cinzel', serif; }
+  .codex-entity-art img { width:100%; height:100%; object-fit:cover; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+</style>
