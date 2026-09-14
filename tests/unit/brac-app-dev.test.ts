@@ -8,6 +8,7 @@ import {
   type Child, type LauncherOptions
 } from '../../scripts/brac-app-dev';
 import type { ManagedProcessOptions, ProcessResult, ProjectLock } from '../../scripts/dev-process';
+import { runWorldSettlementWorker } from '../../scripts/run-world-settlement-worker';
 
 const api = 'http://127.0.0.1:57321';
 const published = 'local-publishable-key-1234';
@@ -80,7 +81,7 @@ function harness(root: string, overrides: Partial<LauncherOptions> & { cold?: bo
         `SUPABASE_SERVICE_ROLE_KEY=${service}`, 'CUSTOM_SETTING=kept'
       ].join('\n') + '\n');
       child = new FakeChild(result());
-    } else if (script === 'dev') child = new FakeChild();
+    } else if (script === 'dev' || script === 'simulation:worker') child = new FakeChild();
     else child = new FakeChild(result());
     calls.push({ command, args, options, child });
     return child;
@@ -120,6 +121,63 @@ describe('brac-app:dev launcher', () => {
     const migration = h.calls.find((call) => call.command === 'supabase' && call.args[0] === 'migration')!;
     expect(migration.options.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY).toBe(published);
     expect(h.released).toBe(1);
+  }));
+
+  it('starts and supervises the settlement worker after database gates', async () => withRoot(async (root) => {
+    const h = harness(root);
+    expect(await runDevelopment(h.options)).toBe(130);
+    const order = commandNames(h.calls);
+    const workerIndex = order.indexOf('npm simulation:worker');
+    expect(workerIndex).toBeGreaterThan(order.indexOf('npm test:integration'));
+    expect(workerIndex).toBeLessThan(order.indexOf('npm dev'));
+    const worker = h.calls.find((call) => commandNames([call])[0] === 'npm simulation:worker')!;
+    expect(worker.options.env.PUBLIC_SUPABASE_URL).toBe(api);
+    expect(worker.options.env.SUPABASE_SERVICE_ROLE_KEY).toBe(service);
+    expect(worker.child.stopped).toBeGreaterThan(0);
+    const app = h.calls.find((call) => commandNames([call])[0] === 'npm dev')!;
+    expect(app.options.env.WORLD_SETTLEMENT_WORKER_MODE).toBe('external');
+
+    const failed = harness(root, { log: () => {} });
+    const original = failed.options.spawn!;
+    failed.options.spawn = (command, args, options) => args.includes('simulation:worker')
+      ? new FakeChild(result(1, '', 'worker crashed')) : original(command, args, options);
+    expect(await runDevelopment(failed.options)).toBe(1);
+    const failedApp = failed.calls.find((call) => commandNames([call])[0] === 'npm dev')!.child;
+    expect(failedApp.stopped).toBeGreaterThan(0);
+
+    const controller = new AbortController();
+    const drainLimits: number[] = [];
+    let inFlight = 0;
+    let maximumInFlight = 0;
+    let beganPoll!: () => void;
+    const pollBegan = new Promise<void>((resolve) => { beganPoll = resolve; });
+    const process = runWorldSettlementWorker({
+      signal: controller.signal,
+      drain: async (limit) => {
+        drainLimits.push(limit);
+        maximumInFlight = Math.max(maximumInFlight, ++inFlight);
+        beganPoll();
+        inFlight--;
+        return [];
+      },
+      log: { info: () => {}, warn: () => {} }
+    });
+    await pollBegan;
+    controller.abort();
+    await expect(Promise.race([
+      process,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('worker did not interrupt its poll wait')), 100))
+    ])).resolves.toBeUndefined();
+    expect(drainLimits).toEqual([4]);
+    expect(maximumInFlight).toBe(1);
+
+    const onceLimits: number[] = [];
+    await runWorldSettlementWorker({
+      once: true,
+      drain: async (limit) => { onceLimits.push(limit); return []; },
+      log: { info: () => {}, warn: () => {} }
+    });
+    expect(onceLimits).toEqual([4]);
   }));
 
   it('reuses a healthy project stack while retaining responsibility for stopping it', async () => withRoot(async (root) => {

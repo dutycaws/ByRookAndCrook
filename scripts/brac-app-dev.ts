@@ -154,7 +154,7 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
   const readinessMs = options.readinessMs ?? 60_000;
   const graceMs = options.graceMs ?? 10_000;
   let env: NodeJS.ProcessEnv = {};
-  let active: Child | undefined;
+  const managedChildren = new Set<Child>();
   let lock: ProjectLock | undefined;
   let adopted = false;
   let cleaning = false;
@@ -167,7 +167,8 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     signalCode = code;
     controller.abort();
     log('[brac-app:dev] Stopping the local session…');
-    if (!cleaning) void active?.stop(graceMs).catch(() => { cleanupFailed = true; });
+    if (!cleaning) void Promise.all([...managedChildren].map((child) => child.stop(graceMs)))
+      .catch(() => { cleanupFailed = true; });
   }
   const onInterrupt = () => requestStop(130);
   const onTerminate = () => requestStop(143);
@@ -202,7 +203,7 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
         if (buffers[stream].length > 64 * 1024) buffers[stream] = '';
       } } : {})
     });
-    active = child;
+    managedChildren.add(child);
     return child;
   }
 
@@ -213,7 +214,7 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     const child = startChild(command, args, settings.visible ?? false, settings.env);
     const result = await child.result;
     await child.stop(graceMs);
-    active = undefined;
+    managedChildren.delete(child);
     signal.throwIfAborted();
     if (result.code !== 0 && !settings.allowFailure) {
       // Hidden stages include credential-bearing CLI output. Never include it in exceptions.
@@ -299,25 +300,40 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     await npm('test:db', 'Running database tests…');
     await npm('test:integration', 'Running RPC integration tests…');
 
+    log('[brac-app:dev] Starting the settlement simulation worker…');
+    const simulationWorker = startChild(npmFile ? process.execPath : 'npm',
+      [...(npmFile ? [npmFile] : []), 'run', 'simulation:worker'], true, { ...env, NODE_ENV: 'development' });
+    let simulationWorkerExited = false;
+    void simulationWorker.result.then(() => { simulationWorkerExited = true; });
+
     log('[brac-app:dev] Starting the app with hot reload…');
     const app = startChild(npmFile ? process.execPath : 'npm',
       [...(npmFile ? [npmFile] : []), 'run', 'dev', '--', '--host', '127.0.0.1', '--port', '3000', '--strictPort'],
-      true, { ...env, NODE_ENV: 'development' });
+      true, { ...env, NODE_ENV: 'development', WORLD_SETTLEMENT_WORKER_MODE: 'external' });
     let appExited = false;
     void app.result.then(() => { appExited = true; });
     const appDeadline = Date.now() + readinessMs;
     while (!await probe(`${APP_ORIGIN}/login`, {}, signal)) {
       signal.throwIfAborted();
       if (appExited) throw new Error('The app exited before /login became ready.');
+      if (simulationWorkerExited) throw new Error('The settlement simulation worker exited before /login became ready.');
       if (Date.now() >= appDeadline) throw new Error('The app did not serve /login before the readiness timeout.');
       await delay(options.pollMs ?? 1_000, undefined, { signal });
     }
     signal.throwIfAborted();
     if (appExited) throw new Error('The app exited before readiness could be confirmed.');
+    if (simulationWorkerExited) throw new Error('The settlement simulation worker exited before readiness could be confirmed.');
     log(`[brac-app:dev] Ready: ${APP_ORIGIN}/login\nStudio: http://127.0.0.1:57323\n`
       + 'Retrieve pilot logins with: npm run credentials:local\nCtrl+C stops the app and this Supabase stack; saves are retained.');
-    const result = await app.result;
-    if (!signal.aborted && result.code !== 0) throw new Error(`The app exited unexpectedly (${result.signal ?? result.code}).`);
+    const exited = await Promise.race([
+      app.result.then((result) => ({ kind: 'app' as const, result })),
+      simulationWorker.result.then((result) => ({ kind: 'worker' as const, result }))
+    ]);
+    if (!signal.aborted && (exited.kind === 'worker' || exited.result.code !== 0)) {
+      throw new Error(exited.kind === 'app'
+        ? `The app exited unexpectedly (${exited.result.signal ?? exited.result.code}).`
+        : `The settlement simulation worker exited unexpectedly (${exited.result.signal ?? exited.result.code}).`);
+    }
   } catch (error) {
     if (signal.aborted) exitCode = signalCode;
     else {
@@ -326,7 +342,7 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     }
   } finally {
     cleaning = true;
-    try { await active?.stop(graceMs); }
+    try { await Promise.all([...managedChildren].map((child) => child.stop(graceMs))); }
     catch { cleanupFailed = true; log('[brac-app:dev] Could not terminate a managed process group.'); }
     if (adopted) {
       log('[brac-app:dev] Stopping this project’s Supabase stack and retaining its data…');

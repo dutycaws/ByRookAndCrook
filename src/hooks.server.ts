@@ -9,7 +9,9 @@ import { startWorldSettlementWorker } from '$lib/server/evolving-world/settlemen
 // lets adapter-node recover queued, undispatched portrait ordinals after a
 // restart while the service-role worker fencing remains database-authoritative.
 startPortraitGenerationWorker();
-startWorldSettlementWorker();
+if (process.env.WORLD_SETTLEMENT_WORKER_MODE !== 'external') {
+  startWorldSettlementWorker();
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
   const { url, publishableKey } = getSupabaseConfig();
