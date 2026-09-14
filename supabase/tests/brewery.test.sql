@@ -1,7 +1,31 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(66);
+select plan(68);
+
+-- Test-only worker harness: later player commands require the prior day-close
+-- settlement to have reached its terminal, open-save state.
+create function pg_temp.drain_world_settlement(p_settlement_id uuid) returns void
+language plpgsql as $$
+declare
+  claim jsonb;
+  processed integer := 0;
+begin
+  loop
+    claim := public.world_settlement_claim(p_settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      p_settlement_id, (claim->>'jobId')::uuid, (claim->>'fence')::uuid,
+      'no_changes', 'Fixture worker completed the settlement.'
+    );
+    processed := processed + 1;
+    if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  if claim->>'status' <> 'completed' then
+    raise exception 'fixture worker did not terminalize settlement';
+  end if;
+end;
+$$;
 
 create temporary table test_ids (
   key text primary key,
@@ -163,6 +187,19 @@ select lives_ok(
 select is((select current_day from public.tavern_saves), 2, 'the next day is persisted');
 select is((select day_minigame_completed from public.tavern_saves), false, 'the new day reopens the daily craft');
 select is((select revision from public.tavern_saves), 4::bigint, 'day advance increments revision');
+select set_config('app.fixture_settlement_id', public.world_settlement_status((select value from test_ids where key = 'save-one'))->>'id', true);
+
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '50000000-0000-4000-8000-000000000001';
+select is(public.world_settlement_status((select value from test_ids where key = 'save-one'))->>'status', 'completed', 'the fixture worker terminalizes the day settlement');
+select is((select world_phase from public.tavern_saves where id = (select value from test_ids where key = 'save-one')), 'open', 'the fixture worker reopens the tavern');
+
 select lives_ok(
   $$ select public.advance_tavern_day(
     (select value from test_ids where key = 'save-one'),

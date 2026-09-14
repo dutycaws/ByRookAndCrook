@@ -47,8 +47,8 @@ begin
 end $$;
 
 select is((select jsonb_agg(template_key order by template_key) from private.world_canonical_event_templates), '["festival-arrival","market-day","road-closure","storm-front"]'::jsonb,'SQL template registry exactly matches the primitive registry');
-select ok(position('activeGeneratedEntityCount' in pg_get_functiondef('public.advance_tavern_day(uuid,uuid,bigint)'::regprocedure))>0 and position('private.world_canonical_entities' in pg_get_functiondef('public.advance_tavern_day(uuid,uuid,bigint)'::regprocedure))>0,'day close freezes the authoritative generated-entity count from canonical rows');
-select ok(position('existingPublicEventReuseKeys' in pg_get_functiondef('public.advance_tavern_day(uuid,uuid,bigint)'::regprocedure))>0 and position('{proposal,reuseKey}' in pg_get_functiondef('public.advance_tavern_day(uuid,uuid,bigint)'::regprocedure))>0,'day close freezes only stored matching reuse keys');
+select ok(position('activeGeneratedEntityCount' in pg_get_functiondef('private.advance_tavern_day_before_social_encounter_v1(uuid,uuid,bigint)'::regprocedure))>0 and position('private.world_canonical_entities' in pg_get_functiondef('private.advance_tavern_day_before_social_encounter_v1(uuid,uuid,bigint)'::regprocedure))>0,'the canonical snapshot layer freezes the authoritative generated-entity count from canonical rows');
+select ok(position('existingPublicEventReuseKeys' in pg_get_functiondef('private.advance_tavern_day_before_social_encounter_v1(uuid,uuid,bigint)'::regprocedure))>0 and position('{proposal,reuseKey}' in pg_get_functiondef('private.advance_tavern_day_before_social_encounter_v1(uuid,uuid,bigint)'::regprocedure))>0,'the canonical snapshot layer freezes only stored matching reuse keys');
 select ok(not has_function_privilege('authenticated','public.world_settlement_commit_canon(uuid,uuid,uuid,jsonb)','execute'),'players cannot commit canonical events');
 select ok(has_function_privilege('service_role','public.world_settlement_commit_canon(uuid,uuid,uuid,jsonb)','execute'),'service worker owns canonical commits');
 
