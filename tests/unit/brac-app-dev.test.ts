@@ -147,6 +147,8 @@ describe('brac-app:dev launcher', () => {
 
     const controller = new AbortController();
     const drainLimits: number[] = [];
+    const artDrainLimits: number[] = [];
+    const pollOrder: string[] = [];
     let inFlight = 0;
     let maximumInFlight = 0;
     let beganPoll!: () => void;
@@ -156,10 +158,12 @@ describe('brac-app:dev launcher', () => {
       drain: async (limit) => {
         drainLimits.push(limit);
         maximumInFlight = Math.max(maximumInFlight, ++inFlight);
+        pollOrder.push('settlement');
         beganPoll();
         inFlight--;
         return [];
       },
+      artDrain: async (limit) => { artDrainLimits.push(limit); pollOrder.push('art'); return []; },
       log: { info: () => {}, warn: () => {} }
     });
     await pollBegan;
@@ -169,15 +173,39 @@ describe('brac-app:dev launcher', () => {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('worker did not interrupt its poll wait')), 100))
     ])).resolves.toBeUndefined();
     expect(drainLimits).toEqual([4]);
+    expect(artDrainLimits).toEqual([4]);
+    expect(pollOrder).toEqual(['settlement', 'art']);
     expect(maximumInFlight).toBe(1);
 
     const onceLimits: number[] = [];
     await runWorldSettlementWorker({
       once: true,
       drain: async (limit) => { onceLimits.push(limit); return []; },
+      artDrain: async (limit) => { onceLimits.push(limit); return []; },
       log: { info: () => {}, warn: () => {} }
     });
-    expect(onceLimits).toEqual([4]);
+    expect(onceLimits).toEqual([4, 4]);
+
+    const warnings: string[] = [];
+    const pollAfterSettlementFailure: string[] = [];
+    await runWorldSettlementWorker({
+      once: true,
+      drain: async () => { throw new Error('private settlement detail'); },
+      artDrain: async () => { pollAfterSettlementFailure.push('art'); return [{ status: 'accepted' }]; },
+      log: { info: () => {}, warn: (message) => warnings.push(message) }
+    });
+    expect(pollAfterSettlementFailure).toEqual(['art']);
+    expect(warnings).toEqual(['[simulation:worker] settlement poll failed; retrying.']);
+
+    const pollBeforeArtFailure: string[] = [];
+    await runWorldSettlementWorker({
+      once: true,
+      drain: async () => { pollBeforeArtFailure.push('settlement'); return [{ status: 'completed' }]; },
+      artDrain: async () => { throw new Error('private provider detail'); },
+      log: { info: () => {}, warn: (message) => warnings.push(message) }
+    });
+    expect(pollBeforeArtFailure).toEqual(['settlement']);
+    expect(warnings.at(-1)).toBe('[simulation:worker] runtime-art poll failed; retrying.');
   }));
 
   it('reuses a healthy project stack while retaining responsibility for stopping it', async () => withRoot(async (root) => {
