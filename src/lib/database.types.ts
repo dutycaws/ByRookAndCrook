@@ -2795,6 +2795,19 @@ export type Database = {
         }
         Returns: Json
       }
+      world_settlement_checkpoint: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_model?: string
+          p_payload: Json
+          p_prompt_version?: string
+          p_settlement_id: string
+          p_stage: string
+          p_usage?: Json
+        }
+        Returns: Json
+      }
       world_settlement_claim: {
         Args: { p_settlement_id: string }
         Returns: Json
@@ -2809,6 +2822,16 @@ export type Database = {
         }
         Returns: Json
       }
+      world_settlement_enqueue: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_input_snapshot: Json
+          p_input_version: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
       world_settlement_fail: {
         Args: {
           p_failure_code: string
@@ -2820,6 +2843,16 @@ export type Database = {
       }
       world_settlement_heartbeat: {
         Args: { p_fence: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_safe_result: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_kind: string
+          p_public_digest: string
+          p_settlement_id: string
+        }
         Returns: Json
       }
       world_settlement_status: {
