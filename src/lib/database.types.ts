@@ -2833,6 +2833,15 @@ export type Database = {
         }
         Returns: Json
       }
+      world_settlement_commit_procedural_world: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
       world_settlement_commit_social_encounter: {
         Args: {
           p_fence: string
