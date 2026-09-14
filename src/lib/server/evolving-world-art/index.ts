@@ -99,23 +99,25 @@ function storageKey(jobId: string, appearanceVersion: string, sha256: string): s
 
 export async function persistAcceptedRuntimeArt(storage: RuntimeArtStorage, rpc: RuntimeArtRpc, jobId: string, appearanceVersion: string, bytes: Buffer, observability: RuntimeArtObservabilitySink | undefined, lease: RuntimeArtLease): Promise<{ sha256: string }> {
   const correlationId = runtimeArtCorrelation(jobId);
-  await emitRuntimeArtObservability(observability, { correlationId, stage: 'verify', status: 'started' });
+  const verifyStarted = Date.now();
+  await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: 'verify', status: 'started' });
   const normalized = await validateRuntimeArtPng(bytes);
   const sha256 = createHash('sha256').update(normalized).digest('hex');
   const key = storageKey(jobId, appearanceVersion, sha256);
   const bucket = storage.from(WORLD_RUNTIME_ART_BUCKET);
   const upload = await bucket.upload(key, normalized, { contentType: 'image/png', upsert: false });
-  if (upload.error) { await markFailure(rpc, jobId, 'failed_storage', lease); await emitRuntimeArtObservability(observability, { correlationId, stage: 'verify', status: 'failed', errorCode: 'storage_failed' }); throw new RuntimeArtError('storage_failed', 'Runtime art storage failed.'); }
+  if (upload.error) { await markFailure(rpc, jobId, 'failed_storage', lease); await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: 'verify', status: 'failed', durationMs: Date.now() - verifyStarted, errorCode: 'storage_failed' }); throw new RuntimeArtError('storage_failed', 'Runtime art storage failed.'); }
   const read = await bucket.download(key);
   if (read.error || !read.data || createHash('sha256').update(Buffer.from(await read.data.arrayBuffer())).digest('hex') !== sha256) {
-    await removeQuietly(bucket, key); await markFailure(rpc, jobId, 'failed_storage', lease); await emitRuntimeArtObservability(observability, { correlationId, stage: 'verify', status: 'failed', errorCode: 'storage_failed' }); throw new RuntimeArtError('storage_failed', 'Runtime art verification failed.');
+    await removeQuietly(bucket, key); await markFailure(rpc, jobId, 'failed_storage', lease); await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: 'verify', status: 'failed', durationMs: Date.now() - verifyStarted, errorCode: 'storage_failed' }); throw new RuntimeArtError('storage_failed', 'Runtime art verification failed.');
   }
-  await emitRuntimeArtObservability(observability, { correlationId, stage: 'verify', status: 'completed' });
-  await emitRuntimeArtObservability(observability, { correlationId, stage: 'accept', status: 'started' });
+  await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: 'verify', status: 'completed', durationMs: Date.now() - verifyStarted });
+  const acceptStarted = Date.now();
+  await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: 'accept', status: 'started' });
   const accepted = await rpc.rpc('world_runtime_art_accept', { p_job_id: jobId, p_attempt: lease.attempt, p_fence: lease.fence, p_runtime_key: key, p_sha256: sha256 });
-  if (accepted.error) { await removeQuietly(bucket, key); await markFailure(rpc, jobId, 'failed_storage', lease); await emitRuntimeArtObservability(observability, { correlationId, stage: 'accept', status: 'failed', errorCode: 'storage_failed' }); throw new RuntimeArtError('storage_failed', 'Runtime art acceptance failed.'); }
+  if (accepted.error) { await removeQuietly(bucket, key); await markFailure(rpc, jobId, 'failed_storage', lease); await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: 'accept', status: 'failed', durationMs: Date.now() - acceptStarted, errorCode: 'storage_failed' }); throw new RuntimeArtError('storage_failed', 'Runtime art acceptance failed.'); }
   const reused = (accepted.data as { reused?: unknown } | undefined)?.reused === true;
-  await emitRuntimeArtObservability(observability, { correlationId, stage: reused ? 'reuse' : 'accept', status: reused ? 'reused' : 'completed' });
+  await emitRuntimeArtObservability(observability, { correlationId, attempt: lease.attempt, stage: reused ? 'reuse' : 'accept', status: reused ? 'reused' : 'completed', ...(reused ? {} : { durationMs: Date.now() - acceptStarted }) });
   return { sha256 };
 }
 
@@ -126,18 +128,18 @@ export async function runRuntimeArtJob(provider: RuntimeArtProvider, storage: Ru
   const correlationId = runtimeArtCorrelation(job.id);
   const model = runtimeArtModel(config);
   const started = Date.now();
-  await emitRuntimeArtObservability(sink, { correlationId, stage: 'queued', status: 'completed', model });
-  await emitRuntimeArtObservability(sink, { correlationId, stage: 'generate', status: 'started', model });
+  await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'queued', status: 'completed', model });
+  await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'generate', status: 'started', model });
   try {
     const bytes = await provider.generate({ model, prompt: runtimeArtPrompt(job.input), signal });
-    await emitRuntimeArtObservability(sink, { correlationId, stage: 'generate', status: 'completed', model, durationMs: Date.now() - started });
+    await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'generate', status: 'completed', model, durationMs: Date.now() - started });
     await persistAcceptedRuntimeArt(storage, rpc, job.id, job.appearanceVersion, bytes, sink, lease);
     return { status: 'accepted' };
   } catch (cause) {
     const code = cause instanceof RuntimeArtError ? cause.code : 'provider_failed';
     const status = code === 'moderated' ? 'failed_moderated' : code === 'storage_failed' ? 'failed_storage' : 'failed_provider';
     await markFailure(rpc, job.id, status, lease);
-    await emitRuntimeArtObservability(sink, { correlationId, stage: 'fail', status: 'failed', model, durationMs: Date.now() - started, errorCode: code });
+    await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'fail', status: 'failed', model, durationMs: Date.now() - started, errorCode: code });
     return { status };
   }
 }
@@ -155,6 +157,7 @@ export async function authorizedRuntimeArtPreview(storage: RuntimeArtStorage, ow
 
 export type RuntimeArtObservabilityEvent = {
   correlationId: string;
+  attempt: number;
   stage: 'queued' | 'generate' | 'verify' | 'accept' | 'fail' | 'reuse';
   status: 'started' | 'completed' | 'failed' | 'reused';
   model?: string;
@@ -169,8 +172,13 @@ export const localRuntimeArtObservabilitySink: RuntimeArtObservabilitySink = (ev
   console.info(JSON.stringify({ workflow: 'runtime_art', ...event }));
 };
 export async function emitRuntimeArtObservability(sink: RuntimeArtObservabilitySink | undefined, event: RuntimeArtObservabilityEvent): Promise<void> {
-  if (!sink || !/^runtime-art:[0-9a-f-]{36}$/.test(event.correlationId)) return;
-  try { await sink({ correlationId: event.correlationId, stage: event.stage, status: event.status, ...(event.model ? { model: event.model.slice(0, 128) } : {}), ...(Number.isSafeInteger(event.tokenCount) && event.tokenCount! >= 0 ? { tokenCount: event.tokenCount } : {}), ...(Number.isSafeInteger(event.durationMs) && event.durationMs! >= 0 ? { durationMs: event.durationMs } : {}), ...(event.errorCode ? { errorCode: event.errorCode } : {}) }); } catch { /* Observability is never a rendering dependency. */ }
+  const stages = new Set<RuntimeArtObservabilityEvent['stage']>(['queued', 'generate', 'verify', 'accept', 'fail', 'reuse']);
+  const statuses = new Set<RuntimeArtObservabilityEvent['status']>(['started', 'completed', 'failed', 'reused']);
+  const errors = new Set<NonNullable<RuntimeArtObservabilityEvent['errorCode']>>(['moderated', 'provider_failed', 'storage_failed']);
+  const model = typeof event.model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(event.model) ? event.model : undefined;
+  const number = (value: unknown, maximum: number): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
+  if (!sink || !/^runtime-art:[0-9a-f-]{36}$/.test(event.correlationId) || !number(event.attempt, 1_000) || event.attempt < 1 || !stages.has(event.stage) || !statuses.has(event.status) || (event.errorCode !== undefined && !errors.has(event.errorCode)) || (event.model !== undefined && !model) || (event.tokenCount !== undefined && !number(event.tokenCount, 10_000_000)) || (event.durationMs !== undefined && !number(event.durationMs, 24 * 60 * 60 * 1_000))) return;
+  try { await sink({ correlationId: event.correlationId, attempt: event.attempt, stage: event.stage, status: event.status, ...(model ? { model } : {}), ...(event.tokenCount !== undefined ? { tokenCount: event.tokenCount } : {}), ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}), ...(event.errorCode ? { errorCode: event.errorCode } : {}) }); } catch { /* Observability is never a rendering dependency. */ }
 }
 
 export type RuntimeArtClaim = { jobId: string; saveId: string; entityId: string; appearanceVersion: string; publicAppearance: string; attempt: number; fence: string };

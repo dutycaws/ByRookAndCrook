@@ -22,7 +22,7 @@ export const WORLD_SETTLEMENT_AI_STAGES = [
   'social_encounter_final_critic', 'social_encounter_validate', 'social_encounter_commit',
   'social_encounter_fallback',
   'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair',
-  'procedural_world_final_critic', 'procedural_world_validate', 'procedural_world_commit',
+  'procedural_world_final_critic', 'procedural_world_validate', 'procedural_world_commit', 'lease',
   'procedural_world_fallback'
 ] as const;
 

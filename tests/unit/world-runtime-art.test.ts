@@ -53,10 +53,20 @@ describe('runtime world art boundary', () => {
 
   it('emits only allow-listed opaque runtime-art lifecycle metrics', async () => {
     const events: unknown[] = [];
-    await emitRuntimeArtObservability((event) => { events.push(event); }, { correlationId: `runtime-art:${jobId}`, stage: 'accept', status: 'completed', model: 'gpt-image-test', tokenCount: 0, durationMs: 12 });
-    expect(events).toEqual([{ correlationId: `runtime-art:${jobId}`, stage: 'accept', status: 'completed', model: 'gpt-image-test', tokenCount: 0, durationMs: 12 }]);
-    await emitRuntimeArtObservability((event) => { events.push(event); }, { correlationId: 'bad', stage: 'fail', status: 'failed', errorCode: 'provider_failed' });
+    await emitRuntimeArtObservability((event) => { events.push(event); }, { correlationId: `runtime-art:${jobId}`, attempt: 2, stage: 'accept', status: 'completed', model: 'gpt-image-test', tokenCount: 0, durationMs: 12 });
+    expect(events).toEqual([{ correlationId: `runtime-art:${jobId}`, attempt: 2, stage: 'accept', status: 'completed', model: 'gpt-image-test', tokenCount: 0, durationMs: 12 }]);
+    await emitRuntimeArtObservability((event) => { events.push(event); }, { correlationId: 'bad', attempt: 1, stage: 'fail', status: 'failed', errorCode: 'provider_failed' });
+    await emitRuntimeArtObservability((event) => { events.push(event); }, { correlationId: `runtime-art:${jobId}`, attempt: 1, stage: 'fail', status: 'failed', model: 'model with private key', errorCode: 'provider_failed' } as any);
+    await emitRuntimeArtObservability((event) => { events.push(event); }, { correlationId: `runtime-art:${jobId}`, attempt: 1, stage: 'fail', status: 'failed', errorCode: 'private provider response' } as any);
     expect(events).toHaveLength(1);
+  });
+
+  it('records a bounded attempt and elapsed verification and acceptance work', async () => {
+    const fixture = storage(); const events: Array<Record<string, unknown>> = [];
+    await runRuntimeArtJob({ async generate() { return png(); } }, fixture.value, { async rpc() { return { data: { reused: false }, error: null }; } }, { id: jobId, appearanceVersion: 'art-v2', attempt: 2, fence: '33333333-3333-4333-8333-333333333333', input: { entityId, appearanceVersion: 'art-v2', publicAppearance: 'brass lantern' } }, {}, AbortSignal.timeout(1_000), { observability: (event) => { events.push(event); } });
+    expect(events).toHaveLength(7);
+    expect(events.every((event) => event.attempt === 2)).toBe(true);
+    for (const stage of ['verify', 'accept']) expect(events.find((event) => event.stage === stage && event.status === 'completed')).toMatchObject({ durationMs: expect.any(Number) });
   });
 
   it('uses the SQL-compatible public-spec hash and drains at most four claimed jobs serially', async () => {

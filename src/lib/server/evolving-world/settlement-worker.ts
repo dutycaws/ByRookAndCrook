@@ -193,7 +193,10 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
     }
   };
   try {
-    if (!await guard.establish()) return { status:'lease_lost', errorCode:'lease_unavailable' };
+    if (!await guard.establish()) {
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'lease',status:'failed',attempt:claim.attempt,errorCode:'lease_unavailable'});
+      return { status:'lease_lost', errorCode:'lease_unavailable' };
+    }
     if (claim.kind === 'news') {
       const newsStarted=now();
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_aggregate',status:'started',attempt:claim.attempt});

@@ -284,9 +284,10 @@ describe('world settlement worker', () => {
     expect(JSON.stringify(received)).not.toMatch(/pressureByDimension|roll/i);
   });
   it('does no provider work when the lease is too close to complete safely', async () => {
-    const mock=client(); const provider=fixtureProvider({proposer:proposal});
-    expect(await runSettlementClaim(mock.api, claim([],new Date(Date.now()+400).toISOString()), {provider,heartbeatMs:99_999})).toMatchObject({status:'lease_lost'});
+    const mock=client(); const provider=fixtureProvider({proposer:proposal}); const events: unknown[]=[];
+    expect(await runSettlementClaim(mock.api, claim([],new Date(Date.now()+400).toISOString()), {provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toMatchObject({status:'lease_lost',errorCode:'lease_unavailable'});
     expect(provider.calls).toEqual([]);
+    expect(events).toEqual([expect.objectContaining({workflow:'world_settlement',stage:'lease',status:'failed',attempt:1,errorCode:'lease_unavailable'})]);
   });
   it('abandons a stale fence without calling safe completion', async () => {
     const mock=client({world_settlement_heartbeat:()=>({data:null,error:{message:'Stale settlement fence'}})});
