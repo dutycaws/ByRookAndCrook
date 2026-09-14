@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { assertLocalSupabaseUrl, seedLocalShopRuntimeAssets } from './local-shop-runtime-assets.js';
 import { seedLocalSceneRuntimeAssets } from './local-scene-runtime-assets.js';
+import { ensureLocalPilotUsers } from './local-pilot-users.js';
 import { ensurePrivatePortraitBuckets } from '../src/lib/server/community-npc-portraits/index.js';
 import {
   registerLocalCommunityNpcSettingLibrary,
@@ -58,28 +59,11 @@ async function main() {
   const admin = createClient(apiUrl.toString(), serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false }
   });
-  const { data: listed, error: listError } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (listError) throw listError;
-
-  const pilotIds = new Map<string, string>();
-  for (const account of DEFAULT_USERS) {
-    const existing = listed.users.find((user) => user.email === account.email);
-    const response = existing
-      ? await admin.auth.admin.updateUserById(existing.id, {
-          password: account.password,
-          email_confirm: true
-        })
-      : await admin.auth.admin.createUser({
-          email: account.email,
-          password: account.password,
-          email_confirm: true
-        });
-
-    if (response.error) throw response.error;
-    if (!response.data.user) throw new Error(`Local pilot ${account.email} did not return an identity.`);
-    pilotIds.set(account.email, response.data.user.id);
-    console.info(`${existing ? 'Updated' : 'Created'} local pilot ${account.email}`);
-  }
+  const pilots = await ensureLocalPilotUsers(admin, DEFAULT_USERS);
+  const pilotIds = pilots.ids;
+  for (const email of pilots.created) console.info(`Created local pilot ${email}`);
+  for (const email of pilots.confirmed) console.info(`Confirmed local pilot ${email}`);
+  for (const email of pilots.reused) console.info(`Reused confirmed local pilot ${email} without changing its password.`);
 
   const assets = await seedLocalShopRuntimeAssets(admin.storage);
   const sceneAssets = await seedLocalSceneRuntimeAssets(admin.storage);
