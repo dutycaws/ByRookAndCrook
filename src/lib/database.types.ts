@@ -2119,6 +2119,7 @@ export type Database = {
           rules_version: string
           updated_at: string
           user_id: string
+          world_phase: string
         }
         Insert: {
           community_npc_level?: number
@@ -2134,6 +2135,7 @@ export type Database = {
           rules_version?: string
           updated_at?: string
           user_id: string
+          world_phase?: string
         }
         Update: {
           community_npc_level?: number
@@ -2149,6 +2151,7 @@ export type Database = {
           rules_version?: string
           updated_at?: string
           user_id?: string
+          world_phase?: string
         }
         Relationships: []
       }
@@ -2790,6 +2793,37 @@ export type Database = {
           p_ingredient_batch_id: string
           p_save_id: string
         }
+        Returns: Json
+      }
+      world_settlement_claim: {
+        Args: { p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_claim_next: { Args: never; Returns: Json }
+      world_settlement_complete: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_output?: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_fail: {
+        Args: {
+          p_failure_code: string
+          p_fence: string
+          p_job_id: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_heartbeat: {
+        Args: { p_fence: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_status: {
+        Args: { p_save_id: string; p_settlement_id?: string }
         Returns: Json
       }
     }
