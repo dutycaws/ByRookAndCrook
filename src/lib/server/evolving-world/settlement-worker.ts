@@ -1,13 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from '$env/dynamic/private';
-import { fingerprintMutationProposal, parseMutationProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
+import { fingerprintMutationProposal, fingerprintWorldCanonEventProposal, parseMutationProposal, validatePersonalityProfile, validatePersonalitySchema, validateMutationProposal, validateQuestChanges, validateWorldEffectCommands } from '$lib/game/evolving-world';
 import type { Database } from '$lib/database.types';
 import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
-import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
+import { emitAiObservability, localAiObservabilitySink, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import {
-  frozenEvolutionContext, parseCriticOutput, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
+  CANON_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
   type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
 } from './settlement-contracts';
 
@@ -15,7 +15,6 @@ type RpcResult = { data: unknown; error: { message: string } | null };
 export type SettlementWorkerClient = { rpc(name: string, args?: Record<string, unknown>): Promise<RpcResult> };
 export type SettlementOutcome = { status: 'idle' | 'completed' | 'lease_lost' | 'failed'; kind?: string; errorCode?: string };
 export type SettlementRuntime = { provider?: SettlementProvider; now?: () => number; timeoutMs?: number; heartbeatMs?: number; observability?: AiObservabilitySink };
-const MAX_CALLS = 5;
 const MAX_TOTAL_MS = 90_000;
 
 function runtimeConfig() { return privateRuntimeEnvironment(env); }
@@ -95,6 +94,23 @@ async function safeResult(client: SettlementWorkerClient, claim: SettlementClaim
   await rpc(client, 'world_settlement_safe_result', { p_settlement_id:claim.settlementId, p_job_id:claim.jobId, p_fence:claim.fence, p_kind:kind, p_public_digest:clip(digest, 500) || 'The day settled without new world changes.' });
 }
 
+function canonCommitted(value: unknown, expected: { settlementId:string; jobId:string; fingerprint:string }): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const receipt=value as Record<string,unknown>;
+  return receipt.status === 'completed' && receipt.rulesVersion === 'world-canon-event-v1'
+    && receipt.settlementId === expected.settlementId && receipt.jobId === expected.jobId
+    && receipt.proposalFingerprint === expected.fingerprint && typeof receipt.canonicalEventId === 'string'
+    && receipt.kind === 'world_event' && typeof receipt.title === 'string' && typeof receipt.summary === 'string';
+}
+
+function newsCompleted(value: unknown, expected: { settlementId:string; jobId:string }): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const receipt=value as Record<string,unknown>;
+  return receipt.status === 'completed' && receipt.rulesVersion === 'world-canon-event-v1'
+    && receipt.settlementId === expected.settlementId && receipt.jobId === expected.jobId
+    && typeof receipt.morningNews === 'string' && receipt.morningNews.length > 0 && receipt.morningNews.length <= 500;
+}
+
 /** Runs one fenced job. A validated resident proposal is committed atomically by the server-owned mutation RPC. */
 export async function runSettlementClaim(client: SettlementWorkerClient, rawClaim: unknown, runtime: SettlementRuntime = {}): Promise<SettlementOutcome> {
   let parsed; try { parsed = parseSettlementClaim(rawClaim); } catch { return { status:'failed', errorCode:'claim_malformed' }; }
@@ -103,27 +119,115 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   const controller = new AbortController(); let timedOut = false; const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, deadline);
   const guard = new LeaseGuard(client, claim, controller, Math.max(1_000, Math.min(runtime.heartbeatMs ?? 20_000, 45_000)));
   const provider = runtime.provider ?? createSettlementProvider(runtimeConfig()); let calls = 0;
+  const observability = runtime.observability;
+  const correlationId = `settlement:${claim.settlementId}:job:${claim.jobId}`;
+  const now = runtime.now ?? Date.now;
+  const elapsed = (started: number) => Math.max(0, Math.min(24 * 60 * 60 * 1_000, Math.round(now() - started)));
+  const callBudget = claim.kind === 'canon' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.canon.maximum
+    : claim.kind === 'resident' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.resident.maximum : 0;
   const generate = async (stage: ProviderStage, payload: unknown): Promise<ProviderResult> => {
-    if (calls >= MAX_CALLS) {
-      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'provider_failed'});
+    if (calls >= callBudget) {
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'budget'});
       throw new SettlementProviderError('provider_failed', 'Settlement model-call budget exhausted.');
     }
     if (!guard.canCall() || !await guard.establish()) {
-      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'provider_timeout'});
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'provider_timeout'});
       throw new SettlementProviderError('provider_timeout', 'Settlement lease was lost.');
     }
     calls += 1;
+    await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'started',attempt:claim.attempt});
     try {
       const result = await provider.generate(stage, payload, controller.signal);
-      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'completed',attempt:claim.attempt,durationMs:result.durationMs,model:result.model,tokenUsage:result.usage});
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'completed',attempt:claim.attempt,durationMs:result.durationMs,model:result.model,tokenUsage:result.usage});
       return result;
     } catch (cause) {
-      await emitAiObservability(runtime.observability,{correlationId:claim.settlementId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:controller.signal.aborted?'provider_timeout':errorCode(cause)});
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:controller.signal.aborted?'provider_timeout':errorCode(cause)});
       throw cause;
     }
   };
   try {
     if (!await guard.establish()) return { status:'lease_lost', errorCode:'lease_unavailable' };
+    if (claim.kind === 'news') {
+      const newsStarted=now();
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_aggregate',status:'started',attempt:claim.attempt});
+      let dispatched=false;
+      try {
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_aggregate',status:'completed',attempt:claim.attempt,durationMs:elapsed(newsStarted)});
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_commit',status:'started',attempt:claim.attempt});
+        const commitStarted=now();
+        dispatched=true;
+        const result=await rpc(client,'world_settlement_complete_news',{p_settlement_id:claim.settlementId,p_job_id:claim.jobId,p_fence:claim.fence});
+        if (!newsCompleted(result,{settlementId:claim.settlementId,jobId:claim.jobId})) {
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:'commit_unknown'});
+          return {status:'failed',errorCode:'commit_unknown'};
+        }
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_commit',status:'completed',attempt:claim.attempt,durationMs:elapsed(commitStarted)});
+        return {status:'completed',kind:'news'};
+      } catch (cause) {
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'news_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(newsStarted),errorCode:isLeaseError(cause as Error)?'lease_lost':'commit_unknown'});
+        if (isLeaseError(cause as Error)) return {status:'lease_lost',errorCode:'lease_lost'};
+        return {status:'failed',errorCode:dispatched?'commit_unknown':errorCode(cause)};
+      }
+    }
+    if (claim.kind === 'canon') {
+      const context=frozenCanonEventContext(claim.jobInputSnapshot);
+      const canonPayload={worldSnapshot:claim.jobInputSnapshot.worldSnapshot ?? claim.jobInputSnapshot};
+      const reject=async(reason:string):Promise<SettlementOutcome>=>{
+        await saveCheckpoint(client,claim,'validated',{accepted:false,reason});
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_validate',status:'skipped',attempt:claim.attempt,errorCode:'validation_rejected'});
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'started',attempt:claim.attempt});
+        await safeResult(client,claim,'rejected','The day settled without new world changes.');
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'safe_fallback',status:'completed',attempt:claim.attempt});
+        return {status:'completed',kind:'rejected'};
+      };
+      if (!context) return await reject('canon_context_missing');
+      let event=checkpoint(claim,CANON_CHECKPOINT_STAGE.canon_proposer)?.proposal;
+      if (event) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_proposer',status:'reused',attempt:claim.attempt});
+      else { const result=await generate('canon_proposer',canonPayload); event=result.value; await saveCheckpoint(client,claim,'proposer',{proposal:event},result); }
+      let proposed=parseFrozenCanonEventProposal(event,canonPayload);
+      if (!proposed) return await reject('canon_proposal_invalid');
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_validate',status:'completed',attempt:claim.attempt});
+      let rawCritic=checkpoint(claim,CANON_CHECKPOINT_STAGE.canon_critic)?.decision;
+      if (rawCritic) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_critic',status:'reused',attempt:claim.attempt});
+      else { const result=await generate('canon_critic',{...canonPayload,event:proposed}); rawCritic=result.value; await saveCheckpoint(client,claim,'critic',{decision:rawCritic},result); }
+      let decision=parseCriticOutput(rawCritic);
+      if (!decision || decision.outcome==='reject') return await reject('canon_critic_rejected');
+      if (decision.outcome==='repair') {
+        let repaired=checkpoint(claim,CANON_CHECKPOINT_STAGE.canon_repair)?.proposal;
+        if (repaired) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_repair',status:'reused',attempt:claim.attempt});
+        else { const result=await generate('canon_repair',{...canonPayload,event:proposed,instructions:decision.instructions}); repaired=result.value; await saveCheckpoint(client,claim,'repair',{proposal:repaired},result); }
+        proposed=parseFrozenCanonEventProposal(repaired,canonPayload);
+        if (!proposed) return await reject('canon_repair_invalid');
+        let final=checkpoint(claim,CANON_CHECKPOINT_STAGE.canon_final_critic)?.decision;
+        if (final) await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_final_critic',status:'reused',attempt:claim.attempt});
+        else { const result=await generate('canon_final_critic',{...canonPayload,event:proposed}); final=result.value; await saveCheckpoint(client,claim,'final_critic',{decision:final},result); }
+        decision=parseCriticOutput(final);
+        if (!decision || decision.outcome!=='accept') return await reject('canon_repair_rejected');
+      }
+      if (decision.outcome!=='accept') return await reject('canon_critic_malformed');
+      await saveCheckpoint(client,claim,'validated',{accepted:true,event:proposed});
+      const fingerprint=await fingerprintWorldCanonEventProposal(proposed,context);
+      if (!fingerprint) return await reject('canon_fingerprint_invalid');
+      if (guard.lost || !guard.canCall()) return {status:'lease_lost'};
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_commit',status:'started',attempt:claim.attempt});
+      const commitStarted=now();
+      let dispatched=false;
+      try {
+        dispatched=true;
+        const result=await rpc(client,'world_settlement_commit_canon',{p_settlement_id:claim.settlementId,p_job_id:claim.jobId,p_fence:claim.fence,p_event:proposed});
+        if (!canonCommitted(result,{settlementId:claim.settlementId,jobId:claim.jobId,fingerprint})) {
+          await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:'commit_unknown'});
+          return {status:'failed',errorCode:'commit_unknown'};
+        }
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_commit',status:'completed',attempt:claim.attempt,durationMs:elapsed(commitStarted)});
+        return {status:'completed',kind:'canon'};
+      } catch (cause) {
+        const code=isLeaseError(cause as Error)?'lease_lost':/PT409|conflict/i.test(String(cause))?'commit_conflict':'commit_unknown';
+        await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'canon_commit',status:'failed',attempt:claim.attempt,durationMs:elapsed(commitStarted),errorCode:code});
+        if (isLeaseError(cause as Error)) return {status:'lease_lost',errorCode:'lease_lost'};
+        return {status:'failed',errorCode:dispatched?'commit_unknown':errorCode(cause)};
+      }
+    }
     if (claim.kind !== 'resident') {
       await safeResult(client, claim, 'skipped', 'The day settled without new world changes.');
       return { status:'completed', kind:'skipped' };
@@ -194,9 +298,10 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
 /** Serial claim processing makes the DB fence the only concurrency authority. */
 export async function drainWorldSettlementQueue(limit = 4, client = serviceClient(), runtime: SettlementRuntime = {}): Promise<SettlementOutcome[]> {
   if (!client) return []; const outcomes: SettlementOutcome[]=[];
+  const unattendedRuntime = { ...runtime, observability: runtime.observability ?? localAiObservabilitySink };
   for (let index=0; index<Math.max(1,Math.min(limit,4)); index+=1) {
     const next = await client.rpc('world_settlement_claim_next', {}); if (next.error) break;
-    const outcome = await runSettlementClaim(client, next.data, runtime); outcomes.push(outcome); if (outcome.status==='idle') break;
+    const outcome = await runSettlementClaim(client, next.data, unattendedRuntime); outcomes.push(outcome); if (outcome.status==='idle') break;
   }
   return outcomes;
 }

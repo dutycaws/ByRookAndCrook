@@ -12,6 +12,9 @@ const digest = { summary:'The tavern rests quietly.', journalEntries:['No new wo
 function committedReceipt(args: Record<string, unknown>, outcome: 'pressure_only' | 'roll_failed' | 'changed' = 'pressure_only') { return {data:{status:'completed',rulesVersion:'evolving-world-v1',outcome,settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:args.p_proposal_fingerprint,publicDigest:args.p_public_digest},error:null}; }
 function claim(checkpoints: unknown[] = [], leaseUntil = new Date(Date.now() + 120_000).toISOString()) { return { settlementId:id('1'), jobId:id('2'), fence:id('3'), kind:'resident', ordinal:3, attempt:1, leaseUntil, inputFingerprint:'a'.repeat(64), inputVersion:'world-v1', inputSnapshot:{dayNumber:1, publicEntityIds:['town-square']}, jobInputVersion:'world-v1', jobInputSnapshot:{ evolution:{ residentId:id('10'),npcId:id('11'),profileRevision:1,schema:{version:'personality-schema-v1',dimensions:[{key:'resolve',label:'Resolve',negativeAnchor:'yielding',positiveAnchor:'unyielding',initialValue:0,volatility:1,core:false}],collections:[]}, profile:{dimensions:{resolve:0},entries:[]}, capability:{version:'v1',allowedActions:[],allowedApproaches:[],allowedWorldEffects:[],allowedTargetKinds:[],socialCapabilities:[],irreversibleEffects:[]}, worldSnapshot:{currentDay:1,entityKinds:{lira:'npc'},activeQuestIds:[],authorizedIrreversibleEffects:[]}, pressureByDimension:{resolve:0}, authorizedEvidence:[{id:'evidence-1',kind:'dialogue',happenedOnDay:1,sequence:2,sourceFingerprint:'a'.repeat(64),salience:'meaningful',summary:'The keeper promised a safe place to rest.'}] } }, checkpoints }; }
 function client(overrides: Partial<Record<string, unknown>> = {}) { const calls:Array<{name:string;args:Record<string,unknown>}> = []; const api: SettlementWorkerClient = { async rpc(name,args={}) { calls.push({name,args}); const entry=overrides[name]; if (typeof entry === 'function') return (entry as (args:Record<string,unknown>)=>unknown)(args) as any; if (entry) return {data:entry,error:null}; if(name==='world_settlement_heartbeat')return {data:{leaseUntil:new Date(Date.now()+120_000).toISOString()},error:null}; return {data:{status:'recorded'},error:null}; } }; return { api,calls }; }
+const canonEvent={version:'world-canon-event-v1',kind:'world_event',templateKey:'market-day',participantEntityIds:['lira'],title:'Market day arrives',summary:'Merchants have reached the square.',payload:{template:'market-day',participants:['lira'],visibility:'public' as const}};
+function canonClaim(checkpoints: unknown[] = []) { const raw=claim(checkpoints) as any; raw.kind='canon'; raw.jobInputSnapshot={worldSnapshot:{activeGeneratedEntityCount:0,existingPublicEventReuseKeys:[],registeredTemplateKeys:['market-day'],entityKinds:{lira:'npc'}},privateSentinel:'sk-secret-canon-input'}; return raw; }
+function canonReceipt(args: Record<string,unknown>) { const event=args.p_event as typeof canonEvent; return {data:{status:'completed',rulesVersion:'world-canon-event-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:'ignored',canonicalEventId:id('88'),kind:'world_event',title:event.title,summary:event.summary},error:null}; }
 
 describe('world settlement worker', () => {
   it('strictly rejects malformed claims before any RPC', async () => {
@@ -38,18 +41,73 @@ describe('world settlement worker', () => {
     expect(commit?.args).toMatchObject({p_settlement_id:id('1'),p_job_id:id('2'),p_fence:id('3'),p_proposal:proposal,p_proposal_fingerprint:await fingerprintMutationProposal(proposal),p_public_digest:'The tavern rests quietly. No new world changes were committed.'});
     expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_safe_result');
     expect(operationalEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({correlationId:id('1'),workflow:'world_settlement',stage:'proposer',status:'completed',attempt:1,model:'fixture-model',tokenUsage:{input:1,output:1}}),
+      expect.objectContaining({correlationId:`settlement:${id('1')}:job:${id('2')}`,workflow:'world_settlement',stage:'proposer',status:'completed',attempt:1,model:'fixture-model',tokenUsage:{input:1,output:1}}),
       expect.objectContaining({stage:'critic',status:'completed'}), expect.objectContaining({stage:'digest',status:'completed'})
     ]));
     expect(JSON.stringify(operationalEvents)).not.toContain('The keeper promised a safe place to rest.');
   });
   it('safely skips non-resident jobs without provider work or mutation commits', async () => {
-    const raw=claim() as any; raw.kind='canon';
+    const raw=claim() as any; raw.kind='snapshot';
     const mock=client(); const provider=fixtureProvider({});
     expect(await runSettlementClaim(mock.api, raw, {provider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'skipped'});
     expect(provider.calls).toEqual([]);
     expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_safe_result');
     expect(mock.calls.map((call)=>call.name)).not.toContain('world_settlement_commit_mutation');
+  });
+  it('admits a canon event after its independent proposer and critic calls, without a model digest', async () => {
+    const events:unknown[]=[];
+    const mock=client({world_settlement_commit_canon:async(args:Record<string,unknown>)=>{
+      const { fingerprintWorldCanonEventProposal }=await import('$lib/game/evolving-world');
+      const fingerprint=await fingerprintWorldCanonEventProposal(args.p_event,{entityKinds:{lira:'npc'},activeGeneratedEntityCount:0,existingPublicEventReuseKeys:[]});
+      return {...canonReceipt(args),data:{...(canonReceipt(args).data as object),proposalFingerprint:fingerprint}};
+    }});
+    const provider=fixtureProvider({canon_proposer:canonEvent,canon_critic:{outcome:'accept',rationale:'frozen',instructions:[]}});
+    expect(await runSettlementClaim(mock.api,canonClaim(),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'canon'});
+    expect(provider.calls).toEqual(['canon_proposer','canon_critic']);
+    expect(mock.calls.map((entry)=>entry.name)).toContain('world_settlement_commit_canon');
+    expect(mock.calls.map((entry)=>entry.name)).not.toContain('world_settlement_complete_news');
+    expect(events.map((event:any)=>[event.stage,event.status])).toEqual([
+      ['canon_proposer','started'],['canon_proposer','completed'],['canon_validate','completed'],
+      ['canon_critic','started'],['canon_critic','completed'],
+      ['canon_commit','started'],['canon_commit','completed']
+    ]);
+    const serialized=JSON.stringify(events);
+    expect(serialized).not.toContain(canonEvent.title); expect(serialized).not.toContain(canonEvent.summary);
+    expect(serialized).not.toContain('sk-secret-canon-input');
+  });
+  it('uses exactly one repair and final critic for a canon event', async () => {
+    const mock=client({world_settlement_commit_canon:async(args:Record<string,unknown>)=>{
+      const { fingerprintWorldCanonEventProposal }=await import('$lib/game/evolving-world'); const fingerprint=await fingerprintWorldCanonEventProposal(args.p_event,{entityKinds:{lira:'npc'},activeGeneratedEntityCount:0,existingPublicEventReuseKeys:[]});
+      return {...canonReceipt(args),data:{...(canonReceipt(args).data as object),proposalFingerprint:fingerprint}};
+    }});
+    const provider=fixtureProvider({canon_proposer:canonEvent,canon_critic:{outcome:'repair',rationale:'tighten',instructions:['Keep it public.']},canon_repair:canonEvent,canon_final_critic:{outcome:'accept',rationale:'frozen',instructions:[]}});
+    expect(await runSettlementClaim(mock.api,canonClaim(),{provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'canon'});
+    expect(provider.calls).toEqual(['canon_proposer','canon_critic','canon_repair','canon_final_critic']);
+  });
+  it('fails canon validation safely and never calls a critic or commit for invalid output', async () => {
+    const mock=client(); const provider=fixtureProvider({canon_proposer:{...canonEvent,title:''}});
+    expect(await runSettlementClaim(mock.api,canonClaim(),{provider,heartbeatMs:99_999})).toEqual({status:'completed',kind:'rejected'});
+    expect(provider.calls).toEqual(['canon_proposer']); expect(mock.calls.map((entry)=>entry.name)).not.toContain('world_settlement_commit_canon');
+  });
+  it('reuses canon checkpoints and never regenerates a prior accepted proposal', async () => {
+    const checkpoints=[{stage:'proposer',payload:{proposal:canonEvent},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')},{stage:'critic',payload:{decision:{outcome:'accept',rationale:'frozen',instructions:[]}},usage:{},model:'old',promptVersion:'v',sourceFence:id('4')}];
+    const mock=client({world_settlement_commit_canon:async(args:Record<string,unknown>)=>{const { fingerprintWorldCanonEventProposal }=await import('$lib/game/evolving-world'); const fingerprint=await fingerprintWorldCanonEventProposal(args.p_event,{entityKinds:{lira:'npc'},activeGeneratedEntityCount:0,existingPublicEventReuseKeys:[]}); return {...canonReceipt(args),data:{...(canonReceipt(args).data as object),proposalFingerprint:fingerprint}};}});
+    const provider=fixtureProvider({}); expect(await runSettlementClaim(mock.api,canonClaim(checkpoints),{provider,heartbeatMs:99_999})).toMatchObject({status:'completed',kind:'canon'}); expect(provider.calls).toEqual([]);
+  });
+  it('treats a malformed canon receipt as unknown rather than retrying or applying a fallback', async () => {
+    const mock=client({world_settlement_commit_canon:{status:'completed',rulesVersion:'world-canon-event-v1'}}); const provider=fixtureProvider({canon_proposer:canonEvent,canon_critic:{outcome:'accept',rationale:'frozen',instructions:[]}});
+    expect(await runSettlementClaim(mock.api,canonClaim(),{provider,heartbeatMs:99_999})).toEqual({status:'failed',errorCode:'commit_unknown'});
+    expect(mock.calls.map((entry)=>entry.name)).not.toContain('world_settlement_safe_result');
+  });
+  it('completes news deterministically without touching the provider', async () => {
+    const raw=canonClaim() as any; raw.kind='news'; const mock=client({world_settlement_complete_news:(args:Record<string,unknown>)=>({data:{status:'completed',rulesVersion:'world-canon-event-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,morningNews:'Market day arrived.'},error:null})}); const provider=fixtureProvider({}); const events:unknown[]=[];
+    expect(await runSettlementClaim(mock.api,raw,{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'news'}); expect(provider.calls).toEqual([]);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'news_aggregate',status:'completed'}),expect.objectContaining({stage:'news_commit',status:'completed'})]));
+  });
+  it('finishes the queued finalize claim with a safe result after earlier jobs settled', async () => {
+    const raw=claim() as any; raw.kind='finalize'; const mock=client();
+    expect(await runSettlementClaim(mock.api,raw,{provider:fixtureProvider({}),heartbeatMs:99_999})).toEqual({status:'completed',kind:'skipped'});
+    expect(mock.calls.map((entry)=>entry.name)).toContain('world_settlement_safe_result');
   });
   it('allows one repair and rejects a final repair request', async () => {
     const mock=client(); const provider=fixtureProvider({proposer:proposal,critic:{outcome:'repair',rationale:'clarify',instructions:['Keep it bounded.']},repair:proposal,final_critic:{outcome:'repair',rationale:'still wrong',instructions:['no']}});
@@ -187,7 +245,7 @@ describe('world settlement worker', () => {
     const operationalEvents: unknown[]=[];
     expect(await runSettlementClaim(mock.api, claim(), {provider,timeoutMs:5,heartbeatMs:99_999,observability:(event)=>{operationalEvents.push(event);}})).toMatchObject({status:'failed',errorCode:'provider_timeout'});
     expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_fail');
-    expect(operationalEvents).toEqual([expect.objectContaining({workflow:'world_settlement',stage:'proposer',status:'failed',attempt:1,errorCode:'provider_timeout'})]);
+    expect(operationalEvents).toEqual(expect.arrayContaining([expect.objectContaining({workflow:'world_settlement',stage:'proposer',status:'failed',attempt:1,errorCode:'provider_timeout'})]));
   });
   it('does not leak private frozen state into the digest payload', async () => {
     const mock=client(); let payload:unknown; const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest}); const original=provider.generate.bind(provider); provider.generate=async(stage,input,signal)=>{if(stage==='digest')payload=input;return original(stage,input,signal);};
@@ -197,7 +255,7 @@ describe('world settlement worker', () => {
     let claims=0; const mock=client({world_settlement_claim_next:()=>({data:claims++ < 6 ? claim() : {status:'idle'},error:null})});
     const provider=fixtureProvider({proposer:proposal,critic:{outcome:'reject',rationale:'no',instructions:[]},digest});
     // The default provider is intentionally not used by this queue seam test; direct parser confirms the cap without network work.
-    const outcomes=await drainWorldSettlementQueue(4, mock.api, {provider,heartbeatMs:99_999}); expect(outcomes).toHaveLength(4); startWorldSettlementWorker();
+    const outcomes=await drainWorldSettlementQueue(4, mock.api, {provider,heartbeatMs:99_999,observability:()=>undefined}); expect(outcomes).toHaveLength(4); startWorldSettlementWorker();
   });
   it('classifies a missing or local provider as unavailable without a network call', async () => {
     await expect(createSettlementProvider({}).generate('proposer',{},new AbortController().signal)).rejects.toMatchObject({code:'provider_unavailable'});

@@ -14,7 +14,11 @@ export type AiTokenUsage = { input: number; output: number };
 
 /** Current provider-call checkpoints. These are operational labels, not prompts. */
 export const DIALOGUE_AI_STAGES = ['investigate0', 'investigate1', 'deliberate', 'speak', 'review', 'rewrite', 'rereview', 'remember'] as const;
-export const WORLD_SETTLEMENT_AI_STAGES = ['proposer', 'critic', 'repair', 'final_critic', 'digest', 'validated'] as const;
+export const WORLD_SETTLEMENT_AI_STAGES = [
+  'proposer', 'critic', 'repair', 'final_critic', 'digest', 'validated',
+  'canon_proposer', 'canon_critic', 'canon_repair', 'canon_final_critic',
+  'canon_validate', 'canon_commit', 'news_aggregate', 'news_commit', 'safe_fallback'
+] as const;
 
 export type AiObservabilityEvent = Readonly<{
   version: typeof AI_OBSERVABILITY_VERSION;
@@ -53,6 +57,7 @@ const modelName = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const permittedErrors = new Set([
   'provider_unavailable', 'provider_timeout', 'provider_malformed', 'provider_failed',
   'worker_failed', 'claim_malformed', 'lease_unavailable', 'lease_lost', 'commit_unknown',
+  'validation_rejected', 'commit_rejected', 'commit_conflict',
   'context_budget', 'budget', 'structure', 'consistency', 'state_changed', 'internal_error'
 ]);
 
@@ -85,6 +90,8 @@ export function sanitizeAiErrorCode(value: unknown): string | undefined {
 export function createAiObservabilityEvent(input: AiObservabilityInput, now: () => Date = () => new Date()): AiObservabilityEvent | null {
   if (!opaqueId.test(input.correlationId) || !workflowSet.has(input.workflow) || !stageName.test(input.stage)
     || !statusSet.has(input.status) || !finiteInteger(input.attempt, 1, 1_000)) return null;
+  const allowedStages = input.workflow === 'dialogue' ? DIALOGUE_AI_STAGES : WORLD_SETTLEMENT_AI_STAGES;
+  if (!(allowedStages as readonly string[]).includes(input.stage)) return null;
   if (input.durationMs !== undefined && !finiteInteger(input.durationMs, 0, 24 * 60 * 60 * 1_000)) return null;
   if (input.model !== undefined && !modelName.test(input.model)) return null;
   if (input.tokenUsage !== undefined && !tokenUsage(input.tokenUsage)) return null;
@@ -112,6 +119,15 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
   if (errorCode) (event as { errorCode?: string }).errorCode = errorCode;
   return event;
 }
+
+/**
+ * Normal server telemetry is a line-delimited, schema-checked structured log.
+ * The event object is built before this sink runs, so the log path cannot
+ * serialize arbitrary caller objects, prompts, model text, or credentials.
+ */
+export const localAiObservabilitySink: AiObservabilitySink = (event) => {
+  try { console.info(JSON.stringify(event)); } catch { /* best effort only */ }
+};
 
 /**
  * Emits a previously allow-listed event. Sink failures are intentionally

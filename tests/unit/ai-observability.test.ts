@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AI_OBSERVABILITY_VERSION, createAiObservabilityEvent, emitAiObservability, sanitizeAiErrorCode } from '$lib/server/observability/ai-events';
+import { AI_OBSERVABILITY_VERSION, createAiObservabilityEvent, emitAiObservability, localAiObservabilitySink, sanitizeAiErrorCode } from '$lib/server/observability/ai-events';
 
 describe('AI observability boundary', () => {
   it('records versioned operational stage metrics with a correlation id', () => {
@@ -33,6 +33,7 @@ describe('AI observability boundary', () => {
     expect(createAiObservabilityEvent({ correlationId: 'turn:ok', workflow: 'dialogue', stage: 'Speak prose', status: 'completed', attempt: 1 })).toBeNull();
     expect(createAiObservabilityEvent({ correlationId: 'turn:ok', workflow: 'dialogue', stage: 'speak', status: 'completed', attempt: 0 })).toBeNull();
     expect(createAiObservabilityEvent({ correlationId: 'turn:ok', workflow: 'dialogue', stage: 'speak', status: 'completed', attempt: 1, tokenUsage: { input: -1, output: 3 } })).toBeNull();
+    expect(createAiObservabilityEvent({ correlationId: 'settlement:ok:job:ok', workflow: 'world_settlement', stage: 'arbitrary_payload_stage', status: 'completed', attempt: 1 })).toBeNull();
   });
 
   it('sanitizes errors and never allows a telemetry sink failure to change execution', async () => {
@@ -41,5 +42,34 @@ describe('AI observability boundary', () => {
     const sink = vi.fn(async () => { throw new Error('telemetry unavailable'); });
     await expect(emitAiObservability(sink, { correlationId: 'settlement:abc', workflow: 'world_settlement', stage: 'critic', status: 'failed', attempt: 1, errorCode: 'provider_timeout' })).resolves.toMatchObject({ errorCode: 'provider_timeout' });
     expect(sink).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows only the fixed canon and news operational labels', () => {
+    for (const stage of ['canon_proposer','canon_critic','canon_repair','canon_final_critic','canon_validate','canon_commit','news_aggregate','news_commit','safe_fallback']) {
+      expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage,status:'completed',attempt:1})).not.toBeNull();
+    }
+    expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'canon_payload',status:'completed',attempt:1})).toBeNull();
+  });
+
+  it('serializes only the exact validated event through the normal local sink', () => {
+    const written:string[]=[]; const original=console.info; console.info=(value:unknown)=>{written.push(String(value));};
+    try {
+      const event=createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage:'canon_commit',status:'failed',attempt:1,errorCode:'raw db error sk-secret-value'})!;
+      localAiObservabilitySink(event);
+    } finally { console.info=original; }
+    expect(written).toHaveLength(1); expect(written[0]).toContain('internal_error'); expect(written[0]).not.toContain('sk-secret-value');
+    expect(written[0]).not.toContain('prompt'); expect(written[0]).not.toContain('private');
+  });
+
+  it('supplies the privacy-safe sink from the normal dialogue runtime', async () => {
+    vi.resetModules();
+    vi.doMock('$env/dynamic/private', () => ({ env: { SUPABASE_SERVICE_ROLE_KEY:'service-key', OPENAI_API_KEY:'api-key' } }));
+    vi.doMock('@supabase/supabase-js', () => ({ createClient: vi.fn(() => ({ mocked:true })) }));
+    vi.doMock('$lib/server/config', () => ({ getSupabaseConfig: () => ({ url:'http://example.test' }) }));
+    vi.doMock('$lib/server/dialogue/provider', () => ({ createProvider: vi.fn(() => ({ mocked:true })), ProviderUnavailable: class ProviderUnavailable extends Error {} }));
+    const { dialogueRuntime }=await import('$lib/server/dialogue/runtime');
+    const { localAiObservabilitySink: runtimeSink }=await import('$lib/server/observability/ai-events');
+    expect(dialogueRuntime().options.observability).toBe(runtimeSink);
+    vi.doUnmock('$env/dynamic/private'); vi.doUnmock('@supabase/supabase-js'); vi.doUnmock('$lib/server/config'); vi.doUnmock('$lib/server/dialogue/provider');
   });
 });
