@@ -7,7 +7,7 @@ import {
 } from '../../src/lib/game/evolving-world';
 
 const context: ProceduralWorldValidationContext = {
-  entityKinds: { ranger:'npc', millhaven:'location', guild:'faction', herb:'item', 'old-event':'world_event' },
+  entityKinds: { ranger:'npc', millhaven:'location', guild:'faction', herb:'item', loaf:'recipe', 'old-event':'world_event' },
   activeGeneratedEntityCount: 148,
   activeQuestByResident: {},
   capabilities: {
@@ -59,5 +59,19 @@ describe('procedural world command contracts', () => {
     const one = canonicalizeProceduralWorldProposal(proposal(), context);
     const reordered = { commands:[{ ...proposal().commands[0], payload:{ tags:['ruin'], region:'north' } }, ...proposal().commands.slice(1)], version:'procedural-world-v1' };
     expect(one).toBe(canonicalizeProceduralWorldProposal(reordered, context));
+  });
+
+  it('permits only registered canonical recipe gameplay unlocks', () => {
+    const item = { version:'procedural-world-v1', commands:[
+      { operation:'entity', effectKind:'create_entity', sourceResidentId:'10000000-0000-4000-8000-000000000001', entityKind:'recipe', entityKey:'forest-loaf', archetypeKey:'crafted-dish', proposedName:'Forest loaf', payload:{} },
+      { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:'10000000-0000-4000-8000-000000000001', entityRef:'forest-loaf', family:'herb_loaf_variant', definition:{ displayName:'Forest loaf' } }
+    ] };
+    expect(parseProceduralWorldProposal(item, context)).toMatchObject({ ok:true });
+    expect(parseProceduralWorldProposal({ ...item, commands:[item.commands[1], item.commands[0]] }, context)).toMatchObject({ ok:true });
+    expect(validateProceduralWorldProposal({ ...item, commands:[item.commands[0], { ...item.commands[1], entityRef:'loaf' }] }, context)).not.toEqual([]);
+    expect(validateProceduralWorldProposal({ ...item, commands:[item.commands[0], { ...item.commands[1], definition:{ displayName:'Bad', extra:true } }] }, context)).not.toEqual([]);
+    expect(parseProceduralWorldProposal({ version:'procedural-world-v1', commands:[
+      { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:'10000000-0000-4000-8000-000000000001', entityRef:'loaf', family:'herb_loaf_variant', definition:{displayName:'Forest loaf'} }
+    ] }, context)).toMatchObject({ ok:false });
   });
 });

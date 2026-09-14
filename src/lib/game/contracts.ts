@@ -418,6 +418,7 @@ export interface CompleteBrewReceipt {
 export interface StartBakeCommand {
   saveId: string;
   ingredientBatchId: string;
+  recipeKey?: string;
   actionId: string;
   expectedRevision: number;
 }
