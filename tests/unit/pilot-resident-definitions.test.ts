@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import rawDefinitions from '../../supabase/content/evolving-world/pilot-residents-v1.json';
+import rawDefinitions from '../../supabase/content/evolving-world/pilot-residents-v2.json';
 import {
   parsePilotResidentDefinitions,
   pilotResidentDefinitions,
@@ -15,12 +15,12 @@ describe('pilot resident definitions', () => {
   it('pins exactly the first-party Lira and Torvin definitions and validates their profile contracts', () => {
     expect(Object.keys(pilotResidentDefinitions)).toEqual(['lira', 'torvin']);
     expect(pilotResidentDefinitions.lira).toMatchObject({
-      key: 'lira', definitionVersion: 'pilot-resident-v1',
+      key: 'lira', definitionVersion: 'pilot-resident-v2',
       sourceIdentity: { npcId: '18181818-1818-4181-8181-181818181818', npcVersionId: '18181818-1818-4181-8181-181818181819', npcKey: 'lira' },
       appearanceSource: { npcVersionId: '18181818-1818-4181-8181-181818181819', schemaVersion: 'npc-sheet-v1' }
     });
     expect(pilotResidentDefinitions.torvin).toMatchObject({
-      key: 'torvin', definitionVersion: 'pilot-resident-v1',
+      key: 'torvin', definitionVersion: 'pilot-resident-v2',
       sourceIdentity: { npcId: '28282828-2828-4282-8282-282828282828', npcVersionId: '28282828-2828-4282-8282-282828282829', npcKey: 'torvin' },
       appearanceSource: { npcVersionId: '28282828-2828-4282-8282-282828282829', schemaVersion: 'npc-sheet-v1' }
     });
@@ -62,10 +62,12 @@ describe('pilot resident definitions', () => {
     }
   });
 
-  it('keeps only the E1 safe capability surface', () => {
+  it('grants exactly the finite procedural capability surface', () => {
     expect(pilotResidentDefinitions.lira.capabilityEnvelope).toMatchObject({
       allowedActions: ['prepare', 'attempt', 'wait', 'abandon'], allowedApproaches: ['scouting', 'combat', 'diplomacy', 'trade'],
-      allowedTargetKinds: ['npc', 'location', 'faction', 'item'], allowedWorldEffects: ['adjust_relationship'], socialCapabilities: ['conceal', 'share_gossip'], irreversibleEffects: []
+      allowedTargetKinds: ['npc', 'location', 'faction', 'item', 'recipe', 'world_event'],
+      allowedWorldEffects: ['adjust_relationship', 'create_entity', 'create_quest', 'update_quest', 'record_world_event'],
+      socialCapabilities: ['conceal', 'share_gossip'], irreversibleEffects: []
     });
     expect(pilotResidentDefinitions.torvin.capabilityEnvelope.socialCapabilities).toEqual(['misdirect', 'share_gossip']);
     expect(pilotResidentDefinitions.torvin.capabilityEnvelope.irreversibleEffects).toEqual([]);

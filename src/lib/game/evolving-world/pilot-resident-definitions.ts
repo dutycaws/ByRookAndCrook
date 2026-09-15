@@ -1,4 +1,4 @@
-import pilotResidentsJson from '../../../../supabase/content/evolving-world/pilot-residents-v1.json';
+import pilotResidentsJson from '../../../../supabase/content/evolving-world/pilot-residents-v2.json';
 import {
   PERSONALITY_SCHEMA_VERSION,
   PROFILE_ENTRY_KINDS,
@@ -14,8 +14,8 @@ import {
 } from './contracts';
 import { validatePersonalityProfile, validatePersonalitySchema } from './rules';
 
-export const PILOT_RESIDENTS_VERSION = 'pilot-residents-v1' as const;
-export const PILOT_RESIDENT_DEFINITION_VERSION = 'pilot-resident-v1' as const;
+export const PILOT_RESIDENTS_VERSION = 'pilot-residents-v2' as const;
+export const PILOT_RESIDENT_DEFINITION_VERSION = 'pilot-resident-v2' as const;
 
 export type PilotResidentKey = 'lira' | 'torvin';
 
@@ -40,7 +40,8 @@ const expectedCollections = [
 ] as const;
 const expectedActions = ['prepare', 'attempt', 'wait', 'abandon'];
 const expectedApproaches = ['scouting', 'combat', 'diplomacy', 'trade'];
-const expectedTargetKinds = ['npc', 'location', 'faction', 'item'];
+const expectedWorldEffects = ['adjust_relationship', 'create_entity', 'create_quest', 'update_quest', 'record_world_event'];
+const expectedTargetKinds = ['npc', 'location', 'faction', 'item', 'recipe', 'world_event'];
 const expectedSocial: Readonly<Record<PilotResidentKey, readonly SocialCapability[]>> = {
   lira: ['conceal', 'share_gossip'], torvin: ['misdirect', 'share_gossip']
 };
@@ -121,7 +122,7 @@ function validateCapability(value: unknown, key: PilotResidentKey, path: string,
   if (value.version !== 'capabilities-v1') issue(issues, `${path}.version`, 'capability_version', 'Use capabilities-v1.');
   sameList(value.allowedActions, expectedActions, `${path}.allowedActions`, issues, 'capability_actions');
   sameList(value.allowedApproaches, expectedApproaches, `${path}.allowedApproaches`, issues, 'capability_approaches');
-  sameList(value.allowedWorldEffects, ['adjust_relationship'], `${path}.allowedWorldEffects`, issues, 'capability_effects');
+  sameList(value.allowedWorldEffects, expectedWorldEffects, `${path}.allowedWorldEffects`, issues, 'capability_effects');
   sameList(value.allowedTargetKinds, expectedTargetKinds, `${path}.allowedTargetKinds`, issues, 'capability_targets');
   sameList(value.socialCapabilities, expectedSocial[key], `${path}.socialCapabilities`, issues, 'capability_social');
   if (!Array.isArray(value.irreversibleEffects) || value.irreversibleEffects.length !== 0) issue(issues, `${path}.irreversibleEffects`, 'capability_irreversible', 'Pilot residents cannot authorize irreversible effects.');
@@ -175,7 +176,7 @@ function deepFreeze<T>(value: T): Readonly<T> {
 export function parsePilotResidentDefinitions(value: unknown): PilotResidentDefinitionsParseResult {
   const issues: ContractIssue[] = [];
   if (!exactKeys(value, ['version', 'residents'], '', issues)) return { ok: false, issues };
-  if (value.version !== PILOT_RESIDENTS_VERSION) issue(issues, 'version', 'version', 'Use pilot-residents-v1.');
+  if (value.version !== PILOT_RESIDENTS_VERSION) issue(issues, 'version', 'version', 'Use pilot-residents-v2.');
   if (!exactKeys(value.residents, ['lira', 'torvin'], 'residents', issues)) return { ok: false, issues };
   validateDefinition(value.residents.lira, 'lira', 'residents.lira', issues);
   validateDefinition(value.residents.torvin, 'torvin', 'residents.torvin', issues);
