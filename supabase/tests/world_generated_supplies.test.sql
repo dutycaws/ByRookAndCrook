@@ -45,6 +45,50 @@ set capability=jsonb_build_object(
 where instance_id=(select resident_id from pg_temp.fixture);
 set local session_replication_role=origin;
 
+-- Keep an unrelated, durable-looking supply in this transaction.  Every
+-- fixture assertion below must remain scoped, even when developer data (or a
+-- neighbouring test) already has generated shop rows.
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='15700000-0000-4000-8000-000000000002';
+select public.create_tavern();
+create temporary table pg_temp.unrelated_supply as
+select
+  (public.npc_bar_snapshot()#>>'{save,id}')::uuid save_id,
+  '15700000-0000-4000-8000-000000000040'::uuid canonical_entity_id,
+  '15700000-0000-4000-8000-000000000041'::uuid quest_id;
+reset role;
+alter table pg_temp.unrelated_supply add column resident_id uuid;
+update pg_temp.unrelated_supply
+set resident_id=(
+  select id
+  from private.world_npc_instances
+  where save_id=pg_temp.unrelated_supply.save_id
+  order by id
+  limit 1
+);
+insert into private.world_canonical_entities(
+  id,save_id,entity_kind,entity_key,origin,payload,lifecycle
+)
+select canonical_entity_id,save_id,'item','unrelated-provisions','procedural','{}'::jsonb,'active'
+from pg_temp.unrelated_supply;
+insert into private.world_generated_supply_definitions(
+  canonical_entity_id,save_id,display_name,price,daily_stock,use_family
+)
+select canonical_entity_id,save_id,'Unrelated provisions',7,2,'successor_provisions'
+from pg_temp.unrelated_supply;
+insert into private.world_generated_supply_stock(canonical_entity_id,save_id,remaining_quantity)
+select canonical_entity_id,save_id,2 from pg_temp.unrelated_supply;
+insert into private.world_procedural_quests(
+  id,save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day
+)
+select quest_id,save_id,resident_id,'active','successor-quest','unrelated-generated-supply','{}'::jsonb,1
+from pg_temp.unrelated_supply;
+insert into private.world_generated_supply_inventory(save_id,canonical_entity_id,quantity)
+select save_id,canonical_entity_id,2 from pg_temp.unrelated_supply;
+insert into private.world_generated_supply_uses(save_id,quest_id,canonical_entity_id,quantity)
+select save_id,quest_id,canonical_entity_id,2 from pg_temp.unrelated_supply;
+
 create temporary table pg_temp.claim(settlement_id uuid,job_id uuid,fence uuid);
 insert into pg_temp.claim values(
   '15700000-0000-4000-8000-000000000010',
@@ -110,7 +154,21 @@ select throws_ok($$select public.world_settlement_commit_procedural_world(
   (select settlement_id from pg_temp.claim),(select job_id from pg_temp.claim),(select fence from pg_temp.claim),pg_temp.supply_proposal('Changed provisions')
 )$$,'PT409',null,'changed complete proposal replay is rejected');
 reset role;
-select is((select count(*) from private.world_generated_supply_definitions),1::bigint,'same-proposal supply unlock creates one durable definition');
+alter table pg_temp.fixture add column supply_entity_id uuid;
+update pg_temp.fixture
+set supply_entity_id=(
+  select definition.canonical_entity_id
+  from private.world_generated_supply_definitions definition
+  join private.world_canonical_entities entity on entity.id=definition.canonical_entity_id
+  where definition.save_id=pg_temp.fixture.save_id
+    and entity.entity_key='road-provisions'
+);
+select is((
+  select count(*)
+  from private.world_generated_supply_definitions definition
+  where definition.save_id=(select save_id from pg_temp.fixture)
+    and definition.canonical_entity_id=(select supply_entity_id from pg_temp.fixture)
+),1::bigint,'same-proposal supply unlock creates one durable definition');
 
 create temporary table pg_temp.negative(settlement_id uuid,job_id uuid,fence uuid);
 insert into pg_temp.negative values(
@@ -203,8 +261,20 @@ select is((select result->>'quantityUsed' from pg_temp.use_result),'1','successo
 select is(jsonb_array_length(public.world_generated_shop_projection((select save_id from pg_temp.fixture))->'inventory'),0,'used supply leaves the projected inventory');
 select is((public.world_generated_shop_projection((select save_id from pg_temp.fixture))#>>'{successorQuest,suppliesUsed}'),'1','successor quest projection reports bounded supply progress');
 reset role;
-select is((select quantity from private.world_generated_supply_uses),1,'supply use records one authoritative progress unit');
-select is((select count(*) from private.world_generated_supply_uses),1::bigint,'supply use creates one durable progress row');
+select is((
+  select uses.quantity
+  from private.world_generated_supply_uses uses
+  where uses.save_id=(select save_id from pg_temp.fixture)
+    and uses.quest_id=(select id from pg_temp.quest)
+    and uses.canonical_entity_id=(select supply_entity_id from pg_temp.fixture)
+),1,'supply use records one authoritative progress unit');
+select is((
+  select count(*)
+  from private.world_generated_supply_uses uses
+  where uses.save_id=(select save_id from pg_temp.fixture)
+    and uses.quest_id=(select id from pg_temp.quest)
+    and uses.canonical_entity_id=(select supply_entity_id from pg_temp.fixture)
+),1::bigint,'supply use creates one durable progress row');
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='15700000-0000-4000-8000-000000000001';
@@ -230,7 +300,10 @@ select public.advance_tavern_day(
 select is((select current_day from public.tavern_saves where id=(select save_id from pg_temp.fixture)),2,'day closing succeeds after generated supply use');
 select is((public.world_generated_shop_projection((select save_id from pg_temp.fixture))#>>'{catalog,0,remainingStock}'),'3','a committed new day resets generated stock');
 reset role;
-update private.world_generated_supply_stock set remaining_quantity=1;
+update private.world_generated_supply_stock
+set remaining_quantity=1
+where save_id=(select save_id from pg_temp.fixture)
+  and canonical_entity_id=(select supply_entity_id from pg_temp.fixture);
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='15700000-0000-4000-8000-000000000001';

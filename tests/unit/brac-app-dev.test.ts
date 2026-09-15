@@ -227,12 +227,17 @@ describe('brac-app:dev launcher', () => {
   }));
 
   it('cleans up an adopted stack after a later startup failure', async () => withRoot(async (root) => {
-    const h = harness(root, { cold: true });
+    const h = harness(root);
     const original = h.options.spawn!;
     h.options.spawn = (command, args, options) => args.includes('test:db')
       ? new FakeChild(result(1, '', 'database failure')) : original(command, args, options);
     expect(await runDevelopment(h.options)).toBe(1);
-    expect(commandNames(h.calls)).toContain('supabase stop');
+    const commands = commandNames(h.calls);
+    expect(commands.filter((name) => name === 'supabase stop')).toHaveLength(1);
+    expect(commands).not.toContain('npm test:integration');
+    expect(commands).not.toContain('npm simulation:worker');
+    expect(commands).not.toContain('npm dev');
+    expect(h.released).toBe(1);
   }));
 
   it('returns cancellation once and cleans up when stopped during a test stage', async () => withRoot(async (root) => {
