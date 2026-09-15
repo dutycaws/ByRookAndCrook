@@ -63,7 +63,7 @@ export function parseGeneratedSupplies(value: unknown): GeneratedSupplies {
 }
 
 type RawRpc = (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
-function rawRpc(client: SupabaseClient<Database>) { return client.rpc as unknown as RawRpc; }
+function rawRpc(client: SupabaseClient<Database>) { return client.rpc.bind(client) as unknown as RawRpc; }
 
 export async function getGeneratedSupplies(client: SupabaseClient<Database>, saveId: string): Promise<GeneratedSupplies> {
   const { data, error } = await rawRpc(client)('world_generated_shop_projection', { p_save_id:saveId });
