@@ -1,24 +1,80 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { getBarSnapshot, serveHospitality } from '$lib/server/serving';
+import { advanceDay } from '$lib/server/game';
 import { GameServiceError } from '$lib/server/game';
 import { dialogueAvailability } from '$lib/server/dialogue/runtime';
-import { databaseError } from '$lib/server/dialogue/orchestrator';
 import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { presentBarPatrons } from '$lib/game/bar-scene';
-import type { Journal } from '$lib/game/dialogue';
+import { parsePublicSettlementStatus } from '$lib/game/evolving-world';
+import type { Journal, PublicDisposition, PublicEvolutionEntry } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function shortText(value: unknown, limit: number): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text.length > 0 && text.length <= limit ? text : null;
+}
+
+function nonNegativeInteger(value: unknown, minimum = 0): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
+    ? value
+    : null;
+}
+
+/**
+ * Treat this projection as a narrow allow-list even though the RPC is owner
+ * scoped. That keeps future internal settlement fields out of page data by
+ * default and gives the UI one stable, player-safe vocabulary.
+ */
+function publicDisposition(value: unknown): PublicDisposition | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  const summary = shortText(candidate.summary, 240);
+  const state = shortText(candidate.state, 48);
+  const version = shortText(candidate.version, 64);
+  return summary && state && version ? { summary, state, version } : null;
+}
+
+function publicEvolution(value: unknown): PublicEvolutionEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 6).flatMap((entry) => {
+    const candidate = record(entry);
+    const disposition = publicDisposition(candidate?.disposition);
+    const day = nonNegativeInteger(candidate?.day);
+    const profileRevision = nonNegativeInteger(candidate?.profileRevision, 1);
+    const createdAt = shortText(candidate?.createdAt, 64);
+    if (!disposition || day === null || profileRevision === null || !createdAt) return [];
+    return [{ day, profileRevision, createdAt, disposition }];
+  });
+}
 
 export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
   if (!await locals.getVerifiedUser()) redirect(303, '/login');
   setHeaders({ 'cache-control': 'private, no-store' });
   try {
     const snapshot = await getBarSnapshot(locals.supabase);
+    let settlement = null;
     const journals: Record<string,Journal> = {};
     if(snapshot) {
       const rpc = locals.supabase.rpc.bind(locals.supabase) as any;
+      try {
+        const settlementResult = await rpc('world_settlement_status', { p_save_id: snapshot.save.id, p_settlement_id: null });
+        if (settlementResult.error) throw settlementResult.error;
+        settlement = parsePublicSettlementStatus(settlementResult.data);
+      } catch (cause) {
+        // Settlement status is an optional player interlude. The core bar and
+        // journal remain usable if that projection is temporarily unavailable.
+        console.warn('bar_settlement_status_unavailable', { cause: cause instanceof Error ? cause.name : 'unknown' });
+      }
       const requested = uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc')! : null;
       const archived = url.searchParams.get('archive') === '1';
       const rosterFunction = archived ? 'npc_archived_roster' : 'npc_roster';
@@ -54,7 +110,9 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
           questStatus:journal.status, preparation:Number(journal.campaign?.preparation ?? 0), nextStep:Number(journal.campaign?.step ?? 0), risk:journal.risk ?? 'none', warning:null,
           turns:(journal.turns ?? []).map((turn:any)=>({id:turn.turnId, message:turn.keeper, reply:turn.npc, day:turn.day})),
           events:(journal.events ?? []).map((event:any)=>({id:event.id,text:event.text,outcome:event.outcome,day:event.day,publicNews:event.publicNews})),
-          pending:journal.pending ? {turnId:journal.pending.turnId,status:journal.pending.status,message:journal.pending.message,error:journal.pending.error} : null
+          pending:journal.pending ? {turnId:journal.pending.turnId,status:journal.pending.status,message:journal.pending.message,error:journal.pending.error} : null,
+          disposition: publicDisposition(journal.disposition),
+          evolution: publicEvolution(journal.evolution)
         };
       }
       }
@@ -64,7 +122,7 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
       // presentation list explicit so the client never guesses availability.
       snapshot.patrons = presentBarPatrons(roster, journals) as typeof snapshot.patrons;
     }
-    return { snapshot, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc') : null, dialogueUnavailable:dialogueAvailability() };
+    return { snapshot, settlement, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc') : null, dialogueUnavailable:dialogueAvailability() };
   } catch (cause) {
     console.error('bar_load_failed', cause);
     error(500, 'The bar ledger is unavailable. Please try again.');
@@ -78,9 +136,17 @@ export const actions: Actions = {
     const action=String(data.get('actionId')??''); const save=String(data.get('saveId')??'');
     const revision=Number(data.get('revision'));
     if(!uuid.test(action)||!uuid.test(save)||!data.has('revision')||!Number.isSafeInteger(revision)||revision<0)return fail(400,{message:'Invalid day transition.'});
-    const r=await locals.supabase.rpc('advance_tavern_day',{p_save_id:save,p_action_id:action,p_expected_revision:revision});
-    if(r.error){const e=databaseError(r.error);return fail(e.status,{message:e.message});}
-    return {success:true,message:'The tavern is closed. A new day begins; the journal records what happened overnight.'};
+    try {
+      const receipt = await advanceDay(locals.supabase, { saveId:save, actionId:action, expectedRevision:revision });
+      if (receipt.worldSettlement) {
+        return { success:true, receipt, message:'The tavern is closed. Overnight settlement is underway; the journal will update when it completes.' };
+      }
+      return { success:true, receipt, message:'The tavern is closed. A new day begins; the journal records what happened overnight.' };
+    } catch (cause) {
+      const message = cause instanceof GameServiceError ? cause.message : 'The tavern ledger is unavailable. Please retry the same close.';
+      const status = cause instanceof GameServiceError ? cause.status : 500;
+      return fail(status, { message });
+    }
   },
   serve: async ({ locals, request }) => {
     if (!await locals.getVerifiedUser()) redirect(303, '/login');

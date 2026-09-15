@@ -15,6 +15,7 @@
     saveId: string;
     expectedRevision: number;
     ingredientBatchId?: string;
+    recipeKey?: string;
     sessionId?: string;
     value?: number;
   }
@@ -22,6 +23,7 @@
   let { data, form }: PageProps = $props();
   let snapshot = $derived(data.snapshot!);
   let selectedIngredientId = $state('');
+  let selectedRecipeKey = $state('herb-loaf');
   let pending = $state(false);
   let transportError = $state<string | null>(null);
   let unresolved = $state<FrozenBakeryCommand | null>(null);
@@ -112,6 +114,7 @@
         saveId: data.snapshot.save.id,
         expectedRevision: data.snapshot.save.revision,
         ingredientBatchId: kind === 'start' ? selectedIngredientId : undefined,
+        recipeKey: kind === 'start' ? selectedRecipeKey : undefined,
         sessionId: kind !== 'start' && kind !== 'advance' ? active!.id : undefined,
         value: kind === 'fold' || kind === 'score' ? gestureValue : undefined
       };
@@ -120,6 +123,7 @@
       formData.set('actionId', command.actionId);
       formData.set('expectedRevision', String(command.expectedRevision));
       if (command.ingredientBatchId) formData.set('ingredientBatchId', command.ingredientBatchId);
+      if (command.recipeKey) formData.set('recipeKey', command.recipeKey);
       if (command.sessionId) formData.set('sessionId', command.sessionId);
       if (kind === 'fold') formData.set('distance', String(command.value));
       if (kind === 'score') formData.set('length', String(command.value));
@@ -264,6 +268,12 @@
             <p class="eyebrow">Choose one unit</p><h2 id="bakery-stage">Mix an herb loaf</h2>
             <p>Ingredient quality and its baking affinity set the loaf’s potential.</p>
             <form method="POST" action="?/start" use:enhance={enhanceStart}>
+              <label class="recipe-picker">Recipe
+                <select bind:value={selectedRecipeKey} disabled={pending || !!unresolved}>
+                  <option value="herb-loaf">Herb loaf</option>
+                  {#each data.generatedRecipes as recipe (recipe.entityId)}<option value={`generated-${recipe.recipeKey}`}>{recipe.name}</option>{/each}
+                </select>
+              </label>
               <fieldset class="ingredient-picker" disabled={pending || !!unresolved}>
                 <legend>Available ingredients</legend>
                 {#each snapshot.ingredients as ingredient (ingredient.id)}

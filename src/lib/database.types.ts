@@ -2119,6 +2119,7 @@ export type Database = {
           rules_version: string
           updated_at: string
           user_id: string
+          world_phase: string
         }
         Insert: {
           community_npc_level?: number
@@ -2134,6 +2135,7 @@ export type Database = {
           rules_version?: string
           updated_at?: string
           user_id: string
+          world_phase?: string
         }
         Update: {
           community_npc_level?: number
@@ -2149,6 +2151,7 @@ export type Database = {
           rules_version?: string
           updated_at?: string
           user_id?: string
+          world_phase?: string
         }
         Relationships: []
       }
@@ -2741,6 +2744,16 @@ export type Database = {
         Returns: Json
       }
       project_garden_day: { Args: never; Returns: Json }
+      purchase_generated_supply: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_item_key: string
+          p_quantity: number
+          p_save_id: string
+        }
+        Returns: Json
+      }
       score_bake: {
         Args: {
           p_action_id: string
@@ -2774,7 +2787,27 @@ export type Database = {
         }
         Returns: Json
       }
-      start_bake: {
+      start_bake:
+        | {
+            Args: {
+              p_action_id: string
+              p_expected_revision: number
+              p_ingredient_batch_id: string
+              p_save_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_action_id: string
+              p_expected_revision: number
+              p_ingredient_batch_id: string
+              p_recipe_key: string
+              p_save_id: string
+            }
+            Returns: Json
+          }
+      start_brew: {
         Args: {
           p_action_id: string
           p_expected_revision: number
@@ -2783,13 +2816,251 @@ export type Database = {
         }
         Returns: Json
       }
-      start_brew: {
+      use_generated_supply: {
         Args: {
           p_action_id: string
           p_expected_revision: number
-          p_ingredient_batch_id: string
+          p_item_key: string
+          p_quest_id: string
           p_save_id: string
         }
+        Returns: Json
+      }
+      world_demote_low_relevance_deep_npc: {
+        Args: { p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_developer_inspector: { Args: { p_save_id: string }; Returns: Json }
+      world_developer_requeue_runtime_art_job: {
+        Args: {
+          p_actor_id: string
+          p_job_id: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_developer_requeue_settlement_job: {
+        Args: {
+          p_actor_id: string
+          p_job_id: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_developer_set_runtime_art_appearance: {
+        Args: {
+          p_actor_id: string
+          p_appearance_version: string
+          p_entity_id: string
+          p_public_appearance: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_discover_procedural_npc_promotions: {
+        Args: { p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_generated_gameplay_availability: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_generated_shop_projection: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_irreversible_warning_status: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_issue_irreversible_entity_warning: {
+        Args: {
+          p_capability_id: string
+          p_public_message: string
+          p_save_id: string
+          p_target_entity_id: string
+        }
+        Returns: Json
+      }
+      world_promote_canonical_npc: {
+        Args: { p_entity_id: string; p_save_id: string }
+        Returns: Json
+      }
+      world_promote_supporting_actor: {
+        Args: { p_entity_id: string; p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_public_codex: { Args: { p_save_id: string }; Returns: Json }
+      world_retire_generated_entity: {
+        Args: {
+          p_capability_id: string
+          p_entity_id: string
+          p_input_fingerprint: string
+          p_reason?: string
+          p_save_id: string
+          p_warning_id: string
+        }
+        Returns: Json
+      }
+      world_retry_procedural_npc_promotion: {
+        Args: { p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_runtime_art_accept: {
+        Args: {
+          p_attempt: number
+          p_fence: string
+          p_job_id: string
+          p_runtime_key: string
+          p_sha256: string
+        }
+        Returns: Json
+      }
+      world_runtime_art_authorize_delivery: {
+        Args: { p_entity_id: string; p_render_id: string; p_save_id: string }
+        Returns: Json
+      }
+      world_runtime_art_claim_next: {
+        Args: { p_lease_seconds?: number }
+        Returns: Json
+      }
+      world_runtime_art_fail: {
+        Args: {
+          p_attempt: number
+          p_fence: string
+          p_job_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
+      world_runtime_art_projection: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_runtime_art_replace_accepted: {
+        Args: { p_job_id: string; p_runtime_key: string; p_sha256: string }
+        Returns: Json
+      }
+      world_runtime_art_service_runtime_key: {
+        Args: { p_render_id: string }
+        Returns: Json
+      }
+      world_runtime_art_set_appearance: {
+        Args: {
+          p_appearance_version: string
+          p_entity_id: string
+          p_public_appearance: string
+          p_save_id: string
+        }
+        Returns: undefined
+      }
+      world_settlement_checkpoint: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_model?: string
+          p_payload: Json
+          p_prompt_version?: string
+          p_settlement_id: string
+          p_stage: string
+          p_usage?: Json
+        }
+        Returns: Json
+      }
+      world_settlement_claim: {
+        Args: { p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_claim_next: { Args: never; Returns: Json }
+      world_settlement_commit_canon: {
+        Args: {
+          p_event: Json
+          p_fence: string
+          p_job_id: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_commit_mutation: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_proposal_fingerprint: string
+          p_public_digest: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_commit_procedural_world: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_commit_social_encounter: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_complete: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_output?: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_complete_news: {
+        Args: { p_fence: string; p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_enqueue: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_input_snapshot: Json
+          p_input_version: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_fail: {
+        Args: {
+          p_failure_code: string
+          p_fence: string
+          p_job_id: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_heartbeat: {
+        Args: { p_fence: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_safe_result: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_kind: string
+          p_public_digest: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_status: {
+        Args: { p_save_id: string; p_settlement_id?: string }
         Returns: Json
       }
     }

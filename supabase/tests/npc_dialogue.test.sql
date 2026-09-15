@@ -1,6 +1,29 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 select no_plan();
+
+-- Test-only worker harness: NPC turns following a day close need the save open.
+create function pg_temp.drain_world_settlement(p_settlement_id uuid) returns void
+language plpgsql as $$
+declare
+  claim jsonb;
+  processed integer := 0;
+begin
+  loop
+    claim := public.world_settlement_claim(p_settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      p_settlement_id, (claim->>'jobId')::uuid, (claim->>'fence')::uuid,
+      'no_changes', 'Fixture worker completed the settlement.'
+    );
+    processed := processed + 1;
+    if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  if claim->>'status' <> 'completed' then
+    raise exception 'fixture worker did not terminalize settlement';
+  end if;
+end;
+$$;
 insert into auth.users(id,email,role,aud) values
  ('70000000-0000-4000-8000-000000000001','npc-rules@example.test','authenticated','authenticated'),
  ('70000000-0000-4000-8000-000000000002','npc-legacy@example.test','authenticated','authenticated'),
@@ -54,14 +77,47 @@ select is((select status from private.npc_attempts where turn_id='71000000-0000-
 select is((select count(*) from private.npc_events where save_id=pg_temp.npc_save(auth.uid()) and day=1),2::bigint,'unattended NPCs both prepare');
 select is((select count(*) from private.npc_events where save_id=pg_temp.npc_save(auth.uid()) and day=1 and public_news),0::bigint,'private preparation is not automatically public gossip');
 select is((public.get_npc_journal('lira')->>'preparation')::integer,1,'overnight preparation is retained');
+select set_config('app.fixture_settlement_id',
+  public.advance_tavern_day(pg_temp.npc_save(auth.uid()), '72000000-0000-4000-8000-000000000001', 0)#>>'{worldSettlement,settlementId}',
+  true
+);
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '70000000-0000-4000-8000-000000000001';
 select public.advance_tavern_day(pg_temp.npc_save(auth.uid()),'72000000-0000-4000-8000-000000000002',1);
 select is((select count(*) from private.npc_events where save_id=pg_temp.npc_save(auth.uid()) and draw between 0 and 99 and chance is not null),2::bigint,'attempts persist random draws and probabilities');
 select public.advance_tavern_day(pg_temp.npc_save(auth.uid()),'72000000-0000-4000-8000-000000000002',1);
 select is((select count(*) from private.npc_events where save_id=pg_temp.npc_save(auth.uid()) and day=2),2::bigint,'replay never rerolls outcomes');
+select set_config('app.fixture_settlement_id',
+  public.advance_tavern_day(pg_temp.npc_save(auth.uid()), '72000000-0000-4000-8000-000000000002', 1)#>>'{worldSettlement,settlementId}',
+  true
+);
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '70000000-0000-4000-8000-000000000001';
 select public.advance_tavern_day(pg_temp.npc_save(auth.uid()),'72000000-0000-4000-8000-000000000003',2);
 select is((select count(*) from private.npc_events where save_id=pg_temp.npc_save(auth.uid()) and day=3),0::bigint,'terminal quests never resolve again');
 select ok(not private.npc_targets(pg_temp.npc_save(auth.uid()),'lira','npc-v1') ? 'bandit-camp','terminal opportunity target is retired');
 select ok(private.npc_targets(pg_temp.npc_save(auth.uid()),'lira','npc-v1') ? 'old-road','unrelated known targets remain available');
+select set_config('app.fixture_settlement_id',
+  public.advance_tavern_day(pg_temp.npc_save(auth.uid()), '72000000-0000-4000-8000-000000000003', 2)#>>'{worldSettlement,settlementId}',
+  true
+);
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '70000000-0000-4000-8000-000000000001';
 
 -- Test-only trusted stage fixtures; authenticated players have no access to completion.
 create function pg_temp.npc_decide(p_plan jsonb default null,p_reaction integer default 0,p_subject text default 'quest') returns jsonb language plpgsql as $$
@@ -93,10 +149,26 @@ select is((pg_temp.npc_decide(null,1,'hospitality')->>'relationshipChange')::int
 do $$declare n integer; begin for n in 0..9999 loop
   perform setseed(n/10000.0); if floor(random()*100)>=95 then perform setseed(n/10000.0); return; end if;
 end loop; end; $$;
-select public.advance_tavern_day(pg_temp.npc_save(auth.uid()),'72000000-0000-4000-8000-000000000004',(select revision from public.tavern_saves where user_id=auth.uid()));
+create temporary table pg_temp.npc_day_four_close as
+select public.advance_tavern_day(
+  pg_temp.npc_save(auth.uid()),
+  '72000000-0000-4000-8000-000000000004',
+  (select revision from public.tavern_saves where user_id=auth.uid())
+) result;
 select is(public.get_npc_journal('lira')->>'questStatus','failed','unauthored failure is permanent too');
 select is(public.get_npc_journal('lira')->>'availability','present','unauthored failure cannot kill or remove a character even on worst draw');
 select is((select count(*) from private.npc_events e join private.npc_quests q on q.id=e.quest_id where e.save_id=pg_temp.npc_save(auth.uid()) and not q.authored and e.public_news),0::bigint,'emergent private objectives are not published as news');
+select set_config('app.fixture_settlement_id',
+  (select result#>>'{worldSettlement,settlementId}' from pg_temp.npc_day_four_close),
+  true
+);
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '70000000-0000-4000-8000-000000000001';
 select is((pg_temp.npc_decide(null,-1,'quest')->>'relationshipChange')::integer,-2,'negative reactions have their own fixed change');
 select is((pg_temp.npc_decide(null,-1,'personal')->>'relationshipChange')::integer,-2,'second negative subject applies');
 select is((pg_temp.npc_decide(null,-1,'hospitality')->>'relationshipChange')::integer,0,'daily negative cap is four');
@@ -130,6 +202,17 @@ select is(public.get_npc_journal('lira')->>'availability','dead','authored faile
 select is(public.get_npc_journal('torvin')->>'availability','departed','authored failed confrontation can permanently drive Torvin away');
 select is(public.get_npc_journal('lira')->>'questStatus','failed','failure is permanent quest state');
 select throws_ok($$select public.dialogue_begin(auth.uid(),'74000000-0000-4000-8000-000000000001','lira','Come back.',0)$$,'PT422',null,'dialogue cannot resurrect an unavailable character');
+select set_config('app.fixture_settlement_id',
+  public.advance_tavern_day(pg_temp.npc_save(auth.uid()), '73000000-0000-4000-8000-000000000001', 0)#>>'{worldSettlement,settlementId}',
+  true
+);
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '70000000-0000-4000-8000-000000000003';
 select public.advance_tavern_day(pg_temp.npc_save(auth.uid()),'73000000-0000-4000-8000-000000000002',1);
 select is(public.get_npc_journal('lira')->>'availability','dead','later days cannot resurrect Lira');
 select is(jsonb_array_length(public.get_npc_journal('torvin')->'events'),2,'public morning news includes both outcomes');

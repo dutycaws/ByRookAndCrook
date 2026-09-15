@@ -177,6 +177,12 @@
         {/if}
         {#if journal.warning}<p class="form-message error" role="note">{journal.warning}</p>{/if}
       </section>
+      {#if journal.disposition}
+        <section class="npc-news" aria-label="How they seem lately">
+          <p class="eyebrow">How they seem lately</p>
+          <p>{journal.disposition.summary}</p>
+        </section>
+      {/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (The overflow transcript must be keyboard-scrollable.) -->
       <div class="npc-transcript" role="region" aria-label="Conversation history" tabindex="0">
         {#if journal.turns.length===0}<p class="muted">Ask about their plans, share advice, or simply get to know them.</p>{/if}
@@ -184,6 +190,12 @@
           <article class="npc-exchange"><p class="eyebrow">Day {turn.day}</p><p class="keeper-line"><strong>You</strong> {turn.message}</p><p><strong>{name}</strong> {turn.reply}</p></article>
         {/each}
       </div>
+      {#if journal.evolution.length}
+        <section class="npc-news" aria-label="What shaped them">
+          <p class="eyebrow">What shaped them</p>
+          <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
+        </section>
+      {/if}
       {#if journal.events.length}<div class="npc-news"><p class="eyebrow">News and remembered events</p><ul>{#each journal.events as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
     </div>
   </details>

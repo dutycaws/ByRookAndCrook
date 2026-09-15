@@ -3,6 +3,41 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(12);
 
+-- Test-only worker harness. The recovery route advances many days in one
+-- transaction, so each fresh close drains its returned settlement before the
+-- next command reads or mutates the save.
+create function pg_temp.advance_and_settle(p_save_id uuid, p_action_id uuid, p_revision bigint)
+returns jsonb language plpgsql security definer as $$
+declare
+  result jsonb;
+  settlement_id uuid;
+  claim jsonb;
+  processed integer := 0;
+  request_role text := current_setting('request.jwt.claim.role', true);
+begin
+  result := public.advance_tavern_day(p_save_id, p_action_id, p_revision);
+  settlement_id := (result#>>'{worldSettlement,settlementId}')::uuid;
+  perform set_config('request.jwt.claim.role', 'service_role', true);
+  loop
+    claim := public.world_settlement_claim(settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      settlement_id, (claim->>'jobId')::uuid, (claim->>'fence')::uuid,
+      'no_changes', 'Fixture worker completed the settlement.'
+    );
+    processed := processed + 1;
+    if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  perform set_config('request.jwt.claim.role', coalesce(request_role, 'authenticated'), true);
+  if claim->>'status' <> 'completed'
+    or public.world_settlement_status(p_save_id, settlement_id)->>'status' <> 'completed'
+    or (select world_phase from public.tavern_saves where id = p_save_id) <> 'open' then
+    raise exception 'fixture worker did not terminalize and reopen settlement';
+  end if;
+  return result;
+end;
+$$;
+
 insert into auth.users(id,email,role,aud,created_at,updated_at)
 values('16700000-0000-4000-8000-000000000001','garden-recovery@example.test',
   'authenticated','authenticated',now(),now());
@@ -41,7 +76,7 @@ select lives_ok($recovery$
       jsonb_build_object('cellIds',jsonb_build_array(v_cell),'dose',10));
     for day_index in 1..4 loop
       select revision into v_revision from public.tavern_saves;
-      perform public.advance_tavern_day(v_save,extensions.gen_random_uuid(),v_revision);
+      perform pg_temp.advance_and_settle(v_save,extensions.gen_random_uuid(),v_revision);
     end loop;
     select revision into v_revision from public.tavern_saves;
     perform public.garden_command(v_save,extensions.gen_random_uuid(),v_revision,'incorporate_clover',
@@ -53,7 +88,7 @@ select lives_ok($recovery$
         jsonb_build_object('cellId',v_cell,'seedItemKey','seed_clover'));
       for day_index in 1..4 loop
         select revision into v_revision from public.tavern_saves;
-        perform public.advance_tavern_day(v_save,extensions.gen_random_uuid(),v_revision);
+        perform pg_temp.advance_and_settle(v_save,extensions.gen_random_uuid(),v_revision);
       end loop;
       select revision into v_revision from public.tavern_saves;
       perform public.garden_command(v_save,extensions.gen_random_uuid(),v_revision,'incorporate_clover',
@@ -66,7 +101,7 @@ select lives_ok($recovery$
     for day_index in 1..10 loop
       exit when exists(select 1 from public.garden_plants where cell_id=v_cell and lifecycle='mature');
       select revision into v_revision from public.tavern_saves;
-      perform public.advance_tavern_day(v_save,extensions.gen_random_uuid(),v_revision);
+      perform pg_temp.advance_and_settle(v_save,extensions.gen_random_uuid(),v_revision);
     end loop;
     if not exists(select 1 from public.garden_plants where cell_id=v_cell and lifecycle='mature') then
       raise exception 'Recovery crop did not mature in the bounded route';

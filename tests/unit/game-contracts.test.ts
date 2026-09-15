@@ -4,7 +4,8 @@ import {
   parseApiaryCommandReceipt,
   parseGardenCommandPreview,
   parseGardenCommandReceipt,
-  parseStartBrewReceipt
+  parseStartBrewReceipt,
+  parseAdvanceDayReceipt
 } from '../../src/lib/game/contracts';
 
 const receipt = {
@@ -33,6 +34,24 @@ describe('Brewery contracts', () => {
     expect(() => parseStartBrewReceipt({
       ...receipt, durationSeconds: 15, countdownSeconds: 0, stirRulesVersion: 'guide-v2'
     })).toThrow('Invalid start brew receipt');
+  });
+});
+
+describe('Day-close contracts', () => {
+  const base = { actionId:'action', committedRevision:3, newDay:2 };
+
+  it('accepts legacy day-close receipts without a settlement summary', () => {
+    expect(parseAdvanceDayReceipt(base)).toEqual(base);
+  });
+
+  it('accepts a queued evolving-world settlement summary', () => {
+    expect(parseAdvanceDayReceipt({ ...base, worldSettlement:{ settlementId:'11111111-1111-4111-8111-111111111111', status:'queued', dayNumber:1 } }))
+      .toMatchObject({ worldSettlement:{ status:'queued', dayNumber:1 } });
+  });
+
+  it('rejects malformed settlement summaries', () => {
+    expect(() => parseAdvanceDayReceipt({ ...base, worldSettlement:{ settlementId:'bad', status:'queued', dayNumber:1 } })).toThrow('Invalid day transition receipt');
+    expect(() => parseAdvanceDayReceipt({ ...base, worldSettlement:{ settlementId:'11111111-1111-4111-8111-111111111111', status:'completed', dayNumber:1 } })).toThrow('Invalid day transition receipt');
   });
 });
 

@@ -3,11 +3,13 @@
   import { invalidateAll } from '$app/navigation';
   import { qualityLabel } from '$lib/game/contracts';
   import { reconcileBarSceneSelection, selectedBarPatron } from '$lib/game/bar-scene';
+  import { isActiveSettlement } from '$lib/game/evolving-world';
   import type { ServeCommand } from '$lib/game/serving';
   import NpcDialogue from '$lib/components/NpcDialogue.svelte';
   import BarStatusRail from '$lib/components/tavern/BarStatusRail.svelte';
   import GuestInspector from '$lib/components/tavern/GuestInspector.svelte';
   import TavernScene from '$lib/components/tavern/TavernScene.svelte';
+  import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
@@ -109,12 +111,15 @@
 </svelte:head>
 
 <main class="bar-page">
-  {#if !data.snapshot}
+  {#if data.settlement && isActiveSettlement(data.settlement)}
+    <SettlementInterlude settlement={data.settlement} />
+  {:else if !data.snapshot}
     <section class="empty-state panel bar-empty-state">
       <h2>Open the doors</h2><p>Start your tavern in the garden, then bring your first brew to the bar.</p>
       <a class="primary-button inline-button" href="/garden">Start your tavern</a>
     </section>
   {:else}
+    <SettlementInterlude settlement={data.settlement} />
     <div class="tavern-dashboard">
       <BarStatusRail day={data.snapshot.save.currentDay} gold={data.snapshot.save.gold} drinks={data.snapshot.beverages.length} foods={data.snapshot.foods.length} recent={data.snapshot.history.length} />
       <TavernScene patrons={data.snapshot.patrons} selected={patron} focusedKey={focusedInstanceId} journals={data.journals} day={data.snapshot.save.currentDay}

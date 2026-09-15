@@ -1,0 +1,69 @@
+{
+  "version": "primitive-registry-v1",
+  "worldBudgets": {
+    "deepNpcs": 8,
+    "supportingActors": 40,
+    "activeLocations": 8,
+    "activeGeneratedEntities": 150
+  },
+  "entityKindAliases": { "place": "location" },
+  "entitySchemas": [
+    { "key": "deep-npc-profile", "fields": [{ "key": "identity", "type": "record", "required": true }, { "key": "profile", "type": "record", "required": true }, { "key": "capabilities", "type": "list", "required": true }, { "key": "appearance", "type": "record", "required": true }] },
+    { "key": "supporting-actor", "fields": [{ "key": "identity", "type": "record", "required": true }, { "key": "role", "type": "text", "required": true }, { "key": "homeLocation", "type": "reference", "required": true }] },
+    { "key": "location", "fields": [{ "key": "name", "type": "text", "required": true }, { "key": "region", "type": "text", "required": true }, { "key": "tags", "type": "list", "required": true }] },
+    { "key": "faction", "fields": [{ "key": "name", "type": "text", "required": true }, { "key": "values", "type": "list", "required": true }, { "key": "standing", "type": "integer", "required": true }] },
+    { "key": "item", "fields": [{ "key": "name", "type": "text", "required": true }, { "key": "components", "type": "list", "required": true }, { "key": "rarity", "type": "text", "required": true }] },
+    { "key": "recipe", "fields": [{ "key": "name", "type": "text", "required": true }, { "key": "components", "type": "list", "required": true }, { "key": "output", "type": "reference", "required": true }] },
+    { "key": "world-event", "fields": [{ "key": "template", "type": "reference", "required": true }, { "key": "participants", "type": "list", "required": true }, { "key": "visibility", "type": "text", "required": true }] }
+  ],
+  "entityArchetypes": [
+    { "key": "deep-npc", "kind": "npc", "schemaKey": "deep-npc-profile" },
+    { "key": "supporting-actor", "kind": "npc", "schemaKey": "supporting-actor" },
+    { "key": "settlement", "kind": "location", "schemaKey": "location" },
+    { "key": "landmark", "kind": "location", "schemaKey": "location" },
+    { "key": "guild", "kind": "faction", "schemaKey": "faction" },
+    { "key": "trade-good", "kind": "item", "schemaKey": "item" },
+    { "key": "crafted-dish", "kind": "recipe", "schemaKey": "recipe" },
+    { "key": "public-occurrence", "kind": "world_event", "schemaKey": "world-event" }
+  ],
+  "quest": {
+    "actions": ["prepare", "attempt", "wait", "abandon"],
+    "approaches": ["scouting", "combat", "diplomacy", "trade"]
+  },
+  "worldEffects": [
+    { "kind": "adjust_relationship", "targetKinds": ["npc", "faction"], "bounds": { "min": -25, "max": 25 }, "irreversible": false },
+    { "kind": "create_quest", "targetKinds": ["npc", "location", "faction", "item"], "bounds": { "min": 1, "max": 3 }, "irreversible": false },
+    { "kind": "update_quest", "targetKinds": ["npc", "location", "faction", "item"], "bounds": { "min": 1, "max": 3 }, "irreversible": false },
+    { "kind": "create_entity", "targetKinds": ["npc", "location", "faction", "item", "recipe", "world_event"], "bounds": { "min": 1, "max": 1 }, "irreversible": false },
+    { "kind": "retire_entity", "targetKinds": ["npc", "location", "faction", "item", "recipe", "world_event"], "bounds": { "min": 1, "max": 1 }, "irreversible": true },
+    { "kind": "record_world_event", "targetKinds": ["npc", "location", "faction", "item", "world_event"], "bounds": { "min": 1, "max": 8 }, "irreversible": false },
+    { "kind": "apply_location_modifier", "targetKinds": ["location"], "bounds": { "min": -3, "max": 3 }, "irreversible": false },
+    { "kind": "transfer_inventory", "targetKinds": ["npc", "faction", "item"], "bounds": { "min": 1, "max": 99 }, "irreversible": false },
+    { "kind": "unlock_recipe", "targetKinds": ["recipe"], "bounds": { "min": 1, "max": 1 }, "irreversible": false },
+    { "kind": "apply_economy_modifier", "targetKinds": ["location", "faction", "item"], "bounds": { "min": -3, "max": 3 }, "irreversible": false },
+    { "kind": "set_availability", "targetKinds": ["npc"], "bounds": { "min": 0, "max": 1 }, "irreversible": false }
+  ],
+  "socialCapabilities": [
+    { "key": "conceal", "description": "May withhold known facts when disclosure conditions permit." },
+    { "key": "misdirect", "description": "May steer a conversation toward a true but incomplete framing." },
+    { "key": "deceive", "description": "May offer a false claim only when the runtime authorizes it." },
+    { "key": "share_gossip", "description": "May repeat attributed social claims as gossip." }
+  ],
+  "npcArchetypes": [
+    { "key": "ranger", "capabilities": ["conceal", "share_gossip"] },
+    { "key": "merchant", "capabilities": ["misdirect", "share_gossip"] },
+    { "key": "scout", "capabilities": ["conceal", "deceive", "share_gossip"] },
+    { "key": "craftsperson", "capabilities": ["share_gossip"] }
+  ],
+  "locationModifiers": ["harvest-bounty", "poor-weather", "safe-road", "blocked-road", "festival-crowd"],
+  "economyModifiers": ["scarce-herbs", "brisk-trade", "caravan-delay", "market-favor"],
+  "itemComponents": ["garden-herb", "garden-honey", "brew-ingredient", "bakery-flour", "tavern-supply"],
+  "recipeComponents": ["herb-loaf", "garden-honey", "brew-ingredient"],
+  "encounterTemplates": ["road-rumor", "trade-offer", "lost-supply", "faction-request"],
+  "worldEventTemplates": ["market-day", "storm-front", "road-closure", "festival-arrival"],
+  "renderingTemplates": ["tavern-portrait", "tavern-background", "location-vignette", "event-seal"],
+  "artDirection": {
+    "key": "gilded-tankard-v1",
+    "description": "Warm, storybook tavern fantasy with worn wood, candlelit amber highlights, mossy greens, and readable parchment accents."
+  }
+}

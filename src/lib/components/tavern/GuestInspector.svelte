@@ -46,6 +46,18 @@
     {:else}<p class="muted">No active intention.</p>{/if}
     {#if journal.warning}<p class="consequence-warning" role="note">{journal.warning}</p>{/if}
     </section>
+    {#if journal.disposition}
+      <section class="guest-section" aria-label="How they seem lately">
+        <p class="eyebrow">How they seem lately</p>
+        <p>{journal.disposition.summary}</p>
+      </section>
+    {/if}
+    {#if journal.evolution.length}
+      <section class="guest-section" aria-label="What shaped them">
+        <p class="eyebrow">What shaped them</p>
+        <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
+      </section>
+    {/if}
     <section class="guest-section">
     <p class="eyebrow">Conversation context</p>
     <p>{selected.description}</p>

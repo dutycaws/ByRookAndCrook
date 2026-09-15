@@ -3,7 +3,7 @@ import type { ActionKind, Approach, Intention } from './dialogue';
 export type NpcId = string;
 export type NpcVersionId = string;
 export type NpcRating = 'standard' | 'mature';
-export type NpcOrigin = 'first_party' | 'community';
+export type NpcOrigin = 'first_party' | 'community' | 'procedural';
 
 export const NPC_SKILLS = ['scouting', 'combat', 'diplomacy', 'trade'] as const;
 export const NPC_ACTIONS = ['prepare', 'wait', 'attempt', 'abandon'] as const satisfies readonly ActionKind[];
