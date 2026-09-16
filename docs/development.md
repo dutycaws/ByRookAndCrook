@@ -21,7 +21,7 @@ The JavaScript package versions and npm version are pinned in `package.json` and
 
 Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
 
-Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2`, and 60 seconds. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
+Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2.5-sunburst`, and 60 seconds. Existing ignored `.env` files explicitly pinned to `NPC_IMAGE_MODEL=gpt-image-2` must be updated to the Sunburst alias; the source default cannot replace an explicit local value. Let any claimed or dispatched portrait-generation attempts finish or drain before changing the environment, then restart the web and worker processes so new attempts use the same model. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
 
 Then use the normal human-testing command from the repository root:
 

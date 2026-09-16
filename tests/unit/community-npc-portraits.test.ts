@@ -2,11 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFixtureNpcSheet } from '../../scripts/community-npc-fixtures.js';
 import {
   createPortraitProvider, lockedPortraitPrompt, optimisePortraitWebp, portraitItemOptions,
-  portraitProviderAvailability, portraitProviderConfiguration, validatePortraitPng, visualInputHash, PortraitProviderError, ensurePrivatePortraitBuckets, PRIVATE_PORTRAIT_BUCKET, PRIVATE_PORTRAIT_MASTER_BUCKET, type PortraitReference, type PrivatePortraitStorage
+  DEFAULT_PORTRAIT_IMAGE_MODEL, portraitProviderAvailability, portraitProviderConfiguration, validatePortraitPng, visualInputHash, PortraitProviderError, ensurePrivatePortraitBuckets, PRIVATE_PORTRAIT_BUCKET, PRIVATE_PORTRAIT_MASTER_BUCKET, type PortraitReference, type PrivatePortraitStorage
 } from '../../src/lib/server/community-npc-portraits/index.js';
 import { runPortraitBatch } from '../../src/lib/server/community-npc-portraits/service.js';
 
@@ -45,13 +45,42 @@ describe('community NPC portrait provider boundary', () => {
   it('uses the dedicated image key and reports provider availability honestly', async () => {
     const emptyRoot = await mkdtemp(join(tmpdir(), 'brac-missing-portrait-references-'));
     try {
-      expect(portraitProviderConfiguration({ NPC_IMAGE_API_KEY: 'key' })).toEqual({ available: true, provider: 'openai', model: 'gpt-image-2' });
+      expect(portraitProviderConfiguration({ NPC_IMAGE_API_KEY: 'key' })).toEqual({ available: true, provider: 'openai', model: DEFAULT_PORTRAIT_IMAGE_MODEL });
+      expect(portraitProviderConfiguration({ NPC_IMAGE_API_KEY: 'key', NPC_IMAGE_MODEL: 'test-explicit-model' })).toEqual({ available: true, provider: 'openai', model: 'test-explicit-model' });
       expect(portraitProviderAvailability({ NPC_IMAGE_API_KEY: 'key' }, emptyRoot)).toEqual({ available: false, reason: 'missing_private_references' });
       expect(portraitProviderAvailability({ NPC_IMAGE_PROVIDER: 'local' })).toEqual({ available: false, reason: 'local_not_implemented' });
       const provider = createPortraitProvider({});
       await expect(provider.generate({ idempotencyKey: 'test', prompt: 'x', references: [], alternativeOrdinal: 1, width: 1024, height: 1536, outputFormat: 'png', background: 'transparent' }, AbortSignal.timeout(1_000))).rejects.toMatchObject({ code: 'provider_unavailable' });
     } finally {
       await rm(emptyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('sends the Sunburst default through the existing private Image edit contract', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(url).toBe('https://api.openai.com/v1/images/edits');
+      expect(init?.method).toBe('POST');
+      expect(init?.headers).toMatchObject({ Authorization: 'Bearer image-key', 'Idempotency-Key': 'portrait-attempt-1' });
+      const form = init?.body as FormData;
+      expect(form.get('model')).toBe(DEFAULT_PORTRAIT_IMAGE_MODEL);
+      expect(form.get('size')).toBe('1024x1536');
+      expect(form.get('background')).toBe('transparent');
+      expect(form.get('output_format')).toBe('png');
+      expect(form.getAll('image[]')).toHaveLength(1);
+      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('png-bytes').toString('base64') }] }), {
+        status: 200, headers: { 'content-type': 'application/json', 'x-request-id': 'request-1' }
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const result = await createPortraitProvider({ NPC_IMAGE_API_KEY: 'image-key' }).generate({
+        idempotencyKey: 'portrait-attempt-1', prompt: 'locked prompt', references: fixtureReferences,
+        alternativeOrdinal: 1, width: 1024, height: 1536, outputFormat: 'png', background: 'transparent'
+      }, AbortSignal.timeout(1_000));
+      expect(result).toMatchObject({ provider: 'openai', model: DEFAULT_PORTRAIT_IMAGE_MODEL, requestId: 'request-1', bytes: Buffer.from('png-bytes') });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

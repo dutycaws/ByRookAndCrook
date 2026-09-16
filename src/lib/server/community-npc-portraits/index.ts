@@ -11,6 +11,8 @@ import sharp from 'sharp';
 import type { NpcSheet } from '$lib/game/npc-sheet';
 
 export const PORTRAIT_STYLE_VERSION = 'community-npc-portrait-sprite-v1';
+/** The Sunburst alias is the deployed default; callers may explicitly override it. */
+export const DEFAULT_PORTRAIT_IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const PORTRAIT_REFERENCE_SET = 'brac-character-look-v1';
 export const PORTRAIT_REFERENCE_REVISION = 'brac-character-look-v1@private-v1';
 export const PORTRAIT_WIDTH = 1024;
@@ -112,7 +114,7 @@ export function portraitProviderConfiguration(config: Record<string, string | un
   if (provider === 'local') return { available: false, reason: 'local_not_implemented' };
   if (provider !== 'openai') return { available: false, reason: 'unknown_provider' };
   if (!(config.NPC_IMAGE_API_KEY ?? config.OPENAI_API_KEY)) return { available: false, reason: 'missing_image_api_key' };
-  return { available: true, provider: 'openai', model: config.NPC_IMAGE_MODEL ?? 'gpt-image-2' };
+  return { available: true, provider: 'openai', model: config.NPC_IMAGE_MODEL ?? DEFAULT_PORTRAIT_IMAGE_MODEL };
 }
 
 export function loadPrivatePortraitReferences(projectRoot = process.cwd()): PortraitReference[] {
@@ -132,7 +134,7 @@ export function loadPrivatePortraitReferences(projectRoot = process.cwd()): Port
 async function openAiImageRequest(config: Record<string, string | undefined>, request: PortraitProviderRequest, signal: AbortSignal): Promise<PortraitProviderResponse> {
   const apiKey = config.NPC_IMAGE_API_KEY ?? config.OPENAI_API_KEY;
   if (!apiKey) throw new PortraitProviderError('provider_unavailable', 'The image-generation API key is not configured.');
-  const model = config.NPC_IMAGE_MODEL ?? 'gpt-image-2';
+  const model = config.NPC_IMAGE_MODEL ?? DEFAULT_PORTRAIT_IMAGE_MODEL;
   const form = new FormData();
   form.set('model', model); form.set('prompt', request.prompt); form.set('size', '1024x1536'); form.set('background', 'transparent'); form.set('output_format', 'png');
   for (const reference of request.references) form.append('image[]', new Blob([new Uint8Array(reference.bytes)], { type: 'image/png' }), reference.filename);

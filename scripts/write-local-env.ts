@@ -50,7 +50,7 @@ const generated = [
   '',
   `NPC_IMAGE_API_KEY=${process.env.NPC_IMAGE_API_KEY ?? ''}`,
   `NPC_IMAGE_PROVIDER=${process.env.NPC_IMAGE_PROVIDER ?? 'openai'}`,
-  `NPC_IMAGE_MODEL=${process.env.NPC_IMAGE_MODEL ?? 'gpt-image-2'}`,
+  `NPC_IMAGE_MODEL=${process.env.NPC_IMAGE_MODEL ?? 'gpt-image-2.5-sunburst'}`,
   `NPC_IMAGE_DEADLINE_MS=${process.env.NPC_IMAGE_DEADLINE_MS ?? '60000'}`,
   ''
 ].join('\n');
