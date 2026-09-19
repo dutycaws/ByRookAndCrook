@@ -11,7 +11,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const text=(v:FormDataEntryValue|null,min:number,max:number)=>typeof v==='string'&&v.trim().length>=min&&v.trim().length<=max?v.trim():null;
-export function assertLocalInspector(enabled=dev): void { if(!enabled) error(404,'This development tool is unavailable.'); }
+function assertLocalInspector(enabled=dev): void { if(!enabled) error(404,'This development tool is unavailable.'); }
 function service() { const runtime=privateRuntimeEnvironment(env); if(!runtime.SUPABASE_SERVICE_ROLE_KEY) error(503,'The local service credential is unavailable.'); return createClient<Database>(getSupabaseConfig().url,runtime.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}}); }
 async function saveForOwner(locals:App.Locals) { const user=await locals.getVerifiedUser(); if(!user) redirect(303,'/login'); const snapshot=await getSnapshot(locals.supabase); if(!snapshot) error(404,'Open a tavern before using the world inspector.'); return { user,saveId:snapshot.save.id }; }
 

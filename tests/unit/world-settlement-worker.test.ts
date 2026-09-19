@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { type SettlementWorkerClient } from '$lib/server/evolving-world/settlement-worker';
-import { drainWorldSettlementQueue, runSettlementClaim, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
+import { drainWorldSettlementQueue as drainWorldSettlementQueueBase, runSettlementClaim as runSettlementClaimBase, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
 import { parseSettlementClaim, SettlementProviderError } from '$lib/server/evolving-world/settlement-contracts';
 import { canonicalizeProceduralWorldProposal, fingerprintMutationProposal, fingerprintSocialEncounterProposal, parseFrozenProceduralWorldContext } from '$lib/game/evolving-world';
 import { createSettlementProvider } from '$lib/server/evolving-world/provider';
 import { fixtureProvider } from '../helpers/world-settlement-provider';
+import { fixturePromptRegistry, fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+
+const promptRelease = fixturePromptRelease;
+const promptRegistry = fixturePromptRegistry();
+const runSettlementClaim = (...args: Parameters<typeof runSettlementClaimBase>) => {
+  const [client, claim, runtime = {}] = args;
+  return runSettlementClaimBase(client, claim, { ...runtime, promptRegistry });
+};
+const drainWorldSettlementQueue = (...args: Parameters<typeof drainWorldSettlementQueueBase>) => {
+  const [limit, client, runtime = {}] = args;
+  return drainWorldSettlementQueueBase(limit, client, { ...runtime, promptRegistry });
+};
 
 const id = (tail: string) => `11111111-1111-4111-8111-${tail.padStart(12, '0')}`;
 const proposal = { rulesVersion:'evolving-world-v1', evidenceIds:['evidence-1'], salience:'meaningful', dimensionChanges:[], entryOperations:[], beliefOperations:[], causalExplanation:'An observed event supports no immediate profile change.', questChanges:[], worldEffects:[] };
@@ -115,7 +127,7 @@ describe('world settlement worker', () => {
     const mock=client({world_settlement_commit_social_encounter:socialReceipt});
     const provider=fixtureProvider({social_encounter_proposer:socialProposal(),social_encounter_critic:{decision:'accept',instructions:[]}});
     const payloads:Array<[string, unknown]>=[]; const generate=provider.generate.bind(provider);
-    provider.generate=async(stage,payload,signal)=>{payloads.push([stage,payload]); return generate(stage,payload,signal);};
+    provider.generate=async(stage,payload,signal,prompt)=>{payloads.push([stage,payload]); return generate(stage,payload,signal,prompt);};
     expect(await runSettlementClaim(mock.api,socialClaim(),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}})).toEqual({status:'completed',kind:'social_encounter'});
     expect(provider.calls).toEqual(['social_encounter_proposer','social_encounter_critic']);
     expect(payloads[0][1]).toMatchObject({version:'social-encounter-v1',publicCanon:{currentDay:4}});
@@ -303,7 +315,7 @@ describe('world settlement worker', () => {
   });
   it('gives the proposer only the frozen authorized evidence records', async () => {
     const mock=client(); let received: unknown; const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest}); const generate=provider.generate.bind(provider);
-    provider.generate=async(stage,payload,signal)=>{if(stage==='proposer')received=payload;return generate(stage,payload,signal);};
+    provider.generate=async(stage,payload,signal,prompt)=>{if(stage==='proposer')received=payload;return generate(stage,payload,signal,prompt);};
     await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999});
     expect(received).toMatchObject({authorizedEvidence:[{id:'evidence-1',summary:'The keeper promised a safe place to rest.'}]});
     expect(JSON.stringify(received)).not.toMatch(/pressureByDimension|roll/i);
@@ -395,7 +407,7 @@ describe('world settlement worker', () => {
     expect(operationalEvents).toEqual(expect.arrayContaining([expect.objectContaining({workflow:'world_settlement',stage:'proposer',status:'failed',attempt:1,errorCode:'provider_timeout'})]));
   });
   it('does not leak private frozen state into the digest payload', async () => {
-    const mock=client(); let payload:unknown; const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest}); const original=provider.generate.bind(provider); provider.generate=async(stage,input,signal)=>{if(stage==='digest')payload=input;return original(stage,input,signal);};
+    const mock=client(); let payload:unknown; const provider=fixtureProvider({proposer:proposal,critic:{outcome:'accept',rationale:'supported',instructions:[]},digest}); const original=provider.generate.bind(provider); provider.generate=async(stage,input,signal,prompt)=>{if(stage==='digest')payload=input;return original(stage,input,signal,prompt);};
     await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999}); expect(JSON.stringify(payload)).not.toMatch(/pressure|profile|capability|roll|evidence/i);
   });
   it('limits a wake to four serial claims and stays inert in tests', async () => {
@@ -405,7 +417,7 @@ describe('world settlement worker', () => {
     const outcomes=await drainWorldSettlementQueue(4, mock.api, {provider,heartbeatMs:99_999,observability:()=>undefined}); expect(outcomes).toHaveLength(4); startWorldSettlementWorker();
   });
   it('classifies a missing or local provider as unavailable without a network call', async () => {
-    await expect(createSettlementProvider({}).generate('proposer',{},new AbortController().signal)).rejects.toMatchObject({code:'provider_unavailable'});
-    await expect(createSettlementProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test'}).generate('digest',{},new AbortController().signal)).rejects.toMatchObject({code:'provider_unavailable'});
+    await expect(createSettlementProvider({}).generate('proposer',{},new AbortController().signal,promptRelease.prompts['resident.proposer'])).rejects.toMatchObject({code:'provider_unavailable'});
+    await expect(createSettlementProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test'}).generate('digest',{},new AbortController().signal,promptRelease.prompts['resident.digest'])).rejects.toMatchObject({code:'provider_unavailable'});
   });
 });

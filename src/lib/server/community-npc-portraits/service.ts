@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { NpcSheet } from '$lib/game/npc-sheet';
 import {
-  createPortraitProvider, loadPrivatePortraitReferences, lockedPortraitPrompt, optimisePortraitWebp,
+  createPortraitProvider, loadPrivatePortraitReferences, lockedPortraitPrompt, portraitPromptContext, optimisePortraitWebp,
   cleanupStoredPrivatePortrait, portraitProviderConfiguration, referenceSetHash, storePrivatePortrait, PRIVATE_PORTRAIT_MASTER_BUCKET,
   type PortraitControls, type PortraitProvider, type PortraitReference, type PrivatePortraitStorage, PortraitProviderError
 } from './index';
+import { portraitIdentityAnchorInstruction, releaseImagePrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
+import { type PromptRegistryService } from '$lib/server/prompt-registry/service';
 
 export type PortraitCompletionClient = { rpc(name: string, args: Record<string, unknown>): Promise<{ error: { message: string } | null }> };
 /** `visualInputHash` is minted by the reserve RPC and is authoritative. */
 export type PortraitJob = { jobId: string; npcId: string; sheet: NpcSheet; controls: Partial<PortraitControls>; alternatives: number; visualInputHash: string };
 export type PortraitBatchOutcome = { status: 'completed' | 'failed'; completed: number; failed: number; errorCode?: string };
-type Runtime = { config: Record<string, string | undefined>; storage: PrivatePortraitStorage; provider?: PortraitProvider; references?: readonly PortraitReference[]; timeoutMs?: number; projectRoot?: string };
+type Runtime = { config: Record<string, string | undefined>; storage: PrivatePortraitStorage; provider?: PortraitProvider; references?: readonly PortraitReference[]; timeoutMs?: number; projectRoot?: string; promptRelease?: PromptReleaseSnapshot };
 
 /**
  * A service-only lease returned by the database worker queue.  It is kept
@@ -41,7 +43,7 @@ export type PortraitGenerationAttempt = {
 
 export type PortraitWorkerRpcResult = { data: unknown; error: { message: string } | null };
 export type PortraitWorkerClient = { rpc(name: string, args?: Record<string, unknown>): Promise<PortraitWorkerRpcResult> };
-export type PortraitWorkerRuntime = Runtime & { heartbeatMs?: number };
+export type PortraitWorkerRuntime = Runtime & { heartbeatMs?: number; promptRegistry?: PromptRegistryService };
 export type PortraitAttemptOutcome = { status: 'completed' | 'failed' | 'lost_lease'; errorCode?: string };
 
 function hash(value: string | Buffer) { return createHash('sha256').update(value).digest('hex'); }
@@ -162,10 +164,18 @@ export async function runPortraitGenerationAttempt(
     const code = errorCode(error); await completeAttempt(client, attempt, { stage: 'pre_dispatch_failed' }, code);
     return { status: 'failed', errorCode: code };
   }
-  const prompt = [
-    lockedPortraitPrompt(attempt.request.sheet, attempt.request.controls),
-    attempt.request.slot === 'neutral' ? '' : 'The final supplied image is this NPC’s approved Neutral identity anchor. Preserve the same person and recognizable silhouette while expressing only the requested slot; do not copy the private style references.'
-  ].filter(Boolean).join('\n');
+  let promptRelease: PromptReleaseSnapshot;
+  try {
+    if (!runtime.promptRegistry) throw new Error('Prompt registry is required for portrait execution');
+    promptRelease = await runtime.promptRegistry.resolveForWork('portrait', attempt.attemptId);
+  } catch {
+    await completeAttempt(client, attempt, { stage: 'pre_dispatch_failed' }, 'provider_unavailable');
+    return { status: 'failed', errorCode: 'provider_unavailable' };
+  }
+  const renderedPrompt=releaseImagePrompt(promptRelease,'image.community_portrait',{
+    portrait_context: portraitPromptContext(attempt.request.sheet,attempt.request.controls), identity_anchor_instruction: portraitIdentityAnchorInstruction(attempt.request.slot)
+  });
+  const prompt = renderedPrompt.rendered;
   const promptHash = hash(prompt); const referenceHash = referenceSetHash(references);
   const provider = runtime.provider ?? createPortraitProvider(runtime.config);
   const controller = new AbortController(); let leaseLost = false; let dispatched = false; let completionStarted = false;
@@ -179,11 +189,13 @@ export async function runPortraitGenerationAttempt(
   try {
     // This is the irreversible billing boundary. Do not move it after generate.
     await markDispatched(client, attempt); dispatched = true;
+    await runtime.promptRegistry?.recordSafeRun({executionId:`portrait:${attempt.attemptId}`,attempt:attempt.ordinal,workflow:'portrait_generation',nodeKey:'image.community_portrait',prompt:renderedPrompt,status:'started'}).catch(()=>{});
     const configuredDeadline = runtime.timeoutMs ?? (Number(runtime.config.NPC_IMAGE_DEADLINE_MS) || 60_000);
     const generated = await deadline(Math.max(1_000, Math.min(configuredDeadline, 120_000)), (signal) =>
       provider.generate({ idempotencyKey: `${attempt.jobId}:${attempt.ordinal}`, prompt, references,
         alternativeOrdinal: attempt.ordinal, width: 1024, height: 1536, outputFormat: 'png', background: 'transparent' },
       AbortSignal.any([signal, controller.signal])));
+    await runtime.promptRegistry?.recordSafeRun({executionId:`portrait:${attempt.attemptId}`,attempt:attempt.ordinal,workflow:'portrait_generation',nodeKey:'image.community_portrait',prompt:renderedPrompt,status:'completed',model:generated.model}).catch(()=>{});
     if (leaseLost) return { status: 'lost_lease' };
     const optimized = await optimisePortraitWebp(generated.bytes);
     stored = await storePrivatePortrait(runtime.storage, optimized, generated.bytes);
@@ -210,6 +222,7 @@ export async function runPortraitGenerationAttempt(
       return { status: 'lost_lease' };
     }
     const code = errorCode(error);
+    await runtime.promptRegistry?.recordSafeRun({executionId:`portrait:${attempt.attemptId}`,attempt:attempt.ordinal,workflow:'portrait_generation',nodeKey:'image.community_portrait',prompt:renderedPrompt,status:'failed',errorCode:code==='storage_failed'?'storage_failed':code==='provider_refused'?'moderation_failed':'provider_failed'}).catch(()=>{});
     // The database charges every dispatched attempt, but only the genuinely
     // unknowable provider outcomes become ambiguous. A refusal, malformed
     // response, invalid image, or storage failure is an ordinary failed
@@ -231,7 +244,8 @@ export async function runPortraitBatch(client: PortraitCompletionClient, job: Po
   let references;
   try { references = runtime.references ? [...runtime.references] : loadPrivatePortraitReferences(runtime.projectRoot); }
   catch (error) { const code = errorCode(error); await complete(client, job, [], code); return { status: 'failed', completed: 0, failed: alternatives, errorCode: code }; }
-  const provider = runtime.provider ?? createPortraitProvider(runtime.config); const prompt = lockedPortraitPrompt(job.sheet, job.controls); const promptHash = hash(prompt); const currentVisualHash = job.visualInputHash; const referenceHash = referenceSetHash(references);
+  if (!runtime.promptRelease) return { status: 'failed', completed: 0, failed: alternatives, errorCode: 'provider_unavailable' };
+  const provider = runtime.provider ?? createPortraitProvider(runtime.config); const prompt = lockedPortraitPrompt(job.sheet, job.controls, 'neutral', runtime.promptRelease); const promptHash = hash(prompt); const currentVisualHash = job.visualInputHash; const referenceHash = referenceSetHash(references);
   const candidates: Array<Record<string, unknown>> = []; let failed = 0; let firstError: string | null = null;
   for (let ordinal = 1; ordinal <= alternatives; ordinal += 1) {
     try {

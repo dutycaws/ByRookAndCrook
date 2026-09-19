@@ -1,4 +1,4 @@
-import { SETTLEMENT_PROMPTS } from './prompts';
+import type { PromptSnapshot } from '$lib/server/prompt-registry';
 import { parseFrozenCanonEventProposal, promptVersionForProviderStage, SettlementProviderError, type ProviderResult, type ProviderStage, type SettlementProvider } from './settlement-contracts';
 import { parseFrozenSocialEncounterContext, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, type FrozenSocialEncounterContext } from '$lib/game/evolving-world/social-encounter-contracts';
 import { parseFrozenProceduralWorldContext, parseProceduralWorldCriticDecision, parseProceduralWorldProposal, PROCEDURAL_WORLD_CRITIC_CODES, PROCEDURAL_WORLD_CRITIC_PATHS, type FrozenProceduralWorldContext } from '$lib/game/evolving-world/procedural-world-contracts';
@@ -79,9 +79,10 @@ export function createSettlementProvider(config: Record<string, string | undefin
   const provider = config.NPC_PROVIDER ?? 'openai';
   if (provider === 'local') return { async generate() { throw new SettlementProviderError('provider_unavailable', 'Local model support is not implemented.'); } };
   if (provider !== 'openai' || !config.OPENAI_API_KEY) return { async generate() { throw new SettlementProviderError('provider_unavailable', 'OpenAI is not configured.'); } };
-  return { async generate(stage, payload, signal): Promise<ProviderResult> {
+  return { async generate(stage, payload, signal, prompt: PromptSnapshot): Promise<ProviderResult> {
     const started = performance.now();
     const model = creativeStages.has(stage) ? config.NPC_CHARACTER_MODEL ?? 'gpt-5.6-terra' : config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna';
+    if (!prompt || prompt.promptType !== 'text_system') throw new SettlementProviderError('provider_unavailable', 'The pinned settlement prompt is unavailable.');
     const socialContext=(socialProposalStages.has(stage) || socialCriticStages.has(stage)) ? parseSocialPayload(stage, payload) : null;
     if ((socialProposalStages.has(stage) || socialCriticStages.has(stage)) && !socialContext) {
       throw new SettlementProviderError('provider_malformed', 'The social encounter provider payload did not match the frozen contract.');
@@ -94,7 +95,7 @@ export function createSettlementProvider(config: Record<string, string | undefin
     try {
       response = await fetch('https://api.openai.com/v1/responses', { method:'POST', signal, headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'}, body:JSON.stringify({
         model, store:false, max_output_tokens:2200, reasoning:{effort:creativeStages.has(stage) ? 'low' : 'none'},
-        input:[{role:'system',content:SETTLEMENT_PROMPTS[stage]},{role:'user',content:JSON.stringify(payload)}],
+        input:[{role:'system',content:prompt.body},{role:'user',content:JSON.stringify(payload)}],
         text:{format:{type:'json_schema',name:`world_${stage}`,strict:true,schema:schema(stage)}}
       }) });
     } catch (cause) {
@@ -132,6 +133,9 @@ export function createSettlementProvider(config: Record<string, string | undefin
           ? JSON.parse(structured?.proposalJson)
           : structured;
       if (value === null) throw new SettlementProviderError('provider_malformed', 'The provider output did not match the frozen world contract.');
+      // Durable checkpoints retain their established semantic version. The
+      // immutable release/revision provenance is recorded separately in the
+      // registry ledger, so old replay readers remain compatible.
       return { value, model, usage:{input:result.usage?.input_tokens ?? 0, output:result.usage?.output_tokens ?? 0}, durationMs:Math.round(performance.now()-started), promptVersion:promptVersionForProviderStage(stage) };
     }
     catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned malformed structured output.'); }

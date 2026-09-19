@@ -13,6 +13,9 @@ import {
   type AuthoringProviderAvailability,
   type SandboxTurn
 } from './provider';
+import { promptRegistryService, type PromptRegistryClient } from '$lib/server/prompt-registry/service';
+import { releaseTextPrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
+import type { PromptRegistryService } from '$lib/server/prompt-registry/service';
 
 export type AuthoringJobKind = 'assist' | 'scene' | 'sandbox';
 export type AssistanceSection = 'identity' | 'appearance' | 'personality' | 'lore' | 'skills' | 'campaign';
@@ -29,7 +32,7 @@ type RpcResult = { error: { message: string } | null };
 export type CompletionClient = { rpc(name: string, args: Record<string, unknown>): Promise<RpcResult> };
 export type AuthoringJobOutcome = { status: 'completed' | 'failed'; errorCode?: string };
 export type LocalJobOutcome = AuthoringJobOutcome;
-export type LocalJobRuntime = { sceneAssets?: LocalSceneAsset[]; provider?: AuthoringProvider; timeoutMs?: number };
+export type LocalJobRuntime = { sceneAssets?: LocalSceneAsset[]; provider?: AuthoringProvider; timeoutMs?: number; promptRelease?: PromptReleaseSnapshot; promptRegistry?: PromptRegistryService };
 export type LocalEvaluationOutcome = { status: 'completed' | 'failed'; errorCode?: string; hardBlockCount?: number };
 
 const sections = new Set<AssistanceSection>(['identity', 'appearance', 'personality', 'lore', 'skills', 'campaign']);
@@ -77,13 +80,17 @@ export async function runAuthoringJob(client: CompletionClient, job: AuthoringPr
   if (!provider) return recordFailure(client, job, 'provider_unavailable');
   if (!validSheet(job.sheet)) return recordFailure(client, job, 'provider_malformed');
   const timeoutMs = Math.max(1_000, Math.min(runtime.timeoutMs ?? 30_000, 90_000));
+  const prompt = runtime.promptRelease ? releaseTextPrompt(runtime.promptRelease, job.kind === 'assist' ? 'authoring.assist' : 'authoring.sandbox') : null;
+  if (!prompt) return recordFailure(client, job, 'provider_unavailable');
   try {
+    await runtime.promptRegistry?.recordSafeRun({executionId:job.jobId,attempt:0,workflow:'authoring',nodeKey:prompt.key,prompt,status:'started'}).catch(()=>{});
     if (job.kind === 'assist') {
       const response = await withinDeadline((signal) => provider.assist({ section: job.section, instruction: clipped(job.instruction, 2_000), sheet: structuredClone(job.sheet) }, signal), timeoutMs);
       const candidate = candidateWithSection(job.sheet, job.section, response.replacement);
       if (!response.explanation.trim() || response.explanation.length > 600 || !validSheet(candidate)) return recordFailure(client, job, 'provider_malformed');
       if (jsonEqual(job.sheet[job.section], response.replacement) || canonicalNpcSheet(candidate) === canonicalNpcSheet(job.sheet)) return recordFailure(client, job, 'provider_no_change');
       await complete(client, 'npc_author_assistance_complete', { p_job_id: job.jobId, p_proposal: { replacement: response.replacement, explanation: clipped(response.explanation, 600), provider: 'openai-responses' } as Json, p_error_code: null });
+      await runtime.promptRegistry?.recordSafeRun({executionId:job.jobId,attempt:0,workflow:'authoring',nodeKey:prompt.key,prompt,status:'completed'}).catch(()=>{});
       return { status: 'completed' };
     }
     const turns = job.turns.map((turn) => ({ role: turn.role, content: clipped(turn.content, 2_000) })).filter((turn) => turn.content);
@@ -91,8 +98,9 @@ export async function runAuthoringJob(client: CompletionClient, job: AuthoringPr
     const response = await withinDeadline((signal) => provider.sandbox({ sheet: structuredClone(job.sheet), turns }, signal), timeoutMs);
     if (!response.reply.trim() || response.reply.length > 4_000) return recordFailure(client, job, 'provider_malformed');
     await complete(client, 'npc_author_sandbox_complete', { p_job_id: job.jobId, p_reply: response.reply.trim(), p_error_code: null });
+    await runtime.promptRegistry?.recordSafeRun({executionId:job.jobId,attempt:0,workflow:'authoring',nodeKey:prompt.key,prompt,status:'completed'}).catch(()=>{});
     return { status: 'completed' };
-  } catch (cause) { return recordFailure(client, job, failureCode(cause)); }
+  } catch (cause) { await runtime.promptRegistry?.recordSafeRun({executionId:job.jobId,attempt:0,workflow:'authoring',nodeKey:prompt.key,prompt,status:'failed',errorCode:'provider_failed'}).catch(()=>{}); return recordFailure(client, job, failureCode(cause)); }
 }
 
 /** Scene selection remains a deterministic local-asset fixture by design. */
@@ -123,7 +131,11 @@ export async function dispatchAuthoringJob(job: QueuedAuthoringJob): Promise<Aut
   if (job.kind === 'scene') return runSceneFixture(client, job, {});
   const config = runtimeConfig();
   if (!authoringProviderAvailability(config).available) return recordFailure(client, job, 'provider_unavailable');
-  return runLocalAuthoringJob(client, job, { provider: createAuthoringProvider(config), timeoutMs: Number(config.NPC_AUTHORING_DEADLINE_MS) || 30_000 });
+  try {
+    const registry=promptRegistryService(client as unknown as PromptRegistryClient);
+    const release=await registry.resolveForWork('authoring',job.jobId);
+    return runLocalAuthoringJob(client, job, { provider: createAuthoringProvider(config,release), promptRelease:release, promptRegistry:registry, timeoutMs: Number(config.NPC_AUTHORING_DEADLINE_MS) || 30_000 });
+  } catch { return recordFailure(client, job, 'provider_unavailable'); }
 }
 /** Legacy name retained so routes can migrate without a split deployment. */
 export const dispatchLocalAuthoringJob = dispatchAuthoringJob;

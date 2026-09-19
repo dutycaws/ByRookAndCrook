@@ -5,9 +5,11 @@ import type { DialogueProvider } from './provider';
 import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, type ContextWindow } from './context';
 import { matchesSchema, schemas, type Stage } from './schemas';
 import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
+import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
+import type { PromptRegistryService } from '$lib/server/prompt-registry/service';
 
 export class DialogueError extends Error { constructor(message:string,public status=500,public code='DIALOGUE_FAILED'){super(message);} }
-export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink };
+export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink; promptRegistry?: PromptRegistryService };
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRIVATE_COGNITION_KEYS=new Set(['evolvingProfile','profileRevision','beliefs','currentSocial','social','pressure','roll','rolls','critic','privateIntent','privateCognition']);
 
@@ -87,6 +89,15 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   if(turn.status==='completed') return {status:'completed',result:turn.result};
   if(turn.status==='stale') throw new DialogueError('The tavern changed. Send a new message from the refreshed conversation.',409,'STATE_CHANGED');
   if(turn.busy) return {status:'processing',turnId:input.turnId};
+  // The row was inserted before provider work and carries an immutable release
+  // pin. Resolving it now prevents a later active-release change affecting a
+  // retry of this turn.
+  let promptRelease: Awaited<ReturnType<PromptRegistryService['resolveForWork']>>;
+  try {
+    if (!options.promptRegistry) throw new Error('Prompt registry is required for dialogue execution');
+    promptRelease = await options.promptRegistry.resolveForWork('dialogue', input.turnId);
+  }
+  catch { throw new DialogueError('The dialogue prompt release is unavailable. Please retry.',503,'REGISTRY_UNAVAILABLE'); }
   const fence=turn.fence as string;
   const checkpoints=turn.checkpoints as Record<string,any>;
   let calls=0;
@@ -101,8 +112,13 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     requirePayloadBudget(payload);
     await checkpoint('reserve',null); calls++;
     let out: Awaited<ReturnType<DialogueProvider['generate']>>;
-    try { out=await provider.generate(stage,payload,signal); }
+    const prompt = releaseTextPrompt(promptRelease, DIALOGUE_PROMPT_KEY[stage]);
+    try {
+      await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'started' });
+      out=await provider.generate(stage,payload,signal,prompt);
+    }
     catch (cause) {
+      await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_failed' }).catch(()=>{});
       await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:signal.aborted?'provider_timeout':observabilityErrorCode(cause)});
       throw cause;
     }
@@ -111,9 +127,11 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
     }
     if(!matchesSchema(out.value,schemas[stage])) {
+      await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_malformed' }).catch(()=>{});
       await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'structure'});
       throw new DialogueError('A response stage was invalid. Please retry.',503,'STRUCTURE');
     }
+    await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'completed',model:out.model,durationMs:out.durationMs,inputTokens:out.usage.input,outputTokens:out.usage.output }).catch(()=>{});
     await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage});
     const recorded={...out,inputContext:describePayload(payload)};
     await checkpoint(name,recorded); checkpoints[name]=recorded;

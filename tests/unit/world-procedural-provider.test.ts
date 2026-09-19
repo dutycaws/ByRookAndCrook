@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseFrozenProceduralWorldContext, parseProceduralWorldProposal } from '../../src/lib/game/evolving-world';
-import { PROCEDURAL_WORLD_CHECKPOINT_STAGE, PROCEDURAL_WORLD_SETTLEMENT_PROMPT_VERSION, SETTLEMENT_PROVIDER_CALL_BUDGETS, createSettlementProvider, promptVersionForProviderStage } from '../../src/lib/server/evolving-world';
+import { PROCEDURAL_WORLD_CHECKPOINT_STAGE, PROCEDURAL_WORLD_SETTLEMENT_PROMPT_VERSION, SETTLEMENT_PROVIDER_CALL_BUDGETS, createSettlementProvider as createSettlementProviderBase, promptVersionForProviderStage } from '../../src/lib/server/evolving-world';
+import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
+import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+
+const promptRelease=fixturePromptRelease;
+function createSettlementProvider(config: Record<string,string|undefined>) {
+  const provider=createSettlementProviderBase(config);
+  return { ...provider, generate(stage: Parameters<typeof provider.generate>[0], payload: unknown, signal: AbortSignal) {
+    return provider.generate(stage,payload,signal,promptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
+  } };
+}
 
 const resident='11111111-1111-4111-8111-111111111111';
 function context() { return {version:'procedural-world-v1',entityKinds:{millhaven:'location'},activeGeneratedEntityCount:12,activeQuestByResident:{},capabilities:{[resident]:{version:'capabilities-v1',allowedActions:['prepare'],allowedApproaches:['scouting'],allowedWorldEffects:['create_entity','record_world_event'],allowedTargetKinds:['location'],socialCapabilities:[],irreversibleEffects:[]}}}; }

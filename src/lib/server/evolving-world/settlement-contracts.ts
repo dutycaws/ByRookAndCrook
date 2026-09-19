@@ -57,7 +57,7 @@ export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'social_enco
 
 export type ProviderUsage = { input: number; output: number };
 export type ProviderResult = { value: unknown; model: string; usage: ProviderUsage; durationMs: number; promptVersion: string };
-export interface SettlementProvider { generate(stage: ProviderStage, payload: unknown, signal: AbortSignal): Promise<ProviderResult>; }
+export interface SettlementProvider { generate(stage: ProviderStage, payload: unknown, signal: AbortSignal, prompt: import('$lib/server/prompt-registry').PromptSnapshot): Promise<ProviderResult>; }
 
 export class SettlementProviderError extends Error {
   constructor(public readonly code: 'provider_unavailable' | 'provider_timeout' | 'provider_malformed' | 'provider_failed', message: string) {

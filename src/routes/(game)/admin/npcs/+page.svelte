@@ -149,7 +149,7 @@
             <p>{describeJson(user.capabilities)}</p>
             <form method="POST" action="?/capability">
               <input type="hidden" name="userId" value={user.userId} />
-              <select name="capability"><option>npc_author</option><option>npc_reviewer</option><option>admin</option></select>
+              <select name="capability"><option>npc_author</option><option>npc_reviewer</option><option>prompt_manager</option><option>admin</option></select>
               <input name="reason" minlength="3" required placeholder="Audit reason" />
               <button name="enabled" value="true">Grant</button>
               <button name="enabled" value="false">Revoke</button>

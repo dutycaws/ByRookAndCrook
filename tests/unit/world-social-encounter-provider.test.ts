@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseFrozenSocialEncounterContext, parseSocialEncounterProposal } from '../../src/lib/game/evolving-world';
-import { SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION, createSettlementProvider } from '../../src/lib/server/evolving-world';
+import { SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION, createSettlementProvider as createSettlementProviderBase } from '../../src/lib/server/evolving-world';
+import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
+import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+
+const promptRelease=fixturePromptRelease;
+function createSettlementProvider(config: Record<string,string|undefined>) {
+  const provider=createSettlementProviderBase(config);
+  return { ...provider, generate(stage: Parameters<typeof provider.generate>[0], payload: unknown, signal: AbortSignal) {
+    return provider.generate(stage,payload,signal,promptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
+  } };
+}
 
 const lira='11111111-1111-4111-8111-111111111111';
 const torvin='22222222-2222-4222-8222-222222222222';

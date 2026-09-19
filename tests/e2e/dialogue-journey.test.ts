@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test';
 import { createBrewedTavern } from '../helpers/brewed-tavern';
 import { runDialogue } from '../../src/lib/server/dialogue/orchestrator';
 import { fixtureProvider } from '../helpers/dialogue-provider';
+import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
+
+const promptRegistry = fixturePromptRegistry();
 
 /**
  * The community-NPC runtime deliberately owns its own bounded Bar projection.
@@ -38,7 +41,7 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     let requests = 0;
     await page.route('**/api/dialogue', async route => {
       requests++;
-      const result = await runDialogue(player.admin, player.userId, route.request().postDataJSON(), fixtureProvider());
+      const result = await runDialogue(player.admin, player.userId, route.request().postDataJSON(), fixtureProvider(), { promptRegistry });
       // A committed reply survives a lost network response.
       if (requests === 1) await route.abort('failed');
       else await route.fulfill({status:200, contentType:'application/json', body:JSON.stringify(result)});
@@ -101,7 +104,7 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
               if(phase==='generating'&&args[0]==='speak'){ready();await held;}
               return fixture.generate(...args);
             }};
-            const result=await runDialogue(player.admin,player.userId,route.request().postDataJSON(),provider);
+            const result=await runDialogue(player.admin,player.userId,route.request().postDataJSON(),provider,{promptRegistry});
             if(phase!=='generating'){ready();await held;}
             await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(result)});
           } catch {
@@ -161,7 +164,7 @@ test('a rejected rewrite can be cancelled and rephrased after reloading',async({
     await page.route('**/api/dialogue',async route=>{
       requests++;
       try {
-        await runDialogue(player.admin,player.userId,route.request().postDataJSON(),fixtureProvider({rejectEveryReview:requests===1}));
+        await runDialogue(player.admin,player.userId,route.request().postDataJSON(),fixtureProvider({rejectEveryReview:requests===1}),{promptRegistry});
         await route.abort('failed');
       } catch {
         await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'CONSISTENCY',message:'Cancel this message and rephrase it.'})});

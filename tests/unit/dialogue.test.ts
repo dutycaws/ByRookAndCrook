@@ -2,9 +2,11 @@ import { describe,it,expect } from 'vitest';
 import { mergeEnvironment } from '../../scripts/environment-merge';
 import { parseInput,runDialogue,validateDecision } from '../../src/lib/server/dialogue/orchestrator';
 import { createProvider, type DialogueProvider } from '../../src/lib/server/dialogue/provider';
+import { fixturePromptRegistry, fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
 const npcId='11111111-1111-4111-8111-111111111111';
 const turnId='22222222-2222-4222-8222-222222222222';
+const promptRegistry = fixturePromptRegistry();
 
 function rpcResult(data: unknown) {
   return {
@@ -62,7 +64,7 @@ describe('dialogue boundaries',()=>{
     }
   });
   it('local mode never falls back to a hosted provider',async()=>{
-    await expect(createProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test-only-placeholder'}).generate('speak',{},new AbortController().signal)).rejects.toThrow('not implemented');
+    await expect(createProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test-only-placeholder'}).generate('speak',{},new AbortController().signal,fixturePromptRelease.prompts['dialogue.speak'])).rejects.toThrow('not implemented');
   });
   it('emits a sanitized provider-stage failure without retaining keeper prose or provider error text',async()=>{
     const base={name:'Lira',recent:[],questStatus:'active',allowedTargets:['millhaven'],personality:{values:['care']}};
@@ -70,7 +72,7 @@ describe('dialogue boundaries',()=>{
     const operationalEvents: unknown[]=[];
     await expect(runDialogue(cognitionClient(base),'33333333-3333-4333-8333-333333333333',{
       turnId,npcId,message:'A private keeper message.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
-    },provider,{rounds:1,observability:(event)=>{operationalEvents.push(event);}})).rejects.toMatchObject({code:'PROVIDER_FAILED'});
+    },provider,{rounds:1,promptRegistry,observability:(event)=>{operationalEvents.push(event);}})).rejects.toMatchObject({code:'PROVIDER_FAILED'});
     expect(operationalEvents).toEqual([expect.objectContaining({correlationId:turnId,workflow:'dialogue',stage:'investigate0',status:'failed',attempt:1,errorCode:'provider_unavailable'})]);
     expect(JSON.stringify(operationalEvents)).not.toContain('private keeper message');
     expect(JSON.stringify(operationalEvents)).not.toContain('sk-secret-value');
@@ -101,7 +103,7 @@ describe('dialogue boundaries',()=>{
     const operationalEvents: unknown[]=[];
     const result=await runDialogue(cognitionClient(base),'33333333-3333-4333-8333-333333333333',{
       turnId,npcId,message:base.message,expectedConversationSequence:0,interactionVersion:'dialogue-v2'
-    },provider,{rounds:1,observability:(event)=>{operationalEvents.push(event);}});
+    },provider,{rounds:1,promptRegistry,observability:(event)=>{operationalEvents.push(event);}});
     expect(result.status).toBe('completed');
     expect(payloads.investigate.privateCognition).toMatchObject({profileRevision:7,evolvingProfile:{privateMotivation:'Do not reveal this.'}});
     expect(payloads.deliberate.privateCognition).toMatchObject({

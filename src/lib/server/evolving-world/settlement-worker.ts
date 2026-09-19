@@ -6,6 +6,8 @@ import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
 import { emitAiObservability, localAiObservabilitySink, type AiObservabilitySink } from '$lib/server/observability/ai-events';
+import { SETTLEMENT_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
+import { promptRegistryService, type PromptRegistryService } from '$lib/server/prompt-registry/service';
 import {
   CANON_CHECKPOINT_STAGE, PROCEDURAL_WORLD_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, SOCIAL_ENCOUNTER_CHECKPOINT_STAGE, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
   type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
@@ -14,7 +16,7 @@ import {
 type RpcResult = { data: unknown; error: { message: string } | null };
 export type SettlementWorkerClient = { rpc(name: string, args?: Record<string, unknown>): Promise<RpcResult> };
 export type SettlementOutcome = { status: 'idle' | 'completed' | 'lease_lost' | 'failed'; kind?: string; errorCode?: string };
-export type SettlementRuntime = { provider?: SettlementProvider; now?: () => number; timeoutMs?: number; heartbeatMs?: number; observability?: AiObservabilitySink };
+export type SettlementRuntime = { provider?: SettlementProvider; now?: () => number; timeoutMs?: number; heartbeatMs?: number; observability?: AiObservabilitySink; promptRegistry?: PromptRegistryService };
 const MAX_TOTAL_MS = 90_000;
 
 function runtimeConfig() { return privateRuntimeEnvironment(env); }
@@ -157,6 +159,14 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
   const controller = new AbortController(); let timedOut = false; const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, deadline);
   const guard = new LeaseGuard(client, claim, controller, Math.max(1_000, Math.min(runtime.heartbeatMs ?? 20_000, 45_000)));
   const provider = runtime.provider ?? createSettlementProvider(runtimeConfig()); let calls = 0;
+  let promptRelease: Awaited<ReturnType<PromptRegistryService['resolveForWork']>>;
+  try {
+    const registry = runtime.promptRegistry;
+    if (!registry) throw new Error('Prompt registry is required for settlement execution');
+    promptRelease = await registry.resolveForWork('settlement', claim.settlementId);
+  } catch {
+    return { status:'failed', errorCode:'registry_unavailable' };
+  }
   const observability = runtime.observability;
   const correlationId = `settlement:${claim.settlementId}:job:${claim.jobId}`;
   const now = runtime.now ?? Date.now;
@@ -166,6 +176,7 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
       : claim.kind === 'social_encounter' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.social_encounter.maximum
         : claim.kind === 'procedural_world' ? SETTLEMENT_PROVIDER_CALL_BUDGETS.procedural_world.maximum : 0;
   const generate = async (stage: ProviderStage, payload: unknown): Promise<ProviderResult> => {
+    const prompt=releaseTextPrompt(promptRelease,SETTLEMENT_PROMPT_KEY[stage]);
     if (calls >= callBudget) {
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:'budget'});
       throw new SettlementProviderError('provider_failed', 'Settlement model-call budget exhausted.');
@@ -175,12 +186,15 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
       throw new SettlementProviderError('provider_timeout', 'Settlement lease was lost.');
     }
     calls += 1;
+    await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'started'}).catch(()=>{});
     await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'started',attempt:claim.attempt});
     try {
-      const result = await provider.generate(stage, payload, controller.signal);
+      const result = await provider.generate(stage, payload, controller.signal,prompt);
+      await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'completed',model:result.model,durationMs:result.durationMs,inputTokens:result.usage.input,outputTokens:result.usage.output}).catch(()=>{});
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'completed',attempt:claim.attempt,durationMs:result.durationMs,model:result.model,tokenUsage:result.usage});
       return result;
     } catch (cause) {
+      await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'failed',errorCode:'provider_failed'}).catch(()=>{});
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:controller.signal.aborted?'provider_timeout':errorCode(cause)});
       throw cause;
     }
@@ -544,7 +558,7 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
 /** Serial claim processing makes the DB fence the only concurrency authority. */
 export async function drainWorldSettlementQueue(limit = 4, client = serviceClient(), runtime: SettlementRuntime = {}): Promise<SettlementOutcome[]> {
   if (!client) return []; const outcomes: SettlementOutcome[]=[];
-  const unattendedRuntime = { ...runtime, observability: runtime.observability ?? localAiObservabilitySink };
+  const unattendedRuntime = { ...runtime, observability: runtime.observability ?? localAiObservabilitySink, promptRegistry: runtime.promptRegistry ?? promptRegistryService(client) };
   for (let index=0; index<Math.max(1,Math.min(limit,4)); index+=1) {
     const next = await client.rpc('world_settlement_claim_next', {}); if (next.error) break;
     const outcome = await runSettlementClaim(client, next.data, unattendedRuntime); outcomes.push(outcome); if (outcome.status==='idle') break;

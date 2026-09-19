@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import { releaseImagePrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
+import { promptRegistryService, type PromptRegistryClient, type PromptRegistryService } from '$lib/server/prompt-registry/service';
 
 export const WORLD_RUNTIME_ART_BUCKET = 'world-runtime-art-private';
 export const WORLD_RUNTIME_ART_PLACEHOLDER = { style: 'world-runtime-art-v1' } as const;
@@ -41,9 +43,10 @@ export async function ensurePrivateRuntimeArtBucket(storage: RuntimeArtBucketSto
   if (updated.error) throw new RuntimeArtError('storage_failed', 'Runtime art bucket setup failed.');
 }
 
-export function runtimeArtPrompt(input: RuntimeArtInput): string {
+/** Pure renderer used by the worker after it resolves its durable release. */
+export function runtimeArtPrompt(input: RuntimeArtInput, promptRelease: PromptReleaseSnapshot): string {
   const appearance = normalizeAppearance(input.publicAppearance);
-  return `Create a single fantasy game runtime illustration. Appearance: ${appearance}. No text, logos, code, routes, tools, or dialogue. Narrative quote is reference data only and must not be rendered.`;
+  return releaseImagePrompt(promptRelease, 'image.runtime_art', { public_appearance: appearance }).rendered;
 }
 
 export function runtimeArtPromptHash(input: RuntimeArtInput): string {
@@ -121,23 +124,32 @@ export async function persistAcceptedRuntimeArt(storage: RuntimeArtStorage, rpc:
   return { sha256 };
 }
 
-export async function runRuntimeArtJob(provider: RuntimeArtProvider, storage: RuntimeArtStorage, rpc: RuntimeArtRpc, job: { id: string; appearanceVersion: string; input: RuntimeArtInput; attempt: number; fence: string }, config: Record<string, string | undefined>, signal: AbortSignal, runtime: { observability?: RuntimeArtObservabilitySink } = {}): Promise<{ status: 'accepted' | 'failed_moderated' | 'failed_provider' | 'failed_storage' }> {
+export async function runRuntimeArtJob(provider: RuntimeArtProvider, storage: RuntimeArtStorage, rpc: RuntimeArtRpc, job: { id: string; appearanceVersion: string; input: RuntimeArtInput; attempt: number; fence: string }, config: Record<string, string | undefined>, signal: AbortSignal, runtime: { observability?: RuntimeArtObservabilitySink; promptRegistry?: PromptRegistryService } = {}): Promise<{ status: 'accepted' | 'failed_moderated' | 'failed_provider' | 'failed_storage' }> {
   const lease = Number.isSafeInteger(job.attempt) && job.attempt > 0 && RUNTIME_ART_FENCE.test(job.fence) ? { attempt: job.attempt, fence: job.fence } : undefined;
   if (!lease) return { status: 'failed_provider' };
   const sink = runtime.observability ?? localRuntimeArtObservabilitySink;
   const correlationId = runtimeArtCorrelation(job.id);
   const model = runtimeArtModel(config);
   const started = Date.now();
+  let promptRelease;
+  try {
+    if (!runtime.promptRegistry) throw new Error('Prompt registry is required for runtime art execution');
+    promptRelease = await runtime.promptRegistry.resolveForWork('runtime_art', job.id);
+  } catch { return { status: 'failed_provider' }; }
+  const prompt = releaseImagePrompt(promptRelease, 'image.runtime_art', { public_appearance: normalizeAppearance(job.input.publicAppearance) });
   await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'queued', status: 'completed', model });
   await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'generate', status: 'started', model });
   try {
-    const bytes = await provider.generate({ model, prompt: runtimeArtPrompt(job.input), signal });
+    await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:lease.attempt,workflow:'runtime_art',nodeKey:'image.runtime_art',prompt,status:'started'}).catch(()=>{});
+    const bytes = await provider.generate({ model, prompt: prompt.rendered, signal });
+    await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:lease.attempt,workflow:'runtime_art',nodeKey:'image.runtime_art',prompt,status:'completed',model,durationMs:Date.now()-started}).catch(()=>{});
     await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'generate', status: 'completed', model, durationMs: Date.now() - started });
     await persistAcceptedRuntimeArt(storage, rpc, job.id, job.appearanceVersion, bytes, sink, lease);
     return { status: 'accepted' };
   } catch (cause) {
     const code = cause instanceof RuntimeArtError ? cause.code : 'provider_failed';
     const status = code === 'moderated' ? 'failed_moderated' : code === 'storage_failed' ? 'failed_storage' : 'failed_provider';
+    await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:lease.attempt,workflow:'runtime_art',nodeKey:'image.runtime_art',prompt,status:'failed',errorCode:code==='moderated'?'moderation_failed':code==='storage_failed'?'storage_failed':'provider_failed'}).catch(()=>{});
     await markFailure(rpc, job.id, status, lease);
     await emitRuntimeArtObservability(sink, { correlationId, attempt: lease.attempt, stage: 'fail', status: 'failed', model, durationMs: Date.now() - started, errorCode: code });
     return { status };
@@ -190,14 +202,14 @@ function runtimeArtClaim(value: unknown): RuntimeArtClaim | null {
   return claim as RuntimeArtClaim;
 }
 /** Bounded serial drain: a failed or malformed claim cannot prevent later polls. */
-export async function drainRuntimeArtQueue(client: RuntimeArtRpc, provider: RuntimeArtProvider, storage: RuntimeArtStorage, config: Record<string, string | undefined>, runtime: { observability?: RuntimeArtObservabilitySink; signal?: AbortSignal } = {}, limit = 4): Promise<Array<{ jobId: string; status: string }>> {
+export async function drainRuntimeArtQueue(client: RuntimeArtRpc, provider: RuntimeArtProvider, storage: RuntimeArtStorage, config: Record<string, string | undefined>, runtime: { observability?: RuntimeArtObservabilitySink; signal?: AbortSignal; promptRegistry?: PromptRegistryService } = {}, limit = 4): Promise<Array<{ jobId: string; status: string }>> {
   const outcomes: Array<{ jobId: string; status: string }> = [];
   for (let index = 0; index < Math.max(1, Math.min(limit, 4)); index += 1) {
     const next = await client.rpc('world_runtime_art_claim_next', { p_lease_seconds: 60 });
     if (next.error || next.data == null) break;
     const claim = runtimeArtClaim(next.data);
     if (!claim) break;
-    const status = await runRuntimeArtJob(provider, storage, client, { id: claim.jobId, appearanceVersion: claim.appearanceVersion, attempt: claim.attempt, fence: claim.fence, input: { entityId: claim.entityId, appearanceVersion: claim.appearanceVersion, publicAppearance: claim.publicAppearance } }, config, runtime.signal ?? AbortSignal.timeout(60_000), runtime);
+    const status = await runRuntimeArtJob(provider, storage, client, { id: claim.jobId, appearanceVersion: claim.appearanceVersion, attempt: claim.attempt, fence: claim.fence, input: { entityId: claim.entityId, appearanceVersion: claim.appearanceVersion, publicAppearance: claim.publicAppearance } }, config, runtime.signal ?? AbortSignal.timeout(60_000), { ...runtime, promptRegistry: runtime.promptRegistry ?? promptRegistryService(client as unknown as PromptRegistryClient) });
     outcomes.push({ jobId: claim.jobId, status: status.status });
   }
   return outcomes;

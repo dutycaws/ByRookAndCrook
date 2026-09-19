@@ -5,9 +5,11 @@ import {
   drainRuntimeArtQueue, ensurePrivateRuntimeArtBucket, persistAcceptedRuntimeArt, runRuntimeArtJob,
   runtimeArtPrompt, runtimeArtPromptHash, validateRuntimeArtPng, type RuntimeArtStorage
 } from '../../src/lib/server/evolving-world-art/index.js';
+import { fixturePromptRegistry, fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
 const jobId = '11111111-1111-4111-8111-111111111111';
 const entityId = '22222222-2222-4222-8222-222222222222';
+const promptRegistry = fixturePromptRegistry();
 async function png() { return sharp({ create: { width: 8, height: 8, channels: 4, background: 'orange' } }).png().toBuffer(); }
 function storage(options: { acceptFails?: boolean } = {}) {
   const objects = new Map<string, Buffer>(); const removed: string[] = [];
@@ -39,7 +41,7 @@ describe('runtime world art boundary', () => {
     const result = await runRuntimeArtJob({ async generate() { throw new Error('provider private response'); } }, fixture.value, rpc, { id: jobId, appearanceVersion: 'world-v1', attempt: 1, fence: '33333333-3333-4333-8333-333333333333', input: { entityId, appearanceVersion: 'world-v1', publicAppearance: 'amber cloak', narrativeQuote: 'private quote' } }, {}, AbortSignal.timeout(1_000));
     expect(result).toEqual({ status: 'failed_provider' });
     expect(rpcCalls.at(-1)).toEqual(expect.objectContaining({ name: 'world_runtime_art_fail', args: expect.objectContaining({ p_attempt: 1, p_fence: '33333333-3333-4333-8333-333333333333' }) }));
-    expect(() => runtimeArtPrompt({ entityId, appearanceVersion: 'world-v1', publicAppearance: ' ', narrativeQuote: 'secret' })).toThrow('appearance');
+    expect(() => runtimeArtPrompt({ entityId, appearanceVersion: 'world-v1', publicAppearance: ' ', narrativeQuote: 'secret' }, fixturePromptRelease)).toThrow('appearance');
   });
 
   it('issues a signed preview only after opaque owner authorization and never returns the storage key', async () => {
@@ -63,7 +65,7 @@ describe('runtime world art boundary', () => {
 
   it('records a bounded attempt and elapsed verification and acceptance work', async () => {
     const fixture = storage(); const events: Array<Record<string, unknown>> = [];
-    await runRuntimeArtJob({ async generate() { return png(); } }, fixture.value, { async rpc() { return { data: { reused: false }, error: null }; } }, { id: jobId, appearanceVersion: 'art-v2', attempt: 2, fence: '33333333-3333-4333-8333-333333333333', input: { entityId, appearanceVersion: 'art-v2', publicAppearance: 'brass lantern' } }, {}, AbortSignal.timeout(1_000), { observability: (event) => { events.push(event); } });
+    await runRuntimeArtJob({ async generate() { return png(); } }, fixture.value, { async rpc() { return { data: { reused: false }, error: null }; } }, { id: jobId, appearanceVersion: 'art-v2', attempt: 2, fence: '33333333-3333-4333-8333-333333333333', input: { entityId, appearanceVersion: 'art-v2', publicAppearance: 'brass lantern' } }, {}, AbortSignal.timeout(1_000), { promptRegistry, observability: (event) => { events.push(event); } });
     expect(events).toHaveLength(7);
     expect(events.every((event) => event.attempt === 2)).toBe(true);
     for (const stage of ['verify', 'accept']) expect(events.find((event) => event.stage === stage && event.status === 'completed')).toMatchObject({ durationMs: expect.any(Number) });
@@ -80,7 +82,7 @@ describe('runtime world art boundary', () => {
       return { data: { reused: false }, error: null };
     } };
     const provider = { async generate() { maximum = Math.max(maximum, ++concurrent); const image = await png(); concurrent--; return image; } };
-    const outcomes = await drainRuntimeArtQueue(rpc, provider, fixture.value, {}, { observability: () => {} });
+    const outcomes = await drainRuntimeArtQueue(rpc, provider, fixture.value, {}, { promptRegistry, observability: () => {} });
     expect(outcomes).toHaveLength(4);
     expect(maximum).toBe(1);
     expect(claimed).toBe(4);
@@ -90,7 +92,7 @@ describe('runtime world art boundary', () => {
     const log = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     try {
       const fixture = storage();
-      await runRuntimeArtJob({ async generate() { return png(); } }, fixture.value, { async rpc() { return { data: { reused: false }, error: null }; } }, { id: jobId, appearanceVersion: 'art-v2', attempt: 1, fence: '33333333-3333-4333-8333-333333333333', input: { entityId, appearanceVersion: 'art-v2', publicAppearance: 'brass lantern', narrativeQuote: 'private quote' } }, {}, AbortSignal.timeout(1_000));
+      await runRuntimeArtJob({ async generate() { return png(); } }, fixture.value, { async rpc() { return { data: { reused: false }, error: null }; } }, { id: jobId, appearanceVersion: 'art-v2', attempt: 1, fence: '33333333-3333-4333-8333-333333333333', input: { entityId, appearanceVersion: 'art-v2', publicAppearance: 'brass lantern', narrativeQuote: 'private quote' } }, {}, AbortSignal.timeout(1_000), { promptRegistry });
       const events = log.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
       expect(events.length).toBeGreaterThan(0);
       for (const event of events) {

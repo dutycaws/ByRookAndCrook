@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test';
 import { createPlayableWorldFixture } from '../helpers/evolving-world-playable-fixture';
 import { runDialogue } from '../../src/lib/server/dialogue/orchestrator';
 import { fixtureProvider } from '../helpers/dialogue-provider';
+import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
+
+const promptRegistry = fixturePromptRegistry();
 
 test('a generated provision and promoted procedural resident stay playable through public shop and bar projections', async ({ page }) => {
   const fixture = await createPlayableWorldFixture();
@@ -43,7 +46,7 @@ test('a generated provision and promoted procedural resident stay playable throu
 
     await page.goto('/bar');
     await expect(page.getByText(fixture.promotedNpcName, { exact: true }).first()).toBeVisible();
-    const roster = await fixture.client.rpc('npc_roster', { p_limit: 20, p_cursor: null, p_query: fixture.promotedNpcName });
+    const roster = await fixture.client.rpc('npc_roster', { p_limit: 20, p_query: fixture.promotedNpcName });
     expect(roster.error).toBeNull();
     const resident = (roster.data as any[]).find((entry) => entry.name === fixture.promotedNpcName);
     expect(resident).toBeTruthy();
@@ -54,7 +57,7 @@ test('a generated provision and promoted procedural resident stay playable throu
     expect((roster.data as any[]).filter((entry) => entry.name === fixture.promotedNpcName)).toHaveLength(1);
 
     await page.route('**/api/dialogue', async (route) => {
-      const result = await runDialogue(fixture.admin, fixture.userId, route.request().postDataJSON(), fixtureProvider());
+      const result = await runDialogue(fixture.admin, fixture.userId, route.request().postDataJSON(), fixtureProvider(), { promptRegistry });
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
     });
     await page.getByText(fixture.promotedNpcName, { exact: true }).first().click();

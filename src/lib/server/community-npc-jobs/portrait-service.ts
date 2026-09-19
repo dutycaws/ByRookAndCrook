@@ -19,6 +19,7 @@ import {
   claimPortraitGenerationAttempt, runPortraitGenerationAttempt,
   type PortraitAttemptOutcome, type PortraitBatchOutcome, type PortraitWorkerClient
 } from '$lib/server/community-npc-portraits/service';
+import { promptRegistryService } from '$lib/server/prompt-registry/service';
 
 /** Legacy bridge input retained while callers migrate from inline execution. */
 export type DispatchPortraitJob = { jobId: string; npcId: string; sheet: NpcSheet; controls: Partial<PortraitControls>; alternatives?: number; visualInputHash: string };
@@ -112,7 +113,7 @@ export async function drainPortraitGenerationQueue(limit = 8): Promise<PortraitA
     const attempt = await claimPortraitGenerationAttempt(client as unknown as PortraitWorkerClient);
     if (!attempt) break;
     outcomes.push(await runPortraitGenerationAttempt(client as unknown as PortraitWorkerClient, attempt, {
-      config, storage: client.storage as unknown as PrivatePortraitStorage
+      config, storage: client.storage as unknown as PrivatePortraitStorage, promptRegistry: promptRegistryService(client)
     }));
   }
   return outcomes;

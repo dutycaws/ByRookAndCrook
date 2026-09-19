@@ -4,11 +4,21 @@ import {
   CANON_SETTLEMENT_PROMPT_VERSION,
   SETTLEMENT_PROVIDER_CALL_BUDGETS,
   checkpointStageForProviderStage,
-  createSettlementProvider,
+  createSettlementProvider as createSettlementProviderBase,
   frozenCanonEventContext,
   parseFrozenCanonEventProposal,
   promptVersionForProviderStage
 } from '../../src/lib/server/evolving-world';
+import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
+import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+
+const promptRelease=fixturePromptRelease;
+function createSettlementProvider(config: Record<string,string|undefined>) {
+  const provider=createSettlementProviderBase(config);
+  return { ...provider, generate(stage: Parameters<typeof provider.generate>[0], payload: unknown, signal: AbortSignal) {
+    return provider.generate(stage,payload,signal,promptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
+  } };
+}
 
 const event=()=>({
   version:'world-canon-event-v1',kind:'world_event',templateKey:'market-day',participantEntityIds:['lira','millhaven'],

@@ -143,7 +143,7 @@ export async function createPlayableWorldFixture() {
         if (claimed === 0) break;
       }
       const supplies = await player.client.rpc('world_generated_shop_projection', { p_save_id: initial.save.id });
-      const roster = await player.client.rpc('npc_roster', { p_limit: 20, p_cursor: null, p_query: promotedNpcName });
+      const roster = await player.client.rpc('npc_roster', { p_limit: 20, p_query: promotedNpcName });
       if (!supplies.error && !roster.error && (supplies.data as any)?.catalog?.some((item: any) => item.itemKey === provisionKey)
         && (roster.data as any[])?.some((resident: any) => resident.name === promotedNpcName)) {
         completed = true;

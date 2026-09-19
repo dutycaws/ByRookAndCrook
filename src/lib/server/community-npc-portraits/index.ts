@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import sharp from 'sharp';
 import type { NpcSheet } from '$lib/game/npc-sheet';
+import { portraitIdentityAnchorInstruction, releaseImagePrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
 
 export const PORTRAIT_STYLE_VERSION = 'community-npc-portrait-sprite-v1';
 /** The Sunburst alias is the deployed default; callers may explicitly override it. */
@@ -88,18 +89,22 @@ export function referenceSetHash(references: readonly Pick<PortraitReference, 'f
   return hash(JSON.stringify([...references].map(({ filename, sha256 }) => ({ filename, sha256 })).sort((a, b) => a.filename.localeCompare(b.filename))));
 }
 
-export function lockedPortraitPrompt(sheet: NpcSheet, controls: Partial<PortraitControls>) {
+export function portraitPromptContext(sheet: NpcSheet, controls: Partial<PortraitControls>) {
   const visual = portraitVisualProjection(sheet, controls);
   return [
-    `Create one original adult NPC portrait sprite for a cozy fantasy tavern game. Role: ${visual.title}.`,
+    `Role: ${visual.title}.`,
     `Physical appearance: ${visual.physicalAppearance}. Attire: ${visual.attire}. Notable features: ${visual.notableFeatures}. Mood: ${visual.mood}.`,
     `Personality cues: ${visual.personalityCues.join(', ') || 'none supplied'}. Pose: ${visual.controls.pose}. Expression: ${visual.controls.expression}. Clothing condition: ${visual.controls.clothingCondition.replace('_', '-')}.`,
     visual.controls.optionalItem ? `Include this authored item only: ${visual.controls.optionalItem}.` : '',
-    visual.controls.compositionNote ? `Composition-only note: ${visual.controls.compositionNote}.` : '',
-    'Locked visual style: cozy high-detail painterly fantasy realism; warm amber key light, restrained golden rim light, deep timber shadows; moss, aged brass, worn leather, and unbleached linen accents; tactile hair, fabric, leather, and metal.',
-    'Create a single upright, head-to-toe adult in a three-quarter pose with a readable face, natural hands, visible feet, and a clean silhouette. Output a 1024 by 1536 RGBA PNG with a genuinely transparent background and a transparent perimeter.',
-    'No environment, floor, furniture, frame, lettering, signature, watermark, interface, extra person, or baked contact shadow. The supplied private references define rendering quality only. Do not reproduce their identity, face, body, hair, clothing, accessories, or pose. Do not default to sexualized framing, exposure, or a body type.'
+    visual.controls.compositionNote ? `Composition-only note: ${visual.controls.compositionNote}.` : ''
   ].filter(Boolean).join('\n');
+}
+
+/** Prompt bodies always arrive from a release pinned by durable work. */
+export function lockedPortraitPrompt(sheet: NpcSheet, controls: Partial<PortraitControls>, slot: string, release: PromptReleaseSnapshot) {
+  return releaseImagePrompt(release, 'image.community_portrait', {
+    portrait_context: portraitPromptContext(sheet, controls), identity_anchor_instruction: portraitIdentityAnchorInstruction(slot)
+  }).rendered;
 }
 
 export function portraitProviderAvailability(config: Record<string, string | undefined>, projectRoot = process.cwd()): PortraitProviderAvailability {
