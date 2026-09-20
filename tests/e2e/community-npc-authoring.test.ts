@@ -219,6 +219,7 @@ test('guided authoring saves a readable world and story arc across reloads', asy
     await page.getByRole('button', { name: 'Create an NPC draft' }).click();
     await expect(page).toHaveURL(/\/authoring\/npcs\/[0-9a-f-]{36}$/);
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+    await page.goto(`${page.url()}?section=sheet`);
 
     const world = page.locator('.guided-section').filter({ hasText: 'Their world and what they reveal' });
     await world.getByRole('button', { name: /Their world and what they reveal/ }).click();
@@ -254,7 +255,7 @@ test('fixture assistance and a draft-pinned sandbox persist, then become preserv
     await sendSandboxFixture(player, sandboxId, 'What would help?', 'A dry map and a promise not to rush the crossing would help more than bravado.');
 
     await signIn(page, player);
-    await page.goto(`/authoring/npcs/${npcId}`);
+    await page.goto(`/authoring/npcs/${npcId}?section=preview`);
     await expect(page.getByRole('heading', { name: 'Suggestion ready' })).toBeVisible();
     await expect(page.locator('.assistance-comparison strong').filter({ hasText: 'Current' }).first()).toBeVisible();
     await expect(page.locator('.assistance-comparison strong').filter({ hasText: 'Suggested' }).first()).toBeVisible();
@@ -282,7 +283,7 @@ test('submission history and a governed retirement request survive reload', asyn
     await prepareValidArtwork(player, npcId);
 
     await signIn(page, player);
-    await page.goto(`/authoring/npcs/${npcId}`);
+    await page.goto(`/authoring/npcs/${npcId}?section=art`);
     await expect(page.getByRole('heading', { name: 'Character sprites' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'A place to meet' })).toBeVisible();
     await expect(page.getByText('Lantern-lit tavern table', { exact: true })).toBeVisible();
@@ -299,6 +300,9 @@ test('submission history and a governed retirement request survive reload', asyn
     await expect(page.locator('.portrait-preview.checkerboard')).toBeVisible();
     await expect(page.getByText('Transparency verified')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.goto(`/authoring/npcs/${npcId}?section=preview`);
+    await expect(page.locator('.authoring-scene-preview')).toBeVisible();
+    await page.goto(`/authoring/npcs/${npcId}?section=review`);
     await page.getByRole('button', { name: 'Submit version 1' }).click();
     await expect(page.locator('main > .community-notice')).toContainText('Version 1 submitted');
     await expect(page.getByText('Version 1', { exact: true })).toBeVisible();
@@ -324,7 +328,7 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     const happy = await transparentSpritePng('#ff9800');
 
     await signIn(page, player);
-    await page.goto(`/authoring/npcs/${npcId}`);
+    await page.goto(`/authoring/npcs/${npcId}?section=art`);
     const panel = page.locator('#portrait-artwork');
     await expect(panel.getByRole('tablist', { name: 'Expression sprite slots' }).getByRole('tab')).toHaveCount(6);
     await expect(panel.getByRole('tab', { name: /^Happy/ })).toHaveAttribute('aria-disabled', 'true');
@@ -336,7 +340,9 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     await page.reload();
     await expect(panel.getByRole('tab', { name: /^Neutral selected/ })).toBeVisible();
     await expect(panel.locator('.portrait-candidate.selected')).toHaveCount(1);
+    await page.goto(`/authoring/npcs/${npcId}?section=preview`);
     await expect(page.locator('.authoring-scene-preview .scene-portrait')).toBeVisible();
+    await page.goto(`/authoring/npcs/${npcId}?section=art`);
 
     await uploadSprite(page, 'happy', happy);
     await panel.getByRole('button', { name: 'Select Happy' }).click();
@@ -347,7 +353,9 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     expect(afterHappy.selectedBySlot.happy.assetId).toBeTruthy();
     expect(afterHappy.resolvedBySlot.sad.assetId).toBe(afterHappy.selectedBySlot.neutral.assetId);
     expect(afterHappy.resolvedBySlot.sad.fallbackFrom).toBe('neutral');
+    await page.goto(`/authoring/npcs/${npcId}?section=preview`);
     await expect(page.locator('.authoring-scene-preview .scene-portrait')).toBeVisible();
+    await page.goto(`/authoring/npcs/${npcId}?section=art`);
 
     await uploadSprite(page, 'neutral', neutralTwo);
     await expect(panel.getByLabel('I understand changing Neutral clears optional selections.')).toBeVisible();
@@ -373,6 +381,7 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     expect(finalWorkspace.resolvedBySlot.leaving.assetId).toBe(finalWorkspace.selectedBySlot.neutral.assetId);
     expect(finalWorkspace.resolvedBySlot.leaving.fallbackFrom).toBe('neutral');
     await expect(panel.getByRole('tab', { name: /^Happy selected/ })).toBeVisible();
+    await page.goto(`/authoring/npcs/${npcId}?section=preview`);
     await expect(page.locator('.authoring-scene-preview .scene-portrait')).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

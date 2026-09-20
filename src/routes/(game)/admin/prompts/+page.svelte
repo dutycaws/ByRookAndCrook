@@ -1,14 +1,18 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { afterNavigate } from '$app/navigation';
+  import { page } from '$app/state';
   import type { SubmitFunction } from '@sveltejs/kit';
   import type { PageProps } from './$types';
   import PrivilegedWorkspaceNav from '$lib/components/community/PrivilegedWorkspaceNav.svelte';
+  import PrivilegedSectionNav from '$lib/components/community/PrivilegedSectionNav.svelte';
 
   type RegistryPrompt = { key: string; name: string; purpose: string; type: string; contractId: string; modelLane: string; workflow: string; revisionId: string; revision: number; contentHash: string };
   type Revision = { id: string; revision: number; body: string; contentHash: string; createdAt?: string; createdBy?: string };
   type StagedCandidate = { id: string; key: string; revision: number; warningCodes: string[] };
   type WorkflowNode = { key: string; name: string; purpose: string; type: string; modelLane: string; contractId: string; contractHash: string; dynamicData: string; templateVariables: string[] };
   type Workflow = { workflow: string; label: string; nodes: WorkflowNode[]; edges: Array<{ from: string; to: string; kind: string }> };
+  type RegistrySection = 'library' | 'release' | 'workflow' | 'ledger';
 
   let { data, form }: PageProps = $props();
   let activeView = $state<'body' | 'edit' | 'history' | 'workflow'>('body');
@@ -24,6 +28,15 @@
   let restoreLabel = $state('');
   let restoreSafetyAcknowledged = $state(false);
   let releaseDialog: HTMLDialogElement | undefined = $state();
+
+  function registrySection(value: string | null): RegistrySection {
+    return value === 'release' || value === 'workflow' || value === 'ledger' ? value : 'library';
+  }
+
+  let activeSection = $state<RegistrySection>(registrySection(page.url.searchParams.get('section')));
+  afterNavigate(({ to }) => {
+    activeSection = registrySection(to?.url.searchParams.get('section') ?? null);
+  });
 
   const summary = $derived(data.summary as Record<string, unknown>);
   const detail = $derived(data.detail as Record<string, unknown>);
@@ -47,10 +60,19 @@
   const stagedWarnings = $derived(stagedCandidates.flatMap((candidate) => candidate.warningCodes));
   const editorBytes = $derived(new TextEncoder().encode(editorBody).byteLength);
   const localTemplateError = $derived(templateError(editorBody, variables));
+  const sectionItems = $derived([
+    { id: 'library', label: 'Prompt library', description: 'Review and create immutable revisions.', href: linkFor({ section: 'library' }), count: prompts.length },
+    { id: 'release', label: 'Release tray', description: 'Review staged candidates and activate together.', href: linkFor({ section: 'release' }), count: stagedCandidates.length, status: stagedCandidates.length ? 'Staged' : undefined },
+    { id: 'workflow', label: 'Workflow explorer', description: 'Inspect code-owned prompt paths.', href: linkFor({ section: 'workflow' }), count: selectedWorkflow?.nodes.length ?? 0 },
+    { id: 'ledger', label: 'Execution ledger', description: 'Review privacy-safe execution events.', href: linkFor({ section: 'ledger' }), count: data.runs.length }
+  ]);
 
   function linkFor(params: Record<string, string | undefined>) {
-    const search = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) if (value) search.set(key, value);
+    const search = new URLSearchParams(page.url.searchParams);
+    for (const [key, value] of Object.entries(params)) {
+      if (value) search.set(key, value);
+      else search.delete(key);
+    }
     return `?${search.toString()}`;
   }
   function openEditor() { editorBody = activeBody; activeView = 'edit'; }
@@ -111,14 +133,17 @@
     <p class:community-error={form.conflict} class:community-success={!form.conflict} class="community-notice" role={form.conflict ? 'alert' : 'status'} aria-live="polite">{form.message}</p>
   {/if}
 
-  <section class="prompt-registry-workbench" aria-label="Prompt registry workspace">
+  <PrivilegedSectionNav items={sectionItems} active={activeSection} label="Prompt registry sections" />
+
+  <div class="prompt-section-mount" hidden={activeSection !== 'library'}>
+  <section class="prompt-registry-workbench prompt-section-content" aria-label="Prompt registry workspace">
     <aside class="prompt-registry-rail workspace-panel" aria-label="Prompt search and registry list">
       <div class="workspace-panel-heading"><span class="workspace-step">01</span><div><p class="eyebrow">Registered call sites</p><h2>Find a prompt</h2><p>{prompts.length} closed, code-owned prompt keys.</p></div></div>
       <label>Search prompts<input bind:value={query} placeholder="Key, purpose, workflow…" /></label>
       <fieldset class="prompt-filter-set"><legend>Filter registry</legend><label>Type<select bind:value={typeFilter}><option value="all">All prompt types</option><option value="text_system">Text system</option><option value="image_template">Image template</option></select></label><label>Status<select bind:value={statusFilter}><option value="all">All statuses</option><option value="active">Active release</option><option value="staged">Staged in this browser</option></select></label></fieldset>
       <nav class="prompt-list" aria-label="Registered prompts">
         {#each filteredPrompts as prompt (prompt.key)}
-          <a class:current={prompt.key === data.selectedKey} href={linkFor({ key: prompt.key, workflow: prompt.workflow })} aria-current={prompt.key === data.selectedKey ? 'page' : undefined}>
+          <a class:current={prompt.key === data.selectedKey} href={linkFor({ key: prompt.key, workflow: prompt.workflow, run: undefined })} aria-current={prompt.key === data.selectedKey ? 'page' : undefined}>
             <span><strong>{prompt.name}</strong><small>{prompt.key}</small></span><span class="prompt-list-meta"><small>{prompt.modelLane}</small><b>r{prompt.revision}</b>{#if staged[prompt.key]}<em>staged</em>{/if}</span>
           </a>
         {:else}<p class="workspace-empty">No registered prompts match these filters.</p>{/each}
@@ -153,11 +178,15 @@
             {#if restoreLabel}<form method="POST" action="?/restore" class="prompt-restore-form"><input type="hidden" name="expectedReleaseId" value={String(summary.activeReleaseId ?? '')} /><input type="hidden" name="restoreReleaseId" value={String(releaseHistory.find((release) => `Restore release ${String(release.releaseNumber)}` === restoreLabel)?.releaseId ?? '')} /><label>New release label<input name="label" bind:value={restoreLabel} required /></label><label>Restore reason<textarea name="reason" bind:value={restoreReason} required placeholder="Why should this historical version become the next release?"></textarea></label><label class="prompt-check"><input type="checkbox" name="acknowledgeSafety" value="true" bind:checked={restoreSafetyAcknowledged} /> I acknowledge any safety-language warnings carried by this historical release.</label><button disabled={!restoreReason.trim()}>Restore in new release</button></form>{/if}
           </section>
         {:else}
-          <section class="prompt-workflow-context"><p>This prompt belongs to <strong>{activePrompt.workflow.replaceAll('_', ' ')}</strong>. Select its workflow below to inspect the code-owned path and its branch conditions.</p><a class="primary-action" href={linkFor({ key: activePrompt.key, workflow: activePrompt.workflow, run: undefined })}>Open workflow explorer</a></section>
+          <section class="prompt-workflow-context"><p>This prompt belongs to <strong>{activePrompt.workflow.replaceAll('_', ' ')}</strong>. Select its workflow below to inspect the code-owned path and its branch conditions.</p><a class="primary-action" href={linkFor({ key: activePrompt.key, workflow: activePrompt.workflow, run: undefined, section: 'workflow' })}>Open workflow explorer</a></section>
         {/if}
       {:else}<p class="workspace-empty">The selected registered prompt is unavailable.</p>{/if}
     </section>
 
+  </section>
+  </div>
+  <div class="prompt-section-mount" hidden={activeSection !== 'release'}>
+  <section class="prompt-section-content" aria-label="Prompt release controls">
     <aside class="prompt-release-tray workspace-panel" aria-labelledby="release-tray-heading">
       <div class="workspace-panel-heading"><span class="workspace-step">03</span><div><p class="eyebrow">Atomic release</p><h2 id="release-tray-heading">Release tray</h2><p>{stagedCandidates.length ? `${stagedCandidates.length} candidate${stagedCandidates.length === 1 ? '' : 's'} staged in this browser.` : 'Create a candidate, then stage it here.'}</p></div></div>
       <p class="workspace-callout"><strong>Expected active release</strong><span>R{String(summary.releaseNumber ?? '—')} · only a matching active release can be replaced.</span></p>
@@ -173,23 +202,46 @@
       {/if}
     </aside>
   </section>
+  </div>
+  <div class="prompt-section-mount" hidden={activeSection !== 'workflow'}>
 
-  <section class="workspace-panel prompt-workflow-explorer" aria-labelledby="workflow-heading">
+  <section class="workspace-panel prompt-workflow-explorer prompt-section-content" aria-labelledby="workflow-heading">
     <div class="workspace-panel-heading"><span class="workspace-step">04</span><div><p class="eyebrow">Code-owned topology</p><h2 id="workflow-heading">Workflow explorer</h2><p>Prompt nodes open their editor. Validation, persistence, failure, and storage nodes are read-only application steps.</p></div></div>
-    <nav class="prompt-workflow-tabs" aria-label="Workflow selection">{#each data.workflows as workflow}<a aria-current={workflow.workflow === data.selectedWorkflow ? 'page' : undefined} href={linkFor({ key: data.selectedKey, workflow: workflow.workflow, run: undefined })}>{workflow.label}</a>{/each}</nav>
+    <nav class="prompt-workflow-tabs" aria-label="Workflow selection">{#each data.workflows as workflow}<a aria-current={workflow.workflow === data.selectedWorkflow ? 'page' : undefined} href={linkFor({ key: data.selectedKey, workflow: workflow.workflow, run: undefined, section: 'workflow' })}>{workflow.label}</a>{/each}</nav>
     {#if selectedWorkflow}
       <div class="prompt-workflow-graph" aria-label={`${selectedWorkflow.label} workflow graph`}>
-        <div class="prompt-graph-nodes">{#each selectedWorkflow.nodes as node (node.key)}<a class:current={node.key === data.selectedKey} class:visited={!!runEventFor(node.key)} class:failed={String(runEventFor(node.key)?.status ?? '') === 'failed'} href={linkFor({ key: node.key, workflow: selectedWorkflow.workflow, run: data.selectedRun || undefined })}><strong>{node.name}</strong><small>{node.key}</small><span>{node.modelLane} · revision {prompts.find((prompt) => prompt.key === node.key)?.revision ?? 'Legacy prompt version'}</span>{#if runEventFor(node.key)}<em>{String(runEventFor(node.key)?.status)} · attempt {String(runEventFor(node.key)?.attempt)}</em>{/if}</a>{/each}</div>
+        <div class="prompt-graph-nodes">{#each selectedWorkflow.nodes as node (node.key)}<a class:current={node.key === data.selectedKey} class:visited={!!runEventFor(node.key)} class:failed={String(runEventFor(node.key)?.status ?? '') === 'failed'} href={linkFor({ key: node.key, workflow: selectedWorkflow.workflow, run: data.selectedRun || undefined, section: 'workflow' })}><strong>{node.name}</strong><small>{node.key}</small><span>{node.modelLane} · revision {prompts.find((prompt) => prompt.key === node.key)?.revision ?? 'Legacy prompt version'}</span>{#if runEventFor(node.key)}<em>{String(runEventFor(node.key)?.status)} · attempt {String(runEventFor(node.key)?.attempt)}</em>{/if}</a>{/each}</div>
         <div class="prompt-code-nodes" aria-label="Read-only application nodes">{#each codeOnlyNodes as node (node)}<div><b>Code only</b><strong>{nodeLabel(node)}</strong><small>Validation, persistence, storage, commit, or fallback behavior remains application-owned.</small></div>{/each}</div>
         <div class="prompt-graph-edges" aria-label="Workflow transitions">{#each selectedWorkflow.edges as edge, index (`${edge.from}-${edge.to}-${index}`)}<span class={`edge-${edge.kind}`}><b>{edge.kind === 'always' ? 'Required' : edge.kind === 'conditional' ? 'Conditional' : 'Retry'}</b>{nodeLabel(edge.from)} <i>→</i> {nodeLabel(edge.to)}</span>{/each}</div>
       </div>
       <details class="prompt-workflow-outline" open><summary>Authoritative workflow sequence</summary><ol>{#each selectedWorkflow.edges as edge, index (`outline-${edge.from}-${edge.to}-${index}`)}<li><strong>{edge.kind === 'always' ? 'Required' : edge.kind === 'conditional' ? 'Conditional branch' : 'Retry path'}:</strong> {nodeLabel(edge.from)} → {nodeLabel(edge.to)}{#if edge.kind === 'conditional'} when the code-owned validation or workflow condition permits it.{:else if edge.kind === 'retry'} when the bounded retry condition is met.{:else}.{/if}</li>{/each}</ol></details>
     {/if}
   </section>
+  </div>
+  <div class="prompt-section-mount" hidden={activeSection !== 'ledger'}>
 
-  <section class="workspace-panel prompt-execution-ledger" aria-labelledby="ledger-heading">
+  <section class="workspace-panel prompt-execution-ledger prompt-section-content" aria-labelledby="ledger-heading">
     <div class="workspace-panel-heading"><span class="workspace-step">05</span><div><p class="eyebrow">Privacy-safe operations</p><h2 id="ledger-heading">Recent execution ledger</h2><p>Showing up to 20 of at most 50 retained runs for this workflow. This ledger excludes prompt text, dynamic game data, outputs, private reasoning, provider errors, credentials, and storage references.</p></div></div>
-    <div class="prompt-ledger-list">{#each data.runs as run (String(run.executionId) + ':' + String(run.attempt) + ':' + String(run.node))}<a class:selected={String(run.executionId) === data.selectedRun} href={linkFor({ key: data.selectedKey, workflow: data.selectedWorkflow, run: String(run.executionId) })}><span><strong>{String(run.status)}</strong><small>{String(run.promptKey)} · {String(run.node)}</small></span><span><small>{String(run.model ?? 'Model unavailable')}</small><small>{run.durationMs === null || run.durationMs === undefined ? '—' : `${String(run.durationMs)} ms`}</small></span></a>{:else}<p class="workspace-empty">No safe execution events are available for this workflow.</p>{/each}</div>
+    <div class="prompt-ledger-list">{#each data.runs as run, runIndex (String(run.executionId) + ':' + String(run.attempt) + ':' + String(run.node) + ':' + runIndex)}<a class:selected={String(run.executionId) === data.selectedRun} href={linkFor({ key: data.selectedKey, workflow: data.selectedWorkflow, run: String(run.executionId), section: 'ledger' })}><span><strong>{String(run.status)}</strong><small>{String(run.promptKey)} · {String(run.node)}</small></span><span><small>{String(run.model ?? 'Model unavailable')}</small><small>{run.durationMs === null || run.durationMs === undefined ? '—' : `${String(run.durationMs)} ms`}</small></span></a>{:else}<p class="workspace-empty">No safe execution events are available for this workflow.</p>{/each}</div>
     {#if selectedRun}<aside class="prompt-run-overlay" aria-live="polite"><strong>Selected safe run overlay · {selectedRunEvents.length} visited event{selectedRunEvents.length === 1 ? '' : 's'}</strong><dl><div><dt>Opaque ID</dt><dd><code>{String(selectedRun.executionId)}</code></dd></div><div><dt>Release / revision</dt><dd><code>{String(selectedRun.releaseId)}</code> / <code>{String(selectedRun.revisionId)}</code></dd></div><div><dt>Model</dt><dd>{String(selectedRun.model ?? 'Not recorded')}</dd></div><div><dt>Tokens</dt><dd>{String(selectedRun.inputTokens ?? '—')} in · {String(selectedRun.outputTokens ?? '—')} out</dd></div><div><dt>Result</dt><dd>{String(selectedRun.status)}{selectedRun.errorCode ? ` · ${String(selectedRun.errorCode)}` : ''}</dd></div></dl><ol>{#each selectedRunEvents as event}<li><code>{String(event.node)}</code> — {String(event.status)}, attempt {String(event.attempt)}</li>{/each}</ol></aside>{/if}
   </section>
+  </div>
 </main>
+
+<style>
+  .prompt-section-content {
+    min-width: 0;
+  }
+
+  @media (max-width: 44rem) {
+    .prompt-section-content :global(.workspace-panel-heading) {
+      align-items: flex-start;
+    }
+
+    .prompt-section-content :global(.prompt-view-controls),
+    .prompt-section-content :global(.prompt-workflow-tabs) {
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+  }
+</style>

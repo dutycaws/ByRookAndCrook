@@ -33,6 +33,14 @@ async function signIn(page: Page, player: Awaited<ReturnType<typeof createTestPl
   await expect(page).toHaveURL(/\/garden$/);
 }
 
+async function openRegistrySection(page: Page, section: 'library' | 'release' | 'workflow' | 'ledger') {
+  const nav = page.getByRole('navigation', { name: 'Prompt registry sections' });
+  const selector = `a[href*="section=${section}"]:visible`;
+  if (!(await nav.locator(selector).count())) await nav.locator('summary').click();
+  await nav.locator(selector).click();
+  await expect(page).toHaveURL(new RegExp(`[?&]section=${section}(?:&|$)`));
+}
+
 test('a prompt manager sees all registered prompts, their workflow outline, and can stage a candidate without a model call', async ({ page }) => {
   const player = await createPromptManager();
   try {
@@ -42,11 +50,19 @@ test('a prompt manager sees all registered prompts, their workflow outline, and 
     await page.getByRole('link', { name: 'Prompt registry' }).click();
     await expect(page).toHaveURL(/\/admin\/prompts/);
     await expect(page.getByRole('heading', { name: 'Prompt registry' })).toBeVisible();
+    const workspaceNav = page.getByRole('navigation', { name: 'Privileged workspaces' });
+    if ((page.viewportSize()?.width ?? 1280) < 900) await workspaceNav.locator('summary').click();
+    await expect(workspaceNav.locator('a:visible')).toHaveCount(1);
+    await expect(workspaceNav.locator('a:visible')).toContainText('Prompt registry');
+    await expect(workspaceNav.getByRole('link', { name: /Creator studio/ })).toHaveCount(0);
+    await expect(workspaceNav.getByRole('link', { name: /Review desk/ })).toHaveCount(0);
     await expect(page.locator('.prompt-list a')).toHaveCount(26);
     await expect(page.locator('.prompt-list')).toContainText('dialogue.investigate');
     await expect(page.locator('.prompt-list')).toContainText('image.runtime_art');
+    await openRegistrySection(page, 'workflow');
     await expect(page.getByText('Authoritative workflow sequence')).toBeVisible();
     await expect(page.locator('.prompt-workflow-outline')).toContainText('Dialogue investigation');
+    await openRegistrySection(page, 'library');
     await expect(page.getByText('Code-owned boundary:')).toBeVisible();
 
     await page.getByRole('button', { name: 'Create revision' }).click();
@@ -57,8 +73,10 @@ test('a prompt manager sees all registered prompts, their workflow outline, and 
     await page.getByLabel('Change note').fill('Exercise the immutable candidate and release-tray path without dispatching any model work.');
     await page.getByRole('button', { name: 'Create candidate revision' }).click();
     await expect(page.locator('.community-notice')).toContainText('Candidate revision created');
+    await openRegistrySection(page, 'release');
     await expect(page.locator('.prompt-staged-list')).toContainText('dialogue.investigate');
     await expect(page.locator('.prompt-release-tray')).toContainText('Expected active release');
+    await openRegistrySection(page, 'ledger');
     await expect(page.locator('.prompt-execution-ledger')).toContainText('This ledger excludes prompt text');
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

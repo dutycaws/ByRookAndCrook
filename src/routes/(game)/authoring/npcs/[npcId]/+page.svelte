@@ -10,7 +10,8 @@
   import HistoryPanel from '$lib/components/community/HistoryPanel.svelte';
   import RetirementPanel from '$lib/components/community/RetirementPanel.svelte';
   import PrivilegedWorkspaceNav from '$lib/components/community/PrivilegedWorkspaceNav.svelte';
-  import { onMount } from 'svelte';
+  import PrivilegedSectionNav from '$lib/components/community/PrivilegedSectionNav.svelte';
+  import { page } from '$app/state';
 
   let { data, form }: PageProps = $props();
   let detail = $derived(data.detail as AuthoringWorkspaceDetail);
@@ -37,23 +38,16 @@
     : !detail.capabilities.canSubmit
       ? 'Submission unavailable'
       : 'Ready for review');
-  let activeStep = $state('draft-editor');
-
-  onMount(() => {
-    const targets = ['draft-editor', 'portrait-artwork', 'setting-library', 'scene-preview', 'assistance-heading', 'sandbox-heading', 'history-heading']
-      .map((id) => document.getElementById(id))
-      .filter((target): target is HTMLElement => target !== null);
-    if (!('IntersectionObserver' in window) || !targets.length) return;
-
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (visible?.target instanceof HTMLElement) activeStep = visible.target.id;
-    }, { rootMargin: '-18% 0px -58% 0px', threshold: [0.1, 0.4, 0.7] });
-    targets.forEach((target) => observer.observe(target));
-    return () => observer.disconnect();
-  });
+  const sectionIds = ['overview', 'sheet', 'art', 'preview', 'review'] as const;
+  type SectionId = typeof sectionIds[number];
+  const activeSection = $derived((sectionIds.includes(page.url.searchParams.get('section') as SectionId) ? page.url.searchParams.get('section') : 'overview') as SectionId);
+  const sectionItems = $derived([
+    { id: 'overview', label: 'Overview', description: 'Readiness and next steps', href: '?section=overview', status: readinessLabel },
+    { id: 'sheet', label: 'Sheet', description: 'Identity, story, and mechanics', href: '?section=sheet', count: detail.preflight.length },
+    { id: 'art', label: 'Art', description: 'Sprites and setting', href: '?section=art', count: portrait.candidates.length },
+    { id: 'preview', label: 'Preview', description: 'Scene, assistance, and sandbox', href: '?section=preview' },
+    { id: 'review', label: 'Review', description: 'Submission and history', href: '?section=review', count: detail.preflight.length, status: detail.capabilities.canSubmit ? 'Available' : 'Unavailable' }
+  ]);
 </script>
 
 <main class="page-shell community-page authoring-workspace">
@@ -72,52 +66,48 @@
     <div class:community-error={form.conflict} class:community-success={!form.conflict} class="community-notice" role={form.conflict ? 'alert' : 'status'} aria-live="polite">{form.message}</div>
   {/if}
 
-  <section class="workspace-readiness" aria-label="Draft readiness">
+  <PrivilegedSectionNav items={sectionItems} active={activeSection} label="Creator studio sections" />
+
+  <section class="workspace-readiness authoring-section" aria-label="Draft readiness" hidden={activeSection !== 'overview'}>
     <div>
       <p class="eyebrow">Draft readiness</p>
       <strong>{readinessLabel}</strong>
     </div>
     <p>{detail.preflight.length ? 'Resolve the listed requirements before submitting a review version.' : detail.capabilities.canSubmit ? 'This draft can be submitted as an immutable review version.' : detail.capabilities.reasons.submit ?? 'This draft cannot be submitted right now.'}</p>
     {#if detail.preflight.length}
-      <a href="#history-heading">View {detail.preflight.length === 1 ? 'requirement' : 'requirements'}</a>
+      <a href="?section=review">View {detail.preflight.length === 1 ? 'requirement' : 'requirements'}</a>
     {/if}
   </section>
 
-  <nav class="workspace-stepper" aria-label="Authoring steps">
-    <a href="#draft-editor" aria-current={activeStep === 'draft-editor' ? 'step' : undefined}><span>01</span> Shape the companion</a>
-    <a href="#portrait-artwork" aria-current={activeStep === 'portrait-artwork' ? 'step' : undefined}><span>02</span> Create artwork</a>
-    <a href="#setting-library" aria-current={activeStep === 'setting-library' ? 'step' : undefined}><span>03</span> Choose a setting</a>
-    <a href="#scene-preview" aria-current={activeStep === 'scene-preview' ? 'step' : undefined}><span>04</span> Preview the scene</a>
-    <a href="#assistance-heading" aria-current={activeStep === 'assistance-heading' ? 'step' : undefined}><span>05</span> Optional assistance</a>
-    <a href="#sandbox-heading" aria-current={activeStep === 'sandbox-heading' ? 'step' : undefined}><span>06</span> Optional sandbox</a>
-    <a href="#history-heading" aria-current={activeStep === 'history-heading' ? 'step' : undefined}><span>07</span> Submit for review</a>
-  </nav>
-
-  <section class="workspace-intro" aria-label="How this workspace works">
+  <section class="workspace-intro authoring-section" aria-label="How this workspace works" hidden={activeSection !== 'overview'}>
     <div><p class="eyebrow">A calm way to author</p><h2>Build a person players will remember.</h2><p>Describe who they are, give them a place in the world, and test their voice before review. Every meaningful change is saved as a protected draft revision.</p></div>
     <ol><li><strong>Shape</strong><span>Write the authored truth.</span></li><li><strong>Optional</strong><span>Use assistance or a private sandbox when useful.</span></li><li><strong>Submit</strong><span>Freeze a version when it is ready for review.</span></li></ol>
   </section>
 
-  <section id="draft-editor" class="workspace-editor-region" aria-label="NPC draft editor">
-    <div class="workspace-region-heading"><span class="workspace-step">01</span><div><p class="eyebrow">Shape the companion</p><h2>Author the draft</h2><p>The details below are the canonical source for this companion. Clear writing gives scenes, dialogue, and consequences a shared foundation.</p></div></div>
-    <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))}>
+  <section id="draft-editor" class="workspace-editor-region authoring-section" class:artwork-editor-region={activeSection === 'art'} aria-label="NPC draft editor" hidden={activeSection !== 'sheet' && activeSection !== 'art'}>
+    <div class="workspace-region-heading" hidden={activeSection !== 'sheet'}><span class="workspace-step">01</span><div><p class="eyebrow">Shape the companion</p><h2>Author the draft</h2><p>The details below are the canonical source for this companion. Clear writing gives scenes, dialogue, and consequences a shared foundation.</p></div></div>
+    <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))} showSheet={activeSection === 'sheet'} showArtwork={activeSection === 'art'}>
       <PortraitPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {portrait} npcId={detail.npcId} visualSummary={portraitSummary} itemOptions={portraitItemOptions} />
     </NpcSheetEditor>
   </section>
 
-  <SettingPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {settings} />
+  <div class="authoring-section" hidden={activeSection !== 'art'}>
+    <SettingPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {settings} />
+  </div>
 
-  <AuthoringScenePreview
-    npcName={detail.draft.sheet.identity.name || 'This companion'}
-    portrait={selectedPortrait ? { previewUrl: selectedPortrait.previewUrl, altText: selectedPortrait.altText } : null}
-    setting={selectedSetting ? { previewUrl: selectedSetting.previewUrl, altText: selectedSetting.altText, name: selectedSetting.name } : null}
-  />
+  <div class="authoring-section preview-section" hidden={activeSection !== 'preview'}>
+    <AuthoringScenePreview
+      npcName={detail.draft.sheet.identity.name || 'This companion'}
+      portrait={selectedPortrait ? { previewUrl: selectedPortrait.previewUrl, altText: selectedPortrait.altText } : null}
+      setting={selectedSetting ? { previewUrl: selectedSetting.previewUrl, altText: selectedSetting.altText, name: selectedSetting.name } : null}
+    />
 
-  <AssistancePanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.assistance} assistance={detail.assistance} quota={detail.quota.assistanceDaily} />
+    <AssistancePanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.assistance} assistance={detail.assistance} quota={detail.quota.assistanceDaily} />
 
-  <SandboxPanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.sandbox} sandbox={detail.sandbox} quota={detail.quota.sandboxDaily} />
+    <SandboxPanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.sandbox} sandbox={detail.sandbox} quota={detail.quota.sandboxDaily} />
+  </div>
 
-  <div class="workspace-columns review-columns">
+  <div class="workspace-columns review-columns authoring-section" hidden={activeSection !== 'review'}>
     <HistoryPanel revision={detail.draft.revision} versions={detail.versions} preflight={detail.preflight} capability={detail.capabilities} />
     <RetirementPanel capability={detail.capabilities} retirement={detail.retirement} />
   </div>
@@ -129,6 +119,8 @@
   .workspace-readiness .eyebrow { margin-bottom: .15rem; }
   .workspace-readiness strong { color: var(--gold-bright); font-family: 'Cinzel', serif; }
   .workspace-readiness a { color: #f0d383; }
-  .workspace-stepper a[aria-current='step'] { border-color: #d6a845; color: #ffe1a2; background: #2b1d09; box-shadow: inset 0 0 0 1px rgb(255 225 162 / .12); }
+  .authoring-section { min-width: 0; }
+  .artwork-editor-region { padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .preview-section { display: grid; gap: 1.2rem; }
   @media (max-width: 700px) { .workspace-readiness { grid-template-columns: 1fr; } }
 </style>
