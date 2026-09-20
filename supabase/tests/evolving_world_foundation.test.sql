@@ -1,14 +1,28 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(42);
+select plan(43);
 
 insert into auth.users(id,email,role,aud) values
  ('17100000-0000-4000-8000-000000000001','world-owner@example.test','authenticated','authenticated');
 insert into public.tavern_saves(id,user_id) values ('17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000001');
-insert into private.world_npc_instances(id,save_id,npc_id,version_id,arrived_day)
-values ('17100000-0000-4000-8000-000000000020','17100000-0000-4000-8000-000000000010','18181818-1818-4181-8181-181818181818','18181818-1818-4181-8181-181818181819',1);
-insert into private.world_npc_instances(id,save_id,npc_id,version_id,arrived_day)
-values ('17100000-0000-4000-8000-000000000022','17100000-0000-4000-8000-000000000010','28282828-2828-4282-8282-282828282828','28282828-2828-4282-8282-282828282829',1);
+-- New residents must be materialized from their exact immutable V2 package.
+-- The fixture deliberately keeps generated instance IDs opaque.
+create temporary table pg_temp.residents as
+select * from private.world_materialize_resident_from_version(
+  '17100000-0000-4000-8000-000000000010',
+  '18181818-1818-4181-8181-181818181818',
+  '18181818-1818-4181-8181-181818181819',1)
+union all
+select * from private.world_materialize_resident_from_version(
+  '17100000-0000-4000-8000-000000000010',
+  '28282828-2828-4282-8282-282828282828',
+  '28282828-2828-4282-8282-282828282829',1);
+create function pg_temp.lira_instance() returns uuid language sql stable as $$
+  select instance_id from pg_temp.residents where version_id='18181818-1818-4181-8181-181818181819'
+$$;
+create function pg_temp.torvin_instance() returns uuid language sql stable as $$
+  select instance_id from pg_temp.residents where version_id='28282828-2828-4282-8282-282828282829'
+$$;
 
 select ok(not has_table_privilege('authenticated','private.world_canonical_entities','select'),'canonical world entities are private');
 select ok(not has_table_privilege('authenticated','private.world_settlements','select'),'settlement internals are private');
@@ -25,31 +39,32 @@ select throws_ok($$update private.world_canonical_entity_history set event_kind=
 select throws_ok($$update private.world_canonical_entities set payload='{"rewritten":true}' where entity_key='old-road'$$,'55000',null,'canonical payload cannot be rewritten outside an append-only revision path');
 select throws_ok($$delete from private.world_canonical_entities where entity_key='old-road'$$,'55000',null,'canonical entities cannot be deleted with their history');
 
-select is((select version_id from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'18181818-1818-4181-8181-181818181819'::uuid,'resident profile backfill pins immutable NPC version');
-select is((select profile_schema_version from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'personality-schema-v1','pilot resident backfill installs the current typed personality schema');
-select ok((select current_profile ? 'dimensions' and current_profile ? 'entries' and public_disposition ? 'name' from private.world_resident_profiles where instance_id='17100000-0000-4000-8000-000000000020'),'typed current profile and bounded public disposition remain separate from frozen source pins');
-insert into private.world_resident_personality_ledger(instance_id,profile_revision,receipt_key,delta) values ('17100000-0000-4000-8000-000000000020',1,'17100000-0000-4000-8000-000000000021','{"caution":2}');
+select is((select version_id from private.world_resident_profiles where instance_id=pg_temp.lira_instance()),'18181818-1818-4181-8181-181818181819'::uuid,'materialized resident profile pins immutable NPC version');
+select is((select profile_schema_version from private.world_resident_profiles where instance_id=pg_temp.lira_instance()),'personality-schema-v1','materializer installs the package personality schema');
+select ok((select current_profile ? 'dimensions' and current_profile ? 'entries' and public_disposition ? 'name' from private.world_resident_profiles where instance_id=pg_temp.lira_instance()),'package-derived current profile and bounded public disposition remain separate from frozen source pins');
+select ok(exists(select 1 from private.world_resident_package_pins pin join pg_temp.residents resident on resident.instance_id=pin.instance_id where pin.package_id=resident.package_id and pin.package_hash=resident.package_hash),'materialization persists an exact immutable package pin');
+insert into private.world_resident_personality_ledger(instance_id,profile_revision,receipt_key,delta) values (pg_temp.lira_instance(),1,'17100000-0000-4000-8000-000000000021','{"caution":2}');
 select throws_ok($$delete from private.world_resident_personality_ledger$$,'55000',null,'personality ledger is append-only');
-select throws_ok($$update private.world_resident_profiles set current_profile='{"changed":true}' where instance_id='17100000-0000-4000-8000-000000000020'$$,'55000',null,'profile state cannot change without a receipt-backed revision');
-insert into private.world_resident_beliefs(instance_id,fingerprint,statement,confidence,provenance) values ('17100000-0000-4000-8000-000000000020','oldroadv1','The old road is dangerous.',70,'authored');
-select throws_ok($$insert into private.world_resident_beliefs(instance_id,fingerprint,statement,confidence,provenance) values ('17100000-0000-4000-8000-000000000020','oldroadv1','Duplicate belief.',60,'event')$$,null,null,'one active belief fingerprint exists per resident');
+select throws_ok($$update private.world_resident_profiles set current_profile='{"changed":true}' where instance_id=pg_temp.lira_instance()$$,'55000',null,'profile state cannot change without a receipt-backed revision');
+insert into private.world_resident_beliefs(instance_id,fingerprint,statement,confidence,provenance) values (pg_temp.lira_instance(),'oldroadv1','The old road is dangerous.',70,'authored');
+select throws_ok($$insert into private.world_resident_beliefs(instance_id,fingerprint,statement,confidence,provenance) values (pg_temp.lira_instance(),'oldroadv1','Duplicate belief.',60,'event')$$,null,null,'one active belief fingerprint exists per resident');
 insert into private.world_resident_belief_history(belief_id,event_kind) select id,'retired' from private.world_resident_beliefs where fingerprint='oldroadv1';
 select lives_ok($$update private.world_resident_beliefs set active=false,contradiction_status='retracted',retired_at=clock_timestamp() where fingerprint='oldroadv1'$$,'beliefs support a controlled retraction after append-only history');
 insert into private.world_social_edges(save_id,from_instance_id,to_instance_id,trust,affection,respect,fear,obligation) values
- ('17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000020',(select id from private.world_npc_instances where save_id='17100000-0000-4000-8000-000000000010' and id<>'17100000-0000-4000-8000-000000000020' limit 1),10,0,20,-10,5);
+ ('17100000-0000-4000-8000-000000000010',pg_temp.lira_instance(),pg_temp.torvin_instance(),10,0,20,-10,5);
 select ok((select trust=10 and fear=-10 from private.world_social_edges limit 1),'directed social edges preserve bounded relationship dimensions');
 
 insert into private.world_procedural_quests(save_id,instance_id,primitive_key,input_fingerprint,payload,started_day) values
- ('17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000020','scout-route','quest-input-v1','{}',1);
-select throws_ok($$insert into private.world_procedural_quests(save_id,instance_id,primitive_key,input_fingerprint,payload,started_day) values ('17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000020','duplicate','x','{}',1)$$,null,null,'one active procedural quest exists per resident');
+ ('17100000-0000-4000-8000-000000000010',pg_temp.lira_instance(),'scout-route','quest-input-v1','{}',1);
+select throws_ok($$insert into private.world_procedural_quests(save_id,instance_id,primitive_key,input_fingerprint,payload,started_day) values ('17100000-0000-4000-8000-000000000010',pg_temp.lira_instance(),'duplicate','x','{}',1)$$,null,null,'one active procedural quest exists per resident');
 select throws_ok($$insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint) values ('17100000-0000-4000-8000-000000000010','permanent-loss','irreversible','pending',false,'effect-v1')$$,null,null,'irreversible effects require approved critic and public full-day validation');
 insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint) values ('17100000-0000-4000-8000-000000000010','permanent-loss','irreversible','approved',true,'effect-v1');
 select is((select capability from private.world_effect_receipts where effect_key='permanent-loss'),'irreversible','validated irreversible effect receipt can be recorded');
 select throws_ok($$insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint,committed_at) values ('17100000-0000-4000-8000-000000000010','bypass-loss','irreversible','approved',true,'effect-bypass',clock_timestamp())$$,'23514',null,'caller-supplied critic flags cannot commit an irreversible effect without immutable capability and warning proof');
 update public.tavern_saves set current_day=2 where id='17100000-0000-4000-8000-000000000010';
-insert into private.world_effect_warnings(id,save_id,target_instance_id,warning_key,visible_day) values ('17100000-0000-4000-8000-000000000023','17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000020','loss-warning',1);
-insert into private.world_irreversible_capabilities(id,save_id,target_instance_id,capability_key,critic_approved,immutable_at) values ('17100000-0000-4000-8000-000000000024','17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000020','loss-v1',true,clock_timestamp());
-insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint,target_instance_id,capability_id,warning_id,committed_at) values ('17100000-0000-4000-8000-000000000010','proved-loss','irreversible','approved',true,'effect-proved','17100000-0000-4000-8000-000000000020','17100000-0000-4000-8000-000000000024','17100000-0000-4000-8000-000000000023',clock_timestamp());
+insert into private.world_effect_warnings(id,save_id,target_instance_id,warning_key,visible_day) values ('17100000-0000-4000-8000-000000000023','17100000-0000-4000-8000-000000000010',pg_temp.lira_instance(),'loss-warning',1);
+insert into private.world_irreversible_capabilities(id,save_id,target_instance_id,capability_key,critic_approved,immutable_at) values ('17100000-0000-4000-8000-000000000024','17100000-0000-4000-8000-000000000010',pg_temp.lira_instance(),'loss-v1',true,clock_timestamp());
+insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint,target_instance_id,capability_id,warning_id,committed_at) values ('17100000-0000-4000-8000-000000000010','proved-loss','irreversible','approved',true,'effect-proved',pg_temp.lira_instance(),'17100000-0000-4000-8000-000000000024','17100000-0000-4000-8000-000000000023',clock_timestamp());
 select throws_ok($$update private.world_irreversible_capabilities set critic_approved=false where id='17100000-0000-4000-8000-000000000024'$$,'55000',null,'immutable capability approval cannot be toggled after it is pinned');
 insert into private.world_effect_receipts(save_id,effect_key,capability,input_fingerprint) values ('17100000-0000-4000-8000-000000000010','repeatable-rumor','reversible','rumor-1'),('17100000-0000-4000-8000-000000000010','repeatable-rumor','reversible','rumor-2');
 select is((select count(*) from private.world_effect_receipts where effect_key='repeatable-rumor'),2::bigint,'same registered effect type may recur with a new causal fingerprint');
@@ -100,12 +115,19 @@ select is((select world_phase from public.tavern_saves where id='17100000-0000-4
 
 insert into auth.users(id,email,role,aud) values ('17100000-0000-4000-8000-000000000002','world-other@example.test','authenticated','authenticated');
 insert into public.tavern_saves(id,user_id) values ('17100000-0000-4000-8000-000000000060','17100000-0000-4000-8000-000000000002');
-insert into private.world_npc_instances(id,save_id,npc_id,version_id,arrived_day) values ('17100000-0000-4000-8000-000000000061','17100000-0000-4000-8000-000000000060','18181818-1818-4181-8181-181818181818','18181818-1818-4181-8181-181818181819',1);
-select throws_ok($$insert into private.world_social_edges(save_id,from_instance_id,to_instance_id) values ('17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000020','17100000-0000-4000-8000-000000000061')$$,'23514',null,'directed social edges reject cross-save residents');
-select throws_ok($$insert into private.world_irreversible_capabilities(save_id,target_instance_id,capability_key) values ('17100000-0000-4000-8000-000000000010','17100000-0000-4000-8000-000000000061','cross-save-capability')$$,'23514',null,'irreversible capability rejects a target from another save');
-insert into private.world_effect_warnings(id,save_id,target_instance_id,warning_key,visible_day) values ('17100000-0000-4000-8000-000000000062','17100000-0000-4000-8000-000000000060','17100000-0000-4000-8000-000000000061','other-warning',1);
-insert into private.world_irreversible_capabilities(id,save_id,target_instance_id,capability_key,critic_approved,immutable_at) values ('17100000-0000-4000-8000-000000000063','17100000-0000-4000-8000-000000000060','17100000-0000-4000-8000-000000000061','other-loss-v1',true,clock_timestamp());
-select throws_ok($$insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint,target_instance_id,capability_id,warning_id,committed_at) values ('17100000-0000-4000-8000-000000000010','cross-save-receipt','irreversible','approved',true,'cross-save-effect','17100000-0000-4000-8000-000000000020','17100000-0000-4000-8000-000000000063','17100000-0000-4000-8000-000000000062',clock_timestamp())$$,'23514',null,'irreversible receipt cannot combine capability or warning from another save');
+create temporary table pg_temp.other_resident as
+select * from private.world_materialize_resident_from_version(
+  '17100000-0000-4000-8000-000000000060',
+  '18181818-1818-4181-8181-181818181818',
+  '18181818-1818-4181-8181-181818181819',1);
+create function pg_temp.other_lira_instance() returns uuid language sql stable as $$
+  select instance_id from pg_temp.other_resident
+$$;
+select throws_ok($$insert into private.world_social_edges(save_id,from_instance_id,to_instance_id) values ('17100000-0000-4000-8000-000000000010',pg_temp.lira_instance(),pg_temp.other_lira_instance())$$,'23514',null,'directed social edges reject cross-save residents');
+select throws_ok($$insert into private.world_irreversible_capabilities(save_id,target_instance_id,capability_key) values ('17100000-0000-4000-8000-000000000010',pg_temp.other_lira_instance(),'cross-save-capability')$$,'23514',null,'irreversible capability rejects a target from another save');
+insert into private.world_effect_warnings(id,save_id,target_instance_id,warning_key,visible_day) values ('17100000-0000-4000-8000-000000000062','17100000-0000-4000-8000-000000000060',pg_temp.other_lira_instance(),'other-warning',1);
+insert into private.world_irreversible_capabilities(id,save_id,target_instance_id,capability_key,critic_approved,immutable_at) values ('17100000-0000-4000-8000-000000000063','17100000-0000-4000-8000-000000000060',pg_temp.other_lira_instance(),'other-loss-v1',true,clock_timestamp());
+select throws_ok($$insert into private.world_effect_receipts(save_id,effect_key,capability,critic_status,public_full_day,input_fingerprint,target_instance_id,capability_id,warning_id,committed_at) values ('17100000-0000-4000-8000-000000000010','cross-save-receipt','irreversible','approved',true,'cross-save-effect',pg_temp.lira_instance(),'17100000-0000-4000-8000-000000000063','17100000-0000-4000-8000-000000000062',clock_timestamp())$$,'23514',null,'irreversible receipt cannot combine capability or warning from another save');
 
 select * from finish();
 rollback;

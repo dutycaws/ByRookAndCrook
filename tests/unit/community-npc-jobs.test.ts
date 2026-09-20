@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NpcSheet } from '$lib/game/npc-sheet';
+import { createNpcSheet } from '$lib/game/community-npc-ui';
 import { localScenePublicUrl, localSettingPublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { authoringProviderAvailability, runAuthoringJob, runLocalAuthoringJob, runLocalNpcEvaluation, type CompletionClient } from '$lib/server/community-npc-jobs/runner';
 import { createAuthoringProvider, type AuthoringProvider } from '$lib/server/community-npc-jobs/provider';
@@ -9,18 +10,14 @@ const promptRelease = fixturePromptRelease;
 const authoringRuntime = <T extends Record<string, unknown>>(runtime: T) => ({ ...runtime, promptRelease });
 
 function sheet(): NpcSheet {
-  return {
-    schemaVersion: 'npc-sheet-v1', rating: 'standard',
-    identity: { name: 'Mara Reed', title: 'Roadside Scout', shortDescription: 'A patient local scout who watches the old road for stranded travelers.', voice: 'Plain-spoken, observant, and careful with every promise she makes.' },
-    appearance: { physicalAppearance: 'A wiry traveler with wind-burned cheeks and steady grey eyes.', attire: 'A weathered green cloak over practical road leathers and worn boots.', notableFeatures: 'A small brass compass hangs beside a field notebook at her belt.', mood: 'Alert in crowds, at ease outdoors, and quietly amused by tavern boasting.' },
-    personality: { values: ['Reliable evidence'], likes: ['Quiet roads'], dislikes: ['Careless accusations'], boundaries: ['Will not endanger civilians'] },
-    lore: { entities: [{ id: 'old-road', namespace: 'millhaven', name: 'Old Road', description: 'The wooded trade road east of Millhaven.' }], npcReferences: [], relationships: [{ subject: { kind: 'entity', entityId: 'old-road' }, description: 'Knows its hidden paths.', trustThreshold: 0 }], facts: [{ id: 'first-patrol', category: 'history', text: 'Mara learned the road while carrying messages as a child.', trustThreshold: 25, entityRefs: ['old-road'], npcRefs: [] }] },
-    skills: { scouting: 4, combat: 3, diplomacy: 2, trade: 1 },
-    campaign: { durableGoal: 'Keep travel between Millhaven and its neighbors safe and dependable.', milestones: [
-      { id: 'map-road', title: 'Map the Old Road', outcome: 'Identify every unsafe stretch of the old road.', motivation: 'Travelers need a dependable map before anyone can secure the route.', constraints: ['Protect uninvolved travelers'], allowedTargets: ['old-road'], difficulty: 2, successNews: 'Mara returns with a reliable map of the old road and its hazards.', nonSuccessNews: 'Mara loses the trail, and the dangerous stretches remain unmapped.', retiredTargets: [], permanentLoss: null, startingPlan: [{ action: 'prepare', approach: 'scouting' }, { action: 'attempt', approach: 'scouting' }] },
-      { id: 'secure-road', title: 'Secure the Route', outcome: 'Establish a lasting patrol along the old road.', motivation: 'A map only matters if someone uses it to keep travelers safe.', constraints: ['Work with local people'], allowedTargets: ['old-road'], difficulty: 3, successNews: 'A lasting patrol now keeps watch along the old road.', nonSuccessNews: 'The proposed patrol dissolves before it can secure the route.', retiredTargets: [], permanentLoss: null, startingPlan: null }
-    ] }
+  const value = createNpcSheet('Mara Reed');
+  value.identity = {
+    name: 'Mara Reed',
+    title: 'Roadside Scout',
+    shortDescription: 'A patient local scout who watches the old road for stranded travelers.',
+    voice: 'Plain-spoken, observant, and careful with every promise she makes.'
   };
+  return value;
 }
 function client(): { client: CompletionClient; calls: Array<{ name: string; args: Record<string, unknown> }> } {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];

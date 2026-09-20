@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(43);
+select plan(44);
 
 select has_table('private','world_generated_supply_definitions','generated supply definitions are private and durable');
 select has_table('private','world_generated_supply_stock','generated supply stock is private and durable');
@@ -31,19 +31,9 @@ alter table pg_temp.fixture add column resident_id uuid;
 update pg_temp.fixture
 set resident_id=(select id from private.world_npc_instances where save_id=pg_temp.fixture.save_id order by id limit 1);
 update public.tavern_saves set gold=100 where id=(select save_id from pg_temp.fixture);
-set local session_replication_role=replica;
-update private.world_resident_evolution_pins
-set capability=jsonb_build_object(
-  'version','capabilities-v1',
-  'allowedWorldEffects',jsonb_build_array('create_entity'),
-  'allowedActions','[]'::jsonb,
-  'allowedApproaches','[]'::jsonb,
-  'allowedTargetKinds',jsonb_build_array('item'),
-  'socialCapabilities','[]'::jsonb,
-  'irreversibleEffects','[]'::jsonb
-)
-where instance_id=(select resident_id from pg_temp.fixture);
-set local session_replication_role=origin;
+-- The fixture uses the reviewed create-entity authority frozen in the
+-- resident package.  No test may alter a superseded procedural source.
+select ok((private.world_procedural_resident_capability((select save_id from pg_temp.fixture),(select resident_id from pg_temp.fixture))->'allowedWorldEffects' ? 'create_entity'),'fixture resident exposes its reviewed package capability');
 
 -- Keep an unrelated, durable-looking supply in this transaction.  Every
 -- fixture assertion below must remain scoped, even when developer data (or a

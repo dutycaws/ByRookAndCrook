@@ -123,14 +123,22 @@ select is((select remaining_quantity from public.garden_shop_stock where item_ke
   'rejected day advance leaves stock unchanged');
 
 reset role;
-insert into public.dialogue_turns(id,save_id,actor_id,patron_key,message,input_sequence,source_revision,day,status,lease_until)
-select '22000000-0000-4000-8000-000000000016',id,user_id,'lira','A pending conversation.',0,revision,current_day,'processing',now()+interval '5 minutes'
-from public.tavern_saves where user_id='22000000-0000-4000-8000-000000000001';
+insert into private.world_npc_dialogue_turns(
+  id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until
+)
+select
+  '22000000-0000-4000-8000-000000000016',save_row.id,resident.id,resident.npc_id,resident.version_id,
+  save_row.user_id,'A pending conversation.',resident.conversation_sequence,save_row.revision,save_row.current_day,
+  'processing',now()+interval '5 minutes'
+from public.tavern_saves save_row
+join private.world_npc_instances resident on resident.save_id=save_row.id
+where save_row.user_id='22000000-0000-4000-8000-000000000001'
+order by resident.id limit 1;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='22000000-0000-4000-8000-000000000001';
 select throws_ok($$ select public.advance_tavern_day((select id from public.tavern_saves),
-  '22000000-0000-4000-8000-000000000017',3) $$,'PT409','Finish or cancel the pending conversation before closing',
+  '22000000-0000-4000-8000-000000000017',3) $$,'PT409','Finish or cancel the active resident dialogue before closing',
   'a blocked day advance cannot reach stock replenishment');
 select is((select remaining_quantity from public.garden_shop_stock where item_key='seed_hops'),9,
   'a blocked day advance leaves stock unchanged');

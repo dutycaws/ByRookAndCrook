@@ -132,8 +132,12 @@ select lives_ok($$ select public.complete_brew(
   '16700000-0000-4000-8000-000000000011',(select revision from public.tavern_saves),60,0,60) $$,
   'recovered ingredient completes a normal guided brew');
 select is((select count(*) from public.beverages),1::bigint,'recovery creates one sellable beverage');
-select lives_ok($$ select public.serve_beverage(
-  (select id from public.tavern_saves),'lira',(select id from public.beverages),null,
+select lives_ok($$ select public.npc_serve_hospitality(
+  (select id from public.tavern_saves),
+  (select (resident->>'instanceId')::uuid
+    from jsonb_array_elements(public.npc_bar_snapshot()->'roster') resident
+    where resident->>'npcId'='18181818-1818-4181-8181-181818181818'),
+  'beverage',(select id from public.beverages),
   '16700000-0000-4000-8000-000000000012',(select revision from public.tavern_saves)) $$,
   'the recovered beverage completes the existing tavern sale');
 select ok((select gold from public.tavern_saves)>0,'the zero-gold recovery route returns to positive tavern income');

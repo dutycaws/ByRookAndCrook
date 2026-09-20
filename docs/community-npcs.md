@@ -115,7 +115,6 @@ This creates a 1,000-identity candidate pool and assigns 100 residents to one sa
 
 The community-specific database suites are:
 
-- `supabase/tests/community_npc_platform.test.sql`
 - `supabase/tests/community_npc_runtime.test.sql`
 - `supabase/tests/community_npc_authoring.test.sql`
 - `supabase/tests/community_npc_authoring_experience.test.sql`
@@ -123,6 +122,18 @@ The community-specific database suites are:
 - `supabase/tests/community_npc_bar_scaling.test.sql`
 - `supabase/tests/community_npc_purge.test.sql`
 - `supabase/tests/community_npc_engagement.test.sql`
+- `supabase/tests/npc_resident_packages.test.sql`
+- `supabase/tests/npc_v2_review_publication.test.sql`
+- `supabase/tests/npc_materializer_cutover.test.sql`
+- `supabase/tests/npc_legacy_cleanup.test.sql`
+- `supabase/tests/npc_package_observability.test.sql`
+- `supabase/tests/resident_evolution_dialogue_projection.test.sql`
+
+The V2 package, review-publication, and materializer suites replace the retired
+all-in-one platform fixture. They isolate the immutable release package,
+reviewer-selected capability registry, canonical materializer, runtime dialogue
+projection, observability, and legacy-source removal as independently diagnosable
+contracts.
 
 Use the standard repository checks after a local reset:
 

@@ -41,9 +41,9 @@ create table private.world_resident_profiles (
   unique(save_id,npc_id), check(jsonb_typeof(frozen_sheet)='object'),check(jsonb_typeof(pressure)='object'),check(jsonb_typeof(evidence_refs)='array')
 );
 alter table private.world_resident_profiles
-  add column profile_schema_version text not null default 'resident-profile-compat-v1',
-  add column capability_source_version text not null default 'npc-sheet-v1',
-  add column appearance_source_version text not null default 'npc-sheet-v1',
+  add column profile_schema_version text not null default 'personality-schema-v1',
+  add column capability_source_version text not null default 'community-capability-options-v1',
+  add column appearance_source_version text not null default 'npc-sheet-v2',
   add column current_profile jsonb not null default '{}'::jsonb,
   add column public_disposition jsonb not null default '{}'::jsonb;
 alter table private.world_resident_profiles add constraint world_profile_shape check (jsonb_typeof(current_profile)='object' and jsonb_typeof(public_disposition)='object' and octet_length(public_disposition::text)<=2048);
@@ -195,20 +195,9 @@ begin
 create trigger world_effect_scope_guard before insert or update on private.world_effect_receipts for each row execute function private.world_save_scope_guard();
 create trigger world_irreversible_effect_guard before insert or update on private.world_effect_receipts for each row execute function private.world_irreversible_effect_guard();
 
--- Existing resident rows gain a save-scoped pinned profile without changing
--- their legacy relationship scalar or the established day-advance wrappers.
-insert into private.world_resident_profiles(instance_id,save_id,npc_id,version_id,frozen_sheet,current_profile,public_disposition)
-select w.id,w.save_id,w.npc_id,w.version_id,v.sheet,jsonb_build_object('identity',v.sheet->'identity','personality',v.sheet->'personality'),jsonb_build_object('name',v.sheet#>>'{identity,name}','title',v.sheet#>>'{identity,title}') from private.world_npc_instances w join private.npc_versions v on v.id=w.version_id
-on conflict(instance_id) do nothing;
-create function private.world_resident_profile_backfill() returns trigger language plpgsql security definer set search_path='' as $$
-begin
-  insert into private.world_resident_profiles(instance_id,save_id,npc_id,version_id,frozen_sheet,current_profile,public_disposition)
-  select new.id,new.save_id,new.npc_id,new.version_id,v.sheet,jsonb_build_object('identity',v.sheet->'identity','personality',v.sheet->'personality'),jsonb_build_object('name',v.sheet#>>'{identity,name}','title',v.sheet#>>'{identity,title}') from private.npc_versions v where v.id=new.version_id
-  on conflict(instance_id) do nothing;
-  return new;
-end $$;
-create trigger world_resident_profile_backfill after insert on private.world_npc_instances
-  for each row execute function private.world_resident_profile_backfill();
+-- A resident profile is inserted only by the package materializer.  There is
+-- deliberately no generic instance trigger: every profile must be paired with
+-- an immutable version package and its exact package pin.
 
 create function private.world_settlement_assert_service() returns void language plpgsql stable security definer set search_path='' as $$ begin
   if auth.role()<>'service_role' then raise sqlstate 'PT403' using message='World settlement workers are server-only'; end if;

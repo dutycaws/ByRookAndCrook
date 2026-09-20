@@ -30,9 +30,10 @@ returns jsonb language sql stable security definer set search_path='' as $$
     from private.world_procedural_quests q
     where q.save_id=p_save_id and q.state='active'
   ), resident_capabilities as (
-    select i.id::text as resident_id, pin.capability
+    select i.id::text as resident_id, package.capability_envelope as capability
     from private.world_npc_instances i
-    join private.world_resident_evolution_pins pin on pin.instance_id=i.id and pin.save_id=i.save_id
+    join private.world_resident_package_pins pin on pin.instance_id=i.id and pin.save_id=i.save_id
+    join private.npc_version_resident_packages package on package.id=pin.package_id and package.package_hash=pin.package_hash
     where i.save_id=p_save_id and i.status='active'
   )
   select jsonb_build_object(

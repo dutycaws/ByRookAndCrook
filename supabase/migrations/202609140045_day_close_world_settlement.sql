@@ -362,12 +362,12 @@ begin
     select 1
     from private.world_npc_instances resident
     join private.world_resident_profiles profile on profile.instance_id = resident.id
-    join private.world_resident_evolution_pins pin on pin.instance_id = resident.id
+    join private.world_resident_package_pins pin on pin.instance_id = resident.id and pin.save_id = resident.save_id
+    join private.npc_version_resident_packages package on package.id = pin.package_id and package.package_hash = pin.package_hash
     where resident.id = p_instance_id
       and resident.save_id = p_save_id
       and profile.save_id = p_save_id
       and pin.save_id = p_save_id
-      and profile.profile_schema_version <> 'resident-profile-compat-v1'
       and resident.status not in ('dead', 'departed', 'dismissed', 'removed', 'quarantined')
   ) then
     return null;
@@ -507,11 +507,11 @@ begin
     select instance.id
     from private.world_npc_instances instance
     join private.world_resident_profiles profile on profile.instance_id = instance.id
-    join private.world_resident_evolution_pins pin on pin.instance_id = instance.id
+    join private.world_resident_package_pins pin on pin.instance_id = instance.id and pin.save_id = instance.save_id
+    join private.npc_version_resident_packages package on package.id = pin.package_id and package.package_hash = pin.package_hash
     where instance.save_id = save_after.id
       and profile.save_id = save_after.id
       and pin.save_id = save_after.id
-      and profile.profile_schema_version <> 'resident-profile-compat-v1'
       and instance.status not in ('dead', 'departed', 'dismissed', 'removed', 'quarantined')
     order by instance.id
   loop

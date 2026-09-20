@@ -46,18 +46,41 @@ insert into private.npc_identities(
   '17400000-0000-4000-8000-000000000004', 'day close arrival', 'published', 'standard'
 );
 insert into private.npc_versions(
-  id, npc_id, version_number, sheet, sheet_hash, state, created_by, published_at
+  id, npc_id, version_number, schema_version, sheet, sheet_hash, state, created_by, published_at
 )
 select
   '17400000-2000-4000-8000-000000000001',
   '17400000-1000-4000-8000-000000000001',
-  1, sheet, 'day-close-arrival-v1', 'published',
+  1, schema_version, sheet, sheet_hash, 'published',
   '17400000-0000-4000-8000-000000000004', now()
 from private.npc_versions
 where id = '18181818-1818-4181-8181-181818181819';
 update private.npc_identities
 set current_published_version_id = '17400000-2000-4000-8000-000000000001'
 where id = '17400000-1000-4000-8000-000000000001';
+insert into private.npc_version_resident_packages(
+  npc_id,version_id,source_kind,frozen_sheet_hash,definition_hash,
+  personality_schema,initial_profile,appearance_spec,capability_envelope,
+  capability_registry_version,capability_option_ids,resolved_options_hash,
+  terminal_outcomes,package_hash
+)
+select
+  '17400000-1000-4000-8000-000000000001',
+  '17400000-2000-4000-8000-000000000001','community',
+  package.frozen_sheet_hash,package.definition_hash,package.personality_schema,
+  package.initial_profile,package.appearance_spec,package.capability_envelope,
+  package.capability_registry_version,package.capability_option_ids,
+  package.resolved_options_hash,package.terminal_outcomes,
+  private.npc_resident_package_hash(
+    '17400000-1000-4000-8000-000000000001',
+    '17400000-2000-4000-8000-000000000001','community',null,
+    package.frozen_sheet_hash,package.definition_hash,package.personality_schema,
+    package.initial_profile,package.appearance_spec,package.capability_envelope,
+    package.capability_registry_version,package.capability_option_ids,
+    package.resolved_options_hash,package.terminal_outcomes
+  )
+from private.npc_version_resident_packages package
+where package.version_id='18181818-1818-4181-8181-181818181819';
 
 -- The current runtime stores conversations by resident instance. Distinct
 -- wording makes cross-resident and cross-save leaks observable.

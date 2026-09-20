@@ -21,7 +21,7 @@ All interface/data/order dependencies above are verified against the existing ap
 
 ## Frozen contracts and pilot rules
 
-Character content lives in `supabase/content/npcs.json`; SQL installs a versioned copy into restricted storage. Dialogue turns freeze identity, message, items, day/revision, and conversation sequence. Durable stage checkpoints and expiring fenced leases support retries. Completion revalidates state and commits transcript, relationship effects, intentions, and serving together. Shared serving receipts prevent double consumption.
+This historical dialogue implementation is now fed by the canonical per-identity catalogs in `supabase/content/first-party-npcs/*.json`. Each active `npc-sheet-v2` release installs as an immutable version-resident package. The shared materializer pins that package when it creates a resident, so dialogue turns and overnight resolution use the exact validated release instead of a mutable pilot registry. Dialogue turns freeze identity, message, items, day/revision, and conversation sequence. Durable stage checkpoints and expiring fenced leases support retries. Completion revalidates state and commits transcript, relationship effects, intentions, and serving together. Shared serving receipts prevent double consumption.
 
 Actions: prepare, attempt, wait, abandon. Approaches: scouting, combat, diplomacy, trade. One active quest per patron; changed objectives retain established targets and record abandoned history. Terminal opportunities cannot be reopened by renaming a goal. Accepted plans have at most three daily steps. Preparation is capped at two. Attempt chance is clamped 10–90 using `50 + 10*(skill-difficulty) + 10*preparation + 5*hospitality`; hospitality is the day's sum of `(qualityIndex-3)`, clamped -3..3. Outcomes and random draws persist once. Qualitative risk is low at >=70%, moderate at >=45%, otherwise high. Exact odds are server-only.
 
@@ -44,7 +44,7 @@ All three delivery milestones are complete. The user configured the OpenAI key i
 - One ignored `.env`, owner-only permissions; configured secrets absent from tracked and new source. Regeneration preserved OpenAI/NPC settings.
 - Existing saves were upgraded additively; no player-data reset, hosted deployment, commit or push was performed for this implementation.
 
-Artifacts: [technical specification](../npc-dialogue.md), [editable content](../../supabase/content/npcs.json), [evaluation cases/results](../evaluations/npc-dialogue.md), [runbook](../development.md). Detailed synthetic live reports remain in ignored `artifacts/npc-evals/`.
+Artifacts: [technical specification](../npc-dialogue.md), [editable first-party catalogs](../../supabase/content/first-party-npcs/), [evaluation cases/results](../evaluations/npc-dialogue.md), [runbook](../development.md). Generate and verify the executable catalog migration with `npm run npc:catalog:generate` and `npm run npc:catalog:check`. Detailed synthetic live reports remain in ignored `artifacts/npc-evals/`.
 
 The independent reviewers were read-only and ran as GPT-6 in the effective environment. Root remained the sole writer. Accepted review changes included immutable content versions/FKs, source evidence snapshots, attempt lifecycle closure, terminal target retirement, finite ordered plans and privacy-safe news designation. No unresolved implementation blocker remains. Model prose still requires the documented bounded review/error path; the local provider remains the specified stub.
 

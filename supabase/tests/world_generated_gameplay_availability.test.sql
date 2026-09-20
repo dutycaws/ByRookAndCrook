@@ -20,9 +20,10 @@ create temporary table pg_temp.fixture as select (public.npc_bar_snapshot()#>>'{
 reset role;
 alter table pg_temp.fixture add column resident_id uuid;
 update pg_temp.fixture set resident_id=(select id from private.world_npc_instances where save_id=pg_temp.fixture.save_id order by id limit 1);
-set local session_replication_role=replica;
-update private.world_resident_evolution_pins set capability=jsonb_build_object('allowedWorldEffects',jsonb_build_array('create_entity'),'allowedActions','[]'::jsonb,'allowedApproaches','[]'::jsonb,'allowedTargetKinds',jsonb_build_array('recipe'),'socialCapabilities','[]'::jsonb,'irreversibleEffects','[]'::jsonb) where instance_id=(select resident_id from pg_temp.fixture);
-set local session_replication_role=origin;
+-- The first-party package used by this fixture carries the reviewed
+-- create-entity option.  Tests must exercise its immutable package-derived
+-- authority rather than mutating a legacy capability source.
+select ok((private.world_procedural_resident_capability((select save_id from pg_temp.fixture),(select resident_id from pg_temp.fixture))->'allowedWorldEffects' ? 'create_entity'),'fixture resident receives reviewed package capability for generated recipe creation');
 create temporary table pg_temp.claim(s uuid,j uuid,f uuid);
 insert into pg_temp.claim values('15500000-0000-4000-8000-000000000010','15500000-0000-4000-8000-000000000011','15500000-0000-4000-8000-000000000012');
 insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,fence,lease_until,deadline_at,input_snapshot,input_version) select s,save_id,2,0,'gameplay', 'processing',f,clock_timestamp()+interval '5 minutes',clock_timestamp()+interval '5 minutes','{}','procedural-world-v1' from pg_temp.claim cross join pg_temp.fixture;

@@ -1,6 +1,4 @@
 -- Typed authoring-workspace read model and draft-pinned sandbox conversations.
--- This is deliberately additive: legacy JSON sandbox rows and the original
--- message-start RPC stay readable while the authoring UI moves to this model.
 begin;
 
 alter table private.npc_assistance_events
@@ -24,36 +22,6 @@ create table if not exists private.npc_sandbox_turns (
   unique(sandbox_id, ordinal)
 );
 
--- Preserve legacy turns as a read-only transcript when a pre-v2 sandbox is
--- inspected. New sessions use the normalized turn table.
-insert into private.npc_sandbox_turns(sandbox_id, ordinal, role, content, status, created_at, completed_at)
-select s.id, 1, 'keeper', turn->>'keeper', 'completed', coalesce((turn->>'at')::timestamptz, s.created_at), s.updated_at
-from private.npc_sandboxes s
-cross join lateral jsonb_array_elements(coalesce(s.state->'turns','[]'::jsonb)) turn
-where jsonb_typeof(turn)='object' and coalesce(turn->>'keeper','')<>''
-  and not exists(select 1 from private.npc_sandbox_turns t where t.sandbox_id=s.id)
-on conflict do nothing;
-insert into private.npc_sandbox_turns(sandbox_id, ordinal, role, content, status, created_at, completed_at)
-select s.id, 2, 'npc', turn->>'reply', 'completed', coalesce((turn->>'at')::timestamptz, s.created_at), s.updated_at
-from private.npc_sandboxes s
-cross join lateral jsonb_array_elements(coalesce(s.state->'turns','[]'::jsonb)) turn
-where jsonb_typeof(turn)='object' and coalesce(turn->>'reply','')<>''
-  and not exists(select 1 from private.npc_sandbox_turns t where t.sandbox_id=s.id and t.ordinal=2)
-on conflict do nothing;
-
-update private.npc_sandboxes set frozen_sheet=d.sheet
-from private.npc_drafts d where d.id=npc_sandboxes.draft_id and npc_sandboxes.frozen_sheet is null;
-update private.npc_sandboxes set lifecycle='invalidated'
-where invalidated_at is not null and lifecycle='active';
-
--- Older releases could have started more than one session. Keep the newest
--- one active, preserving every earlier transcript for the author to inspect.
-with ranked as (
-  select id, row_number() over(partition by draft_id,based_on_revision order by created_at desc,id desc) ordinal
-  from private.npc_sandboxes where invalidated_at is null
-)
-update private.npc_sandboxes s set invalidated_at=now(), lifecycle='invalidated', updated_at=now()
-from ranked r where r.id=s.id and r.ordinal>1;
 create unique index if not exists npc_one_active_sandbox_per_draft_revision
   on private.npc_sandboxes(draft_id,based_on_revision) where invalidated_at is null;
 create unique index if not exists npc_one_pending_sandbox_turn
@@ -61,15 +29,6 @@ create unique index if not exists npc_one_pending_sandbox_turn
 
 alter table private.npc_retirement_requests add column if not exists decision_reason text;
 
--- Older builds allowed duplicate open requests. Preserve the newest request
--- and close older duplicates before enforcing the author-visible invariant.
-with ranked as (
-  select id,row_number() over(partition by npc_id order by created_at desc,id desc) ordinal
-  from private.npc_retirement_requests where status='open'
-)
-update private.npc_retirement_requests r
-set status='rejected',decided_at=coalesce(decided_at,now()),decision_reason=coalesce(decision_reason,'Superseded by a newer open retirement request during the authoring-workspace migration.')
-from ranked x where x.id=r.id and x.ordinal>1;
 create unique index if not exists npc_one_open_retirement_request
   on private.npc_retirement_requests(npc_id) where status='open';
 
@@ -90,7 +49,7 @@ begin
   select * into d from private.npc_drafts where npc_id=p_npc_id and state='open' for update;
   if not found then raise sqlstate 'PT409' using message='Open draft unavailable'; end if;
   if d.revision<>p_expected_revision then raise sqlstate 'PT409' using message='Draft changed; refresh'; end if;
-  perform private.assert_npc_sheet(p_sheet);
+  perform private.validate_npc_sheet_v2(p_sheet);
   update private.npc_drafts set sheet=p_sheet,revision=revision+1,updated_at=now() where id=d.id;
   perform private.npc_author_invalidate_sandboxes(d.id);
   update private.npc_identities set normalized_name=lower(regexp_replace(trim(p_sheet#>>'{identity,name}'),'\\s+',' ','g')),rating=p_sheet->>'rating',updated_at=now() where id=p_npc_id;
@@ -110,7 +69,7 @@ begin
     proposed:=coalesce(e.proposal->'replacement',e.proposal);
     if proposed is null or proposed=(d.sheet#>array[e.section_path]) then raise sqlstate 'PT422' using message='Assistance has no material replacement'; end if;
     candidate:=jsonb_set(d.sheet,array[e.section_path],proposed,true);
-    perform private.assert_npc_sheet(candidate);
+    perform private.validate_npc_sheet_v2(candidate);
     update private.npc_drafts set sheet=candidate,revision=revision+1,updated_at=now() where id=d.id;
     perform private.npc_author_invalidate_sandboxes(d.id);
   end if;
@@ -170,15 +129,6 @@ begin
   return job || jsonb_build_object('kind','sandbox_pending','sandboxId',s.id,'turnId',turn_id,'status','pending');
 end $$;
 
--- Compatibility entry point for the previously shipped start(message) call.
-create or replace function public.npc_author_sandbox_start(p_npc_id uuid,p_expected_revision bigint,p_message text)
-returns jsonb language plpgsql security definer set search_path='' as $$
-declare started jsonb;
-begin
-  started:=public.npc_author_sandbox_start(p_npc_id,p_expected_revision);
-  return public.npc_author_sandbox_send((started->>'sandboxId')::uuid,p_message);
-end $$;
-
 create or replace function public.npc_author_sandbox_complete(p_job_id uuid,p_reply text,p_error_code text default null)
 returns void language plpgsql security definer set search_path='' as $$
 declare j private.npc_generation_jobs; s private.npc_sandboxes; keeper private.npc_sandbox_turns; next_ordinal integer;
@@ -196,9 +146,6 @@ begin
       select coalesce(max(ordinal),0)+1 into next_ordinal from private.npc_sandbox_turns where sandbox_id=s.id;
       insert into private.npc_sandbox_turns(sandbox_id,ordinal,role,content,status,completed_at) values(s.id,next_ordinal,'npc',p_reply,'completed',now());
     end if;
-  else
-    -- Legacy pre-v2 jobs remain readable and keep their old state representation.
-    if p_error_code is null then update private.npc_sandboxes set state=jsonb_set(state,'{turns,0,reply}',to_jsonb(p_reply),true),updated_at=now() where id=s.id and invalidated_at is null; end if;
   end if;
   update private.npc_sandboxes set updated_at=now(),lifecycle=case when invalidated_at is null then lifecycle else 'invalidated' end where id=s.id;
 end $$;

@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(68);
+select plan(64);
 
 -- Test-only worker harness: later player commands require the prior day-close
 -- settlement to have reached its terminal, open-save state.
@@ -209,8 +209,8 @@ select lives_ok(
 );
 select is((select current_day from public.tavern_saves), 2, 'day advance retry does not skip a day');
 
--- Seed one explicit legacy-compatibility ingredient so the second session can
--- exercise rpm-v1 migration behavior without changing modern one-unit harvests.
+-- Seed one explicit second-day ingredient without changing modern one-unit
+-- harvest provenance.
 reset role;
 insert into public.game_actions(save_id,action_id,actor_id,command_kind,input_cell_id,
   input_expected_revision,rules_version,result,committed_revision)
@@ -235,7 +235,7 @@ select lives_ok(
       '52000000-0000-4000-8000-000000000004', 4
     )
   $$,
-  'the legacy compatibility ingredient can start the next day brew'
+  'the second-day ingredient can start another guided brew'
 );
 select is((select count(*) from public.brew_sessions), 2::bigint, 'completed history is retained across tavern days');
 select is((select revision from public.tavern_saves), 5::bigint, 'the next brew start advances revision');
@@ -294,28 +294,8 @@ select throws_ok(
 );
 
 reset role;
-update public.brew_sessions
-set stir_rules_version = 'rpm-v1', countdown_seconds = 0, duration_seconds = 30,
-    started_at = clock_timestamp() - interval '31 seconds'
-where day_number = 2;
 set local role authenticated;
 set local request.jwt.claim.sub = '50000000-0000-4000-8000-000000000001';
-select is(public.get_tavern_snapshot() #>> '{brewery,activeSession,stirRulesVersion}', 'rpm-v1',
-  'an active legacy session remains identifiable after migration');
-select is((public.get_tavern_snapshot() #>> '{brewery,activeSession,countdownSeconds}')::integer, 0,
-  'an active legacy session retains no countdown');
-select lives_ok(
-  $$
-    select public.complete_brew(
-      (select value from test_ids where key = 'save-one'),
-      (select id from public.brew_sessions where day_number = 2),
-      '53000000-0000-4000-8000-000000000004', 5, 120, 0, 120
-    )
-  $$,
-  'an active legacy thirty-second session can still complete'
-);
-select is((select stir_score from public.brew_sessions where day_number = 2), 6::smallint,
-  'the legacy 120-tick calculator remains unchanged');
 select ok(not has_table_privilege('authenticated', 'public.beverages', 'INSERT'), 'players cannot insert beverages directly');
 select is((select quantity from public.ingredient_batches
   where id=(select value from test_ids where key='fennel-batch')), 1,

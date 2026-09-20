@@ -548,10 +548,6 @@ begin
   if v_save.revision <> p_expected_revision then
     raise sqlstate 'PT409' using message = 'Tavern state changed; refresh before ending the day';
   end if;
-  if not v_save.day_minigame_completed then
-    raise sqlstate 'PT422' using message = 'Complete the daily tavern minigame before ending the day';
-  end if;
-
   v_receipt := jsonb_build_object(
     'actionId', p_action_id,
     'newDay', v_save.current_day + 1,

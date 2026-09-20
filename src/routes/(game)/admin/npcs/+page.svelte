@@ -5,6 +5,23 @@
   let admin = $derived(data.community.capabilities.includes('admin'));
 
   const describeJson = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
+  type OptionChoice = { id: string; kind: string; value: string; targetKinds: string[] };
+  type Sheet = { identity?: { name?: string; shortDescription?: string }; campaign?: { milestones?: Array<{ title?: string; startingPlan?: Array<{ action?: string; approach?: string }>; permanentLoss?: { kind?: string; warning?: string } | null }> } };
+  type ReviewerSubmission = {
+    npcId: string; versionId: string; sheet: Sheet; frozenSheetHash?: string; candidateHash?: string;
+    optionRegistryVersion?: string; optionChoices?: OptionChoice[]; evolutionPreview?: Record<string, unknown>;
+    prospectivePackage?: { state?: string; definitionHash?: string; packageHash?: string; terminalOutcomes?: string[] }; evaluation?: { status?: string; result?: unknown } | null;
+  };
+  const submissions = $derived(data.queue as unknown as ReviewerSubmission[]);
+  const optionGroups = (submission: ReviewerSubmission) => {
+    const choices = Array.isArray(submission.optionChoices) ? submission.optionChoices : [];
+    return ['quest_action', 'quest_approach', 'world_effect', 'social_capability'].map((kind) => ({ kind, choices: choices.filter((choice) => choice.kind === kind) })).filter((group) => group.choices.length);
+  };
+  const campaignRequirements = (sheet: Sheet) => {
+    const steps = sheet.campaign?.milestones?.flatMap((milestone) => milestone.startingPlan ?? []) ?? [];
+    return { actions: [...new Set(steps.map((step) => step.action).filter(Boolean))], approaches: [...new Set(steps.map((step) => step.approach).filter(Boolean))] };
+  };
+  const readableKind = (kind: string) => kind.replace(/[._]/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 </script>
 
 <main class="page-shell community-page">
@@ -20,15 +37,33 @@
 
   <section>
     <h2>Submitted versions</h2>
-    <div class="community-grid">
-      {#each data.queue as item}
+    <p>The author supplied character sheet is frozen in the review candidate. Reviewers choose from server-issued option IDs; the server resolves the package and verifies campaign coverage before publication.</p>
+    <div class="community-grid two reviewer-submission-grid">
+      {#each submissions as item (item.versionId)}
+        {@const requirements = campaignRequirements(item.sheet ?? {})}
         <article class="community-card">
-          <h3>{item.sheet.identity.name}</h3>
-          <p>{item.sheet.identity.shortDescription}</p>
-          <p>Evaluation: {item.evaluation.status}</p>
+          <p class="eyebrow">Immutable submitted version</p>
+          <h3>{item.sheet?.identity?.name ?? 'Unnamed NPC'}</h3>
+          <p>{item.sheet?.identity?.shortDescription ?? 'No description supplied.'}</p>
+          <dl class="reviewer-facts">
+            <div><dt>Candidate hash</dt><dd><code title={item.candidateHash}>{item.candidateHash?.slice(0, 16) ?? '—'}…</code></dd></div>
+            <div><dt>Frozen sheet</dt><dd><code title={item.frozenSheetHash}>{item.frozenSheetHash?.slice(0, 16) ?? '—'}…</code></dd></div>
+            <div><dt>Package state</dt><dd>{item.prospectivePackage?.state ?? 'awaiting review'}</dd></div>
+            <div><dt>Registry</dt><dd>{item.optionRegistryVersion ?? '—'}</dd></div>
+          </dl>
+          <details>
+            <summary>Evolution preview</summary>
+            <p>This is the prospective resident definition derived from the frozen sheet. Capability permissions are selected separately below.</p>
+            <pre>{describeJson(item.evolutionPreview)}</pre>
+          </details>
+          {#if item.prospectivePackage?.terminalOutcomes?.length}
+            <aside class="community-notice"><strong>Authored permanent-loss outcomes:</strong> {item.prospectivePackage.terminalOutcomes.join(', ')}. They are allowed only when the campaign’s authored conditions occur.</aside>
+          {/if}
+          <p class="reviewer-requirements"><strong>Campaign-required coverage:</strong> actions: {requirements.actions.join(', ') || 'none'} · approaches: {requirements.approaches.join(', ') || 'none'}. Select matching server options to approve.</p>
+          <p>Evaluation: {item.evaluation?.status ?? 'not started'}</p>
           <details>
             <summary>Evaluation details</summary>
-            <pre>{describeJson(item.evaluation.result)}</pre>
+            <pre>{describeJson(item.evaluation?.result)}</pre>
           </details>
           <form method="POST" action="?/comment">
             <input type="hidden" name="npcId" value={item.npcId} />
@@ -37,24 +72,33 @@
             <textarea name="body" required placeholder="Review comment"></textarea>
             <button>Comment</button>
           </form>
-          <form method="POST" action="?/decide">
+          <form method="POST" action="?/decide" class="reviewer-approval">
             <input type="hidden" name="versionId" value={item.versionId} />
-            <select name="decision">
-              <option value="approve">Approve</option>
-              <option value="request_changes">Request changes</option>
-              <option value="reject">Reject</option>
-            </select>
-            <select name="rating">
-              <option value="">Keep rating</option>
-              <option value="standard">Standard</option>
-              <option value="mature">Mature</option>
-            </select>
-            <textarea name="notes" placeholder="Decision notes"></textarea>
-            <button>Record decision</button>
+            <input type="hidden" name="decision" value="approve" />
+            <fieldset>
+              <legend>Reviewer-selected capabilities</legend>
+              <p>These IDs are issued by the server for this candidate. The author cannot set them, and the raw capability package is never editable here.</p>
+              {#each optionGroups(item) as group}
+                <fieldset class="option-group">
+                  <legend>{readableKind(group.kind)}</legend>
+                  {#each group.choices as option}
+                    <label><input type="checkbox" name="optionId" value={option.id} /> <span><strong>{option.value}</strong><small>{option.id}{option.targetKinds?.length ? ` · targets: ${option.targetKinds.join(', ')}` : ''}</small></span></label>
+                  {/each}
+                </fieldset>
+              {/each}
+            </fieldset>
+            <textarea name="notes" placeholder="Approval notes for the author"></textarea>
+            <button class="primary-action">Approve selected package</button>
+          </form>
+          <form method="POST" action="?/decide" class="reviewer-nonapproval">
+            <input type="hidden" name="versionId" value={item.versionId} />
+            <textarea name="notes" required placeholder="Required notes for changes or rejection"></textarea>
+            <button name="decision" value="request_changes">Request changes</button>
+            <button name="decision" value="reject">Reject submission</button>
           </form>
           <form method="POST" action="?/publish">
             <input type="hidden" name="versionId" value={item.versionId} />
-            <button class="primary-action">Publish approved version</button>
+            <button class="primary-action">Publish approved immutable package</button>
           </form>
         </article>
       {:else}

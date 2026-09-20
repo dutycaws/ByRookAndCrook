@@ -21,9 +21,9 @@
   const selectedSetting = $derived(settings.settings.find((setting) => setting.id === settings.selectedSettingId) ?? null);
   const portraitSummary = $derived([
     { label: 'Title and role', values: [detail.draft.sheet.identity.title, detail.draft.sheet.identity.shortDescription].filter(Boolean) },
-    { label: 'Physical appearance', values: [detail.draft.sheet.appearance.physicalAppearance].filter(Boolean) },
-    { label: 'Attire and notable features', values: [detail.draft.sheet.appearance.attire, detail.draft.sheet.appearance.notableFeatures].filter(Boolean) },
-    { label: 'Mood and personality', values: [detail.draft.sheet.appearance.mood, ...detail.draft.sheet.personality.values.slice(0, 2), ...detail.draft.sheet.personality.likes.slice(0, 1)].filter(Boolean) },
+    { label: 'Physical appearance and silhouette', values: [detail.draft.sheet.appearance.physicalAppearance, detail.draft.sheet.appearance.silhouette].filter(Boolean) },
+    { label: 'Attire, features, and palette', values: [detail.draft.sheet.appearance.attire, detail.draft.sheet.appearance.notableFeatures, ...detail.draft.sheet.appearance.palette].filter(Boolean) },
+    { label: 'Mood and personality', values: [detail.draft.sheet.appearance.mood, ...detail.draft.sheet.personality.initialEntries.slice(0, 3).map((entry) => entry.text)].filter(Boolean) },
     { label: 'Content rating', values: [detail.draft.sheet.rating] }
   ]);
   const portraitItemOptions = $derived([...new Set([

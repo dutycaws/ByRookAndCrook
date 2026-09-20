@@ -18,13 +18,10 @@ const receipt = {
 };
 
 describe('Brewery contracts', () => {
-  it('accepts guide-v2 timing and normalizes historical receipts', () => {
+  it('accepts guide-v2 timing', () => {
     expect(parseStartBrewReceipt({
       ...receipt, durationSeconds: 15, countdownSeconds: 2, stirRulesVersion: 'guide-v2'
     })).toMatchObject({ durationSeconds: 15, countdownSeconds: 2, stirRulesVersion: 'guide-v2' });
-    expect(parseStartBrewReceipt({
-      ...receipt, durationSeconds: 30
-    })).toMatchObject({ durationSeconds: 30, countdownSeconds: 0, stirRulesVersion: 'rpm-v1' });
   });
 
   it('rejects unknown rules and mismatched timing', () => {
@@ -33,6 +30,9 @@ describe('Brewery contracts', () => {
     })).toThrow('Invalid start brew receipt');
     expect(() => parseStartBrewReceipt({
       ...receipt, durationSeconds: 15, countdownSeconds: 0, stirRulesVersion: 'guide-v2'
+    })).toThrow('Invalid start brew receipt');
+    expect(() => parseStartBrewReceipt({
+      ...receipt, durationSeconds: 30
     })).toThrow('Invalid start brew receipt');
   });
 });

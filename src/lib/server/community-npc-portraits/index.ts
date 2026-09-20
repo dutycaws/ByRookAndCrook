@@ -65,7 +65,10 @@ export function portraitItemOptions(sheet: NpcSheet): string[] {
 
 /** No lore, campaign, private relationships, or arbitrary style directions enter this projection. */
 export function portraitVisualProjection(sheet: NpcSheet, controls: Partial<PortraitControls>) {
-  const selectedCues = sheet.personality.values.slice(0, 3).map((value) => clean(value, 80));
+  const selectedCues = sheet.personality.initialEntries
+    .filter((entry) => entry.active && ['value', 'preference', 'voice_trait'].includes(entry.kind))
+    .slice(0, 3)
+    .map((entry) => clean(entry.text, 80));
   const itemChoices = portraitItemOptions(sheet);
   const item = clean(controls.optionalItem, 240);
   if (item && !itemChoices.includes(item)) throw new PortraitProviderError('provider_malformed', 'Choose an optional item already present in attire or notable features.');
