@@ -14,8 +14,22 @@
   const missing=$derived(required.filter((kind)=>!editor.personality.initialEntries.some((entry)=>entry.kind===kind)));
   const palette=$derived(editor.appearance.palette.join('\n'));
   onMount(()=>{hydrated=true});
-  function schedule(){if(!hydrated||!editable||frozen)return;status='Saving…';if(timer)clearTimeout(timer);timer=setTimeout(()=>form.requestSubmit(),700)}
-  const autosave:SubmitFunction=()=>async({result,update})=>{const data=(result.type==='failure'||result.type==='success'?result.data:undefined) as {message?:string;conflict?:boolean}|undefined;if(result.type==='failure'){if(data?.conflict){frozen=true;status='Conflict — refresh before editing'}else status=data?.message??'Save failed';await update({reset:false,invalidateAll:false});return}status='Saved';await update({reset:false,invalidateAll:true})};
+  function schedule(event: Event){if((event.target as Element|null)?.closest('.workspace-panel'))return;if(!hydrated||!editable||frozen)return;status='Saving…';if(timer)clearTimeout(timer);timer=setTimeout(()=>form.requestSubmit(),700)}
+  const autosave:SubmitFunction=({submitter})=>async({result,update})=>{
+    const data=(result.type==='failure'||result.type==='success'?result.data:undefined) as {message?:string;conflict?:boolean}|undefined;
+    if(submitter instanceof HTMLElement&&submitter.dataset.portraitAction){
+      form.dispatchEvent(new CustomEvent('portrait-action-result',{detail:data}));
+      await update({reset:false,invalidateAll:false});
+      return;
+    }
+    if(result.type==='failure'){
+      if(data?.conflict){frozen=true;status='Conflict — refresh before editing'}else status=data?.message??'Save failed';
+      await update({reset:false,invalidateAll:false});
+      return;
+    }
+    status='Saved';
+    await update({reset:false,invalidateAll:true});
+  };
   const lines=(text:string)=>text.split('\n').map((x)=>x.trim()).filter(Boolean);
   function addDimension(){if(editor.personality.dimensions.length<8){const n=editor.personality.dimensions.length+1;editor.personality.dimensions.push({key:`dimension_${n}`,label:`Dimension ${n}`,negativeAnchor:'withdrawn',positiveAnchor:'engaged',initialValue:0,volatility:1,ordinaryChangeThreshold:25,definingRuptureThreshold:100})}}
   function addCollection(){const kind=kinds.find((x)=>!editor.personality.collections.some((c)=>c.kind===x));if(kind)editor.personality.collections.push({kind,maximumEntries:4})}
@@ -33,9 +47,9 @@
 </script>
 
 {#if message}<p class="community-notice" class:community-error={conflict} role={conflict?'alert':'status'}>{message}</p>{/if}
-<form bind:this={form} method="POST" action="?/save" class="npc-editor" use:enhance={autosave} oninput={schedule}>
+<form bind:this={form} method="POST" action="?/save" enctype="multipart/form-data" class="npc-editor" use:enhance={autosave} oninput={schedule}>
   <input type="hidden" name="revision" value={revision}/><input type="hidden" name="appearance" value={JSON.stringify(canonical.appearance)}/><input type="hidden" name="personality" value={JSON.stringify(canonical.personality)}/><input type="hidden" name="skills" value={JSON.stringify(canonical.skills)}/><input type="hidden" name="entities" value={JSON.stringify(canonical.lore.entities)}/><input type="hidden" name="facts" value={JSON.stringify(canonical.lore.facts)}/><input type="hidden" name="relationships" value={JSON.stringify(canonical.lore.relationships)}/><input type="hidden" name="npcReferences" value={JSON.stringify(canonical.lore.npcReferences)}/><input type="hidden" name="milestones" value={JSON.stringify(canonical.campaign.milestones)}/>
-  <div class="npc-editor-toolbar"><span class="eyebrow">Draft revision {revision}</span><span aria-live="polite">{!editable?'Read-only':status}</span></div>
+  <div class="npc-editor-toolbar"><span class="eyebrow">Draft revision {revision}</span><span role="status" aria-label="Draft save status" aria-live="polite">{!editable?'Read-only':status}</span></div>
   <fieldset disabled={!hydrated||!editable||frozen}>
     <section class="editor-section"><div class="editor-section-heading"><span>01</span><div><h2>Identity</h2><p>Public introduction and voice rules.</p></div></div><div class="editor-fields two-column"><label>Name<input name="name" bind:value={editor.identity.name} required/></label><label>Title<input name="title" bind:value={editor.identity.title} required/></label></div><label>Short description<textarea name="shortDescription" bind:value={editor.identity.shortDescription} required></textarea></label><label>Voice and speech rules<textarea name="voice" bind:value={editor.identity.voice} required></textarea></label><label>Audience<select name="rating" bind:value={editor.rating}><option value="standard">Standard</option><option value="mature">Mature</option></select></label></section>
     <section class="editor-section"><div class="editor-section-heading"><span>02</span><div><h2>Appearance</h2><p>These fields create the portrait and scene brief.</p></div></div><div class="editor-fields two-column"><label>Physical appearance<textarea bind:value={editor.appearance.physicalAppearance} required></textarea></label><label>Recognizable silhouette<textarea bind:value={editor.appearance.silhouette} required></textarea></label><label>Attire<textarea bind:value={editor.appearance.attire} required></textarea></label><label>Notable features<textarea bind:value={editor.appearance.notableFeatures} required></textarea></label><label>Default mood<textarea bind:value={editor.appearance.mood} required></textarea></label><label>Palette keys<textarea value={palette} oninput={(e)=>editor.appearance.palette=lines((e.currentTarget as HTMLTextAreaElement).value).map((x)=>x.toLowerCase().replaceAll(' ','-')).slice(0,5)} required></textarea><small>One lowercase key per line, up to five.</small></label></div></section>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GENERATED_CATALOG_MIGRATION, catalogPublications, generateFirstPartyCatalogSql, readFirstPartyCatalogs } from '../../scripts/npc-content';
+import { GENERATED_CATALOG_MIGRATION, catalogPublications, generateFirstPartyCatalogSql, readFirstPartyCatalogs } from '../../scripts/first-party-npc-catalog';
 import { readFileSync } from 'node:fs';
 import { canonicalResidentPackageInputs, deriveResidentInitialProfile, deriveResidentPersonalitySchema, validateFirstPartyNpcCatalog } from '../../src/lib/game/first-party-npc-catalog';
 

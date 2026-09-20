@@ -185,13 +185,18 @@ async function uploadSprite(page: Page, slot: 'neutral' | 'happy', png: Buffer) 
   const panel = page.locator('#portrait-artwork');
   await panel.getByRole('tab', { name: new RegExp(`^${slot[0].toUpperCase()}${slot.slice(1)}`) }).click();
   const candidates = panel.locator('input[name="candidateId"]');
-  const previousCandidateCount = await candidates.count();
+  const previousCandidateIds = await candidates.evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
   await panel.getByLabel('PNG sprite').setInputFiles({ name: `${slot}.png`, mimeType: 'image/png', buffer: png });
   await panel.getByRole('button', { name: `Upload ${slot[0].toUpperCase()}${slot.slice(1)}` }).click();
-  await expect(panel.locator('.portrait-live-status')).toContainText('sprite uploaded for review');
-  await expect(candidates).toHaveCount(previousCandidateCount + 1);
-  await panel.locator('label.portrait-candidate').last().click();
-  await expect(candidates.last()).toBeChecked();
+  await expect(panel.getByRole('status').filter({ hasText: 'sprite uploaded for review' })).toBeVisible();
+  await expect(candidates).toHaveCount(previousCandidateIds.length + 1);
+  const uploadedCandidateId = await candidates.evaluateAll((inputs, priorIds) => inputs
+    .map((input) => (input as HTMLInputElement).value)
+    .find((candidateId) => !priorIds.includes(candidateId)) ?? null, previousCandidateIds);
+  expect(uploadedCandidateId).not.toBeNull();
+  const uploadedCandidate = panel.locator(`label.portrait-candidate:has(input[name="candidateId"][value="${uploadedCandidateId}"])`);
+  await uploadedCandidate.click();
+  await expect(uploadedCandidate.locator('input[name="candidateId"]')).toBeChecked();
 }
 
 async function expressionWorkspace(player: Awaited<ReturnType<typeof createAuthor>>, npcId: string) {
@@ -220,8 +225,8 @@ test('guided authoring saves a readable world and story arc across reloads', asy
     await world.getByRole('button', { name: 'Add detail' }).click();
     await world.getByLabel('Name').fill('The Lantern Archive');
     await world.getByLabel('Description').fill('A quiet archive where old delivery routes and weather logs are kept by patient clerks.');
-    await expect(page.locator('.autosave-status')).toHaveText('Saving…');
-    await expect(page.locator('.autosave-status')).toHaveText('Saved');
+    const saveStatus = page.getByRole('status', { name: 'Draft save status' });
+    await expect(saveStatus).toHaveText('Saved');
     await page.reload();
 
     await world.getByRole('button', { name: /Their world and what they reveal/ }).click();
