@@ -11,7 +11,9 @@
   import RetirementPanel from '$lib/components/community/RetirementPanel.svelte';
   import PrivilegedWorkspaceNav from '$lib/components/community/PrivilegedWorkspaceNav.svelte';
   import PrivilegedSectionNav from '$lib/components/community/PrivilegedSectionNav.svelte';
+  import { pushState } from '$app/navigation';
   import { page } from '$app/state';
+  import { onMount } from 'svelte';
 
   let { data, form }: PageProps = $props();
   let detail = $derived(data.detail as AuthoringWorkspaceDetail);
@@ -40,7 +42,19 @@
       : 'Ready for review');
   const sectionIds = ['overview', 'sheet', 'art', 'preview', 'review'] as const;
   type SectionId = typeof sectionIds[number];
-  const activeSection = $derived((sectionIds.includes(page.url.searchParams.get('section') as SectionId) ? page.url.searchParams.get('section') : 'overview') as SectionId);
+  type ArtSubview = 'sprites' | 'setting';
+  type PreviewSubview = 'scene' | 'assistance' | 'sandbox';
+  type ReviewSubview = 'submission' | 'retirement';
+  type AuthoringPageState = App.PageState & { authoringSection?: SectionId };
+  let artSubview = $state<ArtSubview>('sprites');
+  let previewSubview = $state<PreviewSubview>('scene');
+  let reviewSubview = $state<ReviewSubview>('submission');
+  let sectionNavHost: HTMLElement;
+  const activeSection = $derived((sectionIds.includes((page.state as AuthoringPageState).authoringSection as SectionId)
+    ? (page.state as AuthoringPageState).authoringSection
+    : sectionIds.includes(page.url.searchParams.get('section') as SectionId)
+      ? page.url.searchParams.get('section')
+      : 'overview') as SectionId);
   const sectionItems = $derived([
     { id: 'overview', label: 'Overview', description: 'Readiness and next steps', href: '?section=overview', status: readinessLabel },
     { id: 'sheet', label: 'Sheet', description: 'Identity, story, and mechanics', href: '?section=sheet', count: detail.preflight.length },
@@ -48,6 +62,23 @@
     { id: 'preview', label: 'Preview', description: 'Scene, assistance, and sandbox', href: '?section=preview' },
     { id: 'review', label: 'Review', description: 'Submission and history', href: '?section=review', count: detail.preflight.length, status: detail.capabilities.canSubmit ? 'Available' : 'Unavailable' }
   ]);
+
+  function navigateWithinStudio(event: MouseEvent) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href]');
+    if (!link || link.target || link.hasAttribute('download')) return;
+    const destination = new URL(link.href, page.url);
+    if (destination.origin !== page.url.origin || destination.pathname !== page.url.pathname) return;
+    const section = destination.searchParams.get('section');
+    if (!section || !sectionIds.includes(section as SectionId)) return;
+    event.preventDefault();
+    pushState(destination, { ...page.state, authoringSection: section } as AuthoringPageState);
+  }
+
+  onMount(() => {
+    sectionNavHost.addEventListener('click', navigateWithinStudio);
+    return () => sectionNavHost.removeEventListener('click', navigateWithinStudio);
+  });
 </script>
 
 <main class="page-shell community-page authoring-workspace">
@@ -66,7 +97,9 @@
     <div class:community-error={form.conflict} class:community-success={!form.conflict} class="community-notice" role={form.conflict ? 'alert' : 'status'} aria-live="polite">{form.message}</div>
   {/if}
 
-  <PrivilegedSectionNav items={sectionItems} active={activeSection} label="Creator studio sections" />
+  <div bind:this={sectionNavHost}>
+    <PrivilegedSectionNav items={sectionItems} active={activeSection} label="Creator studio sections" />
+  </div>
 
   <section class="workspace-readiness authoring-section" aria-label="Draft readiness" hidden={activeSection !== 'overview'}>
     <div>
@@ -86,30 +119,49 @@
 
   <section id="draft-editor" class="workspace-editor-region authoring-section" class:artwork-editor-region={activeSection === 'art'} aria-label="NPC draft editor" hidden={activeSection !== 'sheet' && activeSection !== 'art'}>
     <div class="workspace-region-heading" hidden={activeSection !== 'sheet'}><span class="workspace-step">01</span><div><p class="eyebrow">Shape the companion</p><h2>Author the draft</h2><p>The details below are the canonical source for this companion. Clear writing gives scenes, dialogue, and consequences a shared foundation.</p></div></div>
-    <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))} showSheet={activeSection === 'sheet'} showArtwork={activeSection === 'art'}>
-      <PortraitPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {portrait} npcId={detail.npcId} visualSummary={portraitSummary} itemOptions={portraitItemOptions} />
+    <nav class="workspace-local-nav" aria-label="Artwork workspace" hidden={activeSection !== 'art'}>
+      <div>
+        <button type="button" aria-pressed={artSubview === 'sprites'} aria-controls="art-sprites-panel" onclick={() => artSubview = 'sprites'}>Character sprites</button>
+        <button type="button" aria-pressed={artSubview === 'setting'} aria-controls="art-setting-panel" onclick={() => artSubview = 'setting'}>Meeting setting</button>
+      </div>
+    </nav>
+    <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))} showSheet={activeSection === 'sheet'} showArtwork={activeSection === 'art' && artSubview === 'sprites'}>
+      <div id="art-sprites-panel" role="region" aria-label="Character sprites" hidden={activeSection !== 'art' || artSubview !== 'sprites'}>
+        <PortraitPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {portrait} npcId={detail.npcId} visualSummary={portraitSummary} itemOptions={portraitItemOptions} />
+      </div>
     </NpcSheetEditor>
   </section>
 
-  <div class="authoring-section" hidden={activeSection !== 'art'}>
+  <div id="art-setting-panel" class="authoring-section" role="region" aria-label="Meeting setting" hidden={activeSection !== 'art' || artSubview !== 'setting'}>
     <SettingPanel revision={detail.draft.revision} editable={detail.capabilities.canEdit} {settings} />
   </div>
 
   <div class="authoring-section preview-section" hidden={activeSection !== 'preview'}>
-    <AuthoringScenePreview
-      npcName={detail.draft.sheet.identity.name || 'This companion'}
-      portrait={selectedPortrait ? { previewUrl: selectedPortrait.previewUrl, altText: selectedPortrait.altText } : null}
-      setting={selectedSetting ? { previewUrl: selectedSetting.previewUrl, altText: selectedSetting.altText, name: selectedSetting.name } : null}
-    />
-
-    <AssistancePanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.assistance} assistance={detail.assistance} quota={detail.quota.assistanceDaily} />
-
-    <SandboxPanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.sandbox} sandbox={detail.sandbox} quota={detail.quota.sandboxDaily} />
+    <nav class="workspace-local-nav" aria-label="Preview workspace">
+      <div>
+        <button type="button" aria-pressed={previewSubview === 'scene'} aria-controls="preview-scene-panel" onclick={() => previewSubview = 'scene'}>Scene</button>
+        <button type="button" aria-pressed={previewSubview === 'assistance'} aria-controls="preview-assistance-panel" onclick={() => previewSubview = 'assistance'}>Assistance</button>
+        <button type="button" aria-pressed={previewSubview === 'sandbox'} aria-controls="preview-sandbox-panel" onclick={() => previewSubview = 'sandbox'}>Voice sandbox</button>
+      </div>
+    </nav>
+    <div id="preview-scene-panel" role="region" aria-label="Scene preview" hidden={previewSubview !== 'scene'}><AuthoringScenePreview
+        npcName={detail.draft.sheet.identity.name || 'This companion'}
+        portrait={selectedPortrait ? { previewUrl: selectedPortrait.previewUrl, altText: selectedPortrait.altText } : null}
+        setting={selectedSetting ? { previewUrl: selectedSetting.previewUrl, altText: selectedSetting.altText, name: selectedSetting.name } : null}
+      /></div>
+    <div id="preview-assistance-panel" role="region" aria-label="Writing assistance" hidden={previewSubview !== 'assistance'}><AssistancePanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.assistance} assistance={detail.assistance} quota={detail.quota.assistanceDaily} /></div>
+    <div id="preview-sandbox-panel" role="region" aria-label="Voice sandbox" hidden={previewSubview !== 'sandbox'}><SandboxPanel revision={detail.draft.revision} capability={detail.capabilities} provider={detail.provider.sandbox} sandbox={detail.sandbox} quota={detail.quota.sandboxDaily} /></div>
   </div>
 
   <div class="workspace-columns review-columns authoring-section" hidden={activeSection !== 'review'}>
-    <HistoryPanel revision={detail.draft.revision} versions={detail.versions} preflight={detail.preflight} capability={detail.capabilities} />
-    <RetirementPanel capability={detail.capabilities} retirement={detail.retirement} />
+    <nav class="workspace-local-nav workspace-local-nav-wide" aria-label="Review workspace">
+      <div>
+        <button type="button" aria-pressed={reviewSubview === 'submission'} aria-controls="review-submission-panel" onclick={() => reviewSubview = 'submission'}>Submission & history</button>
+        <button type="button" aria-pressed={reviewSubview === 'retirement'} aria-controls="review-retirement-panel" onclick={() => reviewSubview = 'retirement'}>Retirement</button>
+      </div>
+    </nav>
+    <div id="review-submission-panel" role="region" aria-label="Submission and history" hidden={reviewSubview !== 'submission'}><HistoryPanel revision={detail.draft.revision} versions={detail.versions} preflight={detail.preflight} capability={detail.capabilities} /></div>
+    <div id="review-retirement-panel" role="region" aria-label="Retirement" hidden={reviewSubview !== 'retirement'}><RetirementPanel capability={detail.capabilities} retirement={detail.retirement} /></div>
   </div>
 </main>
 
@@ -122,5 +174,14 @@
   .authoring-section { min-width: 0; }
   .artwork-editor-region { padding: 0; border: 0; background: transparent; box-shadow: none; }
   .preview-section { display: grid; gap: 1.2rem; }
+  .workspace-local-nav { margin-bottom: .8rem; }
+  .workspace-local-nav > div { display: flex; flex-wrap: wrap; gap: .45rem; padding: .45rem; border: 1px solid rgb(106 80 34 / .64); background: rgb(10 8 5 / .46); }
+  .workspace-local-nav button { min-height: 44px; border: 1px solid transparent; padding: .5rem .75rem; color: #cbb98d; background: transparent; cursor: pointer; }
+  .workspace-local-nav button:hover { border-color: #715426; background: rgb(71 48 15 / .25); }
+  .workspace-local-nav button[aria-pressed='true'] { border-color: #c99a3d; color: #f1d27a; background: linear-gradient(110deg, rgb(72 50 17 / .62), rgb(23 16 8 / .72)); }
+  .workspace-local-nav button:focus-visible { outline: 3px solid rgb(230 196 109 / .65); outline-offset: 2px; }
+  .workspace-local-nav-wide { grid-column: 1 / -1; margin-bottom: 0; }
+  .review-columns > [id^='review-'] { min-width: 0; }
+  .review-columns > [id^='review-'][hidden] { display: none; }
   @media (max-width: 700px) { .workspace-readiness { grid-template-columns: 1fr; } }
 </style>

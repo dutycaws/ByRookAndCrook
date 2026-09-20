@@ -221,22 +221,131 @@ test('guided authoring saves a readable world and story arc across reloads', asy
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
     await page.goto(`${page.url()}?section=sheet`);
 
+    const sheetTasks = page.getByRole('navigation', { name: 'NPC sheet tasks' });
+    await sheetTasks.getByRole('button', { name: /World:/ }).click();
     const world = page.locator('.guided-section').filter({ hasText: 'Their world and what they reveal' });
     await world.getByRole('button', { name: /Their world and what they reveal/ }).click();
+    const worldTasks = world.getByRole('navigation', { name: 'World tasks' });
+    await expect(worldTasks.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-pressed', 'true');
     await world.getByRole('button', { name: 'Add detail' }).click();
     await world.getByLabel('Name').fill('The Lantern Archive');
     await world.getByLabel('Description').fill('A quiet archive where old delivery routes and weather logs are kept by patient clerks.');
+    await worldTasks.getByRole('button', { name: 'Connections' }).click();
+    await expect(world.getByLabel('Name')).toBeHidden();
+    await worldTasks.getByRole('button', { name: 'Details' }).click();
+    await expect(world.getByLabel('Name')).toHaveValue('The Lantern Archive');
     const saveStatus = page.getByRole('status', { name: 'Draft save status' });
     await expect(saveStatus).toHaveText('Saved');
     await page.reload();
 
+    await sheetTasks.getByRole('button', { name: /World:/ }).click();
     await world.getByRole('button', { name: /Their world and what they reveal/ }).click();
     await expect(world.getByLabel('Name')).toHaveValue('The Lantern Archive');
+    await sheetTasks.getByRole('button', { name: /Story:/ }).click();
     await expect(page.getByRole('button', { name: /Their story arc/ })).toBeVisible();
+    const storyTasks = page.getByRole('navigation', { name: 'Story tasks' });
+    await storyTasks.getByRole('button').nth(1).click();
     await expect(page.getByText('Chapter 1', { exact: true })).toBeVisible();
     const textareasAreGuided = await page.locator('textarea').evaluateAll((fields) => fields.every((field) => !(field as HTMLTextAreaElement).value.trim().startsWith('[')));
     expect(textareasAreGuided).toBe(true);
     await expect(page.locator('input[type="hidden"][name="entities"]')).toHaveCount(1);
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('creator tasks retain an edited sheet while moving between focused rooms', async ({ page }) => {
+  const player = await createAuthor();
+  try {
+    const npcId = await createDraft(player, `Task Courier ${crypto.randomUUID().slice(0, 6)}`);
+    await signIn(page, player);
+    await page.goto(`/authoring/npcs/${npcId}?section=sheet`);
+
+    const taskMenu = page.getByRole('navigation', { name: 'NPC sheet tasks' });
+    const sectionMenu = page.getByRole('navigation', { name: 'Creator studio sections' });
+    const chooseSection = async (label: 'Sheet' | 'Art' | 'Preview' | 'Review') => {
+      const link = sectionMenu.getByRole('link', { name: new RegExp(label) });
+      if (!(await link.isVisible())) await sectionMenu.locator('summary').click();
+      await link.click();
+    };
+    await expect(taskMenu.getByRole('button', { name: /Foundation:/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('heading', { name: 'Identity' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Evolution' })).toBeHidden();
+
+    await taskMenu.getByRole('button', { name: /Personality:/ }).click();
+    const personalityTasks = page.getByRole('navigation', { name: 'Personality tasks' });
+    await expect(personalityTasks.getByRole('button', { name: 'Dimensions' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('heading', { name: 'Personality dimensions' })).toBeVisible();
+    await personalityTasks.getByRole('button', { name: 'Profile rules' }).click();
+    await expect(page.getByRole('heading', { name: 'Collection caps' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Personality dimensions' })).toBeHidden();
+    await personalityTasks.getByRole('button', { name: 'Profile entries' }).click();
+    await expect(page.getByRole('heading', { name: 'Initial profile entries' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Collection caps' })).toBeHidden();
+    await taskMenu.getByRole('button', { name: /Foundation:/ }).click();
+
+    const editedVoice = `A precise note ${crypto.randomUUID()}`;
+    await page.getByLabel('Voice and speech rules').fill(editedVoice);
+    await chooseSection('Art');
+    await expect(page).toHaveURL(/\?section=art$/);
+    await expect(page.locator('#art-sprites-panel')).toBeVisible();
+    await expect(page.getByRole('status', { name: 'Draft save status' })).toHaveText('Saved');
+    await expect(page).toHaveURL(/\?section=art$/);
+    await chooseSection('Sheet');
+    await expect(page.getByLabel('Voice and speech rules')).toHaveValue(editedVoice);
+    await page.goBack();
+    await expect(page).toHaveURL(/\?section=art$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/\?section=sheet$/);
+    await expect(page.getByLabel('Voice and speech rules')).toHaveValue(editedVoice);
+
+    await taskMenu.getByRole('button', { name: /Story:/ }).click();
+    await expect(page.getByRole('heading', { name: 'Identity' })).toBeHidden();
+    await expect(page.getByRole('button', { name: /Their story arc/ })).toBeVisible();
+    await taskMenu.getByRole('button', { name: /Foundation:/ }).click();
+    await expect(page.getByLabel('Voice and speech rules')).toHaveValue(editedVoice);
+
+    await chooseSection('Art');
+    const artworkChoices = page.getByRole('navigation', { name: 'Artwork workspace' });
+    await expect(page.locator('#art-sprites-panel')).toBeVisible();
+    await expect(page.locator('#art-setting-panel')).toBeHidden();
+    await artworkChoices.getByRole('button', { name: 'Meeting setting' }).click();
+    await expect(page.locator('#art-sprites-panel')).toBeHidden();
+    await expect(page.locator('#art-setting-panel')).toBeVisible();
+
+    await chooseSection('Preview');
+    const previewChoices = page.getByRole('navigation', { name: 'Preview workspace' });
+    await expect(page.locator('#preview-scene-panel')).toBeVisible();
+    await expect(page.locator('#preview-assistance-panel')).toBeHidden();
+    await expect(page.locator('#preview-sandbox-panel')).toBeHidden();
+    await previewChoices.getByRole('button', { name: 'Assistance' }).click();
+    await expect(page.locator('#preview-scene-panel')).toBeHidden();
+    await expect(page.locator('#preview-assistance-panel')).toBeVisible();
+    await expect(page.locator('#preview-sandbox-panel')).toBeHidden();
+
+    await chooseSection('Review');
+    const reviewChoices = page.getByRole('navigation', { name: 'Review workspace' });
+    await expect(page.locator('#review-submission-panel')).toBeVisible();
+    await expect(page.locator('#review-retirement-panel')).toBeHidden();
+    await reviewChoices.getByRole('button', { name: 'Retirement' }).click();
+    await expect(page.locator('#review-submission-panel')).toBeHidden();
+    await expect(page.locator('#review-retirement-panel')).toBeVisible();
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('creator workspace stays within the mobile viewport at 375px', async ({ page }) => {
+  const player = await createAuthor();
+  try {
+    const npcId = await createDraft(player, `Mobile Courier ${crypto.randomUUID().slice(0, 6)}`);
+    await page.setViewportSize({ width: 375, height: 844 });
+    await signIn(page, player);
+    for (const section of ['sheet', 'art', 'preview', 'review']) {
+      await page.goto(`/authoring/npcs/${npcId}?section=${section}`);
+      await expect(page.locator('main.authoring-workspace')).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    }
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -256,19 +365,27 @@ test('fixture assistance and a draft-pinned sandbox persist, then become preserv
 
     await signIn(page, player);
     await page.goto(`/authoring/npcs/${npcId}?section=preview`);
+    const previewWorkspace = page.getByRole('navigation', { name: 'Preview workspace' });
+    await previewWorkspace.getByRole('button', { name: 'Assistance' }).click();
     await expect(page.getByRole('heading', { name: 'Suggestion ready' })).toBeVisible();
     await expect(page.locator('.assistance-comparison strong').filter({ hasText: 'Current' }).first()).toBeVisible();
     await expect(page.locator('.assistance-comparison strong').filter({ hasText: 'Suggested' }).first()).toBeVisible();
+    await previewWorkspace.getByRole('button', { name: 'Voice sandbox' }).click();
     await expect(page.locator('.sandbox-transcript')).toContainText('How are preparations going?');
     await expect(page.locator('.sandbox-transcript')).toContainText('A dry map and a promise not to rush the crossing');
     await page.reload();
+    await previewWorkspace.getByRole('button', { name: 'Voice sandbox' }).click();
     await expect(page.locator('.sandbox-transcript article')).toHaveCount(4);
 
+    await previewWorkspace.getByRole('button', { name: 'Assistance' }).click();
     await page.getByRole('button', { name: 'Apply suggestion' }).click();
     await expect(page.locator('main > .community-notice')).toHaveText('Suggestion applied to the draft.');
+    await previewWorkspace.getByRole('button', { name: 'Voice sandbox' }).click();
     await expect(page.getByText('Earlier conversations are preserved')).toBeVisible();
     await page.reload();
+    await previewWorkspace.getByRole('button', { name: 'Assistance' }).click();
     await expect(page.getByRole('heading', { name: 'Suggestion applied' })).toBeVisible();
+    await previewWorkspace.getByRole('button', { name: 'Voice sandbox' }).click();
     await expect(page.getByText('Earlier sandbox transcripts (1)')).toBeVisible();
     await expect(page.locator('.preserved-sandboxes')).toContainText('A dry map and a promise not to rush the crossing');
   } finally {
@@ -285,6 +402,9 @@ test('submission history and a governed retirement request survive reload', asyn
     await signIn(page, player);
     await page.goto(`/authoring/npcs/${npcId}?section=art`);
     await expect(page.getByRole('heading', { name: 'Character sprites' })).toBeVisible();
+    await expect(page.locator('.portrait-preview.checkerboard')).toBeVisible();
+    await expect(page.getByText('Transparency verified')).toBeVisible();
+    await page.getByRole('navigation', { name: 'Artwork workspace' }).getByRole('button', { name: 'Meeting setting' }).click();
     await expect(page.getByRole('heading', { name: 'A place to meet' })).toBeVisible();
     await expect(page.getByText('Lantern-lit tavern table', { exact: true })).toBeVisible();
     const settingPreview = page.locator('.setting-preview').first();
@@ -297,8 +417,6 @@ test('submission history and a governed retirement request survive reload', asyn
     } else {
       await expect(settingPreview.getByText('Setting preview unavailable', { exact: true })).toBeVisible();
     }
-    await expect(page.locator('.portrait-preview.checkerboard')).toBeVisible();
-    await expect(page.getByText('Transparency verified')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.goto(`/authoring/npcs/${npcId}?section=preview`);
     await expect(page.locator('.authoring-scene-preview')).toBeVisible();
@@ -306,13 +424,15 @@ test('submission history and a governed retirement request survive reload', asyn
     await page.getByRole('button', { name: 'Submit version 1' }).click();
     await expect(page.locator('main > .community-notice')).toContainText('Version 1 submitted');
     await expect(page.getByText('Version 1', { exact: true })).toBeVisible();
+    await page.getByRole('navigation', { name: 'Review workspace' }).getByRole('button', { name: 'Retirement' }).click();
     await page.getByLabel('Why should this NPC be retired?').fill('This prototype courier is being replaced by a more focused community character.');
     await page.getByRole('button', { name: 'Request retirement review' }).click();
     await expect(page.locator('main > .community-notice')).toHaveText('Retirement request submitted for review.');
     await page.reload();
+    await expect(page.getByText('Version 1', { exact: true })).toBeVisible();
+    await page.getByRole('navigation', { name: 'Review workspace' }).getByRole('button', { name: 'Retirement' }).click();
     await expect(page.getByText('Pending review', { exact: true })).toBeVisible();
     await expect(page.getByText('This prototype courier is being replaced by a more focused community character.')).toBeVisible();
-    await expect(page.getByText('Version 1', { exact: true })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
