@@ -116,7 +116,7 @@ jobs:
         run: npm run check
 
       - name: Validate versioned NPC content
-        run: npm run npc:content:check
+        run: npm run npc:catalog:check
 
       - name: Test unit behavior
         run: npm run test:unit
