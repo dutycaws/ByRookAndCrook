@@ -3,6 +3,17 @@
 -- V2 sheet; it contains no V1 conversion or compatibility materializer.
 begin;
 
+-- Generated deep residents are package-backed identities without an author.
+-- The original community platform only admitted authored and first-party rows.
+alter table private.npc_identities drop constraint npc_identities_origin_check;
+alter table private.npc_identities drop constraint npc_identities_check;
+alter table private.npc_identities
+  add constraint npc_identities_origin_check check (origin in ('first_party','community','procedural')),
+  add constraint npc_identities_creator_check check (
+    (origin = 'community' and creator_id is not null)
+    or (origin in ('first_party','procedural') and creator_id is null)
+  );
+
 -- The package-backed arrival path shares the tavern's current resident limit.
 create or replace function private.world_capacity(p_save uuid)
 returns integer
@@ -223,6 +234,10 @@ begin
   select * into prior from private.world_promoted_npc_package_receipts where canonical_entity_id=p_entity_id and save_id=p_save_id;
   if found then return prior.result || jsonb_build_object('replayed',true); end if;
   select * into entity from private.world_canonical_entities where id=p_entity_id and save_id=p_save_id for update;
+  -- A concurrent materializer may have completed while this caller waited on
+  -- the canonical entity lock. Re-read the durable receipt before any writes.
+  select * into prior from private.world_promoted_npc_package_receipts where canonical_entity_id=p_entity_id and save_id=p_save_id;
+  if found then return prior.result || jsonb_build_object('replayed',true); end if;
   select * into lifecycle from private.world_generated_entity_lifecycle where entity_id=p_entity_id and save_id=p_save_id for update;
   if not found or entity.entity_kind<>'npc' or entity.origin<>'procedural' or entity.lifecycle<>'active'
     or lifecycle.entity_role<>'deep_npc' then
@@ -251,8 +266,98 @@ begin
   return (select result from private.world_promoted_npc_package_receipts where canonical_entity_id=p_entity_id and save_id=p_save_id);
 end $f$;
 
+-- A committed procedural command is immutable before this service-only step
+-- runs. Read only the exact command receipt, materialize its deep NPCs through
+-- V2 packages, and let the package receipt make retries an exact replay.
+create function public.world_materialize_procedural_npc_packages(
+  p_settlement_id uuid,
+  p_job_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  settlement private.world_settlements;
+  receipt private.world_procedural_command_receipts;
+  operation jsonb;
+  v_entity_id uuid;
+  promotion jsonb;
+  materialized_count integer := 0;
+begin
+  perform private.world_settlement_assert_service();
+  select * into settlement
+  from private.world_settlements
+  where id = p_settlement_id
+  for share;
+  if not found then raise sqlstate 'PT404' using message = 'Settlement not found'; end if;
+
+  select * into receipt
+  from private.world_procedural_command_receipts
+  where job_id = p_job_id
+  for share;
+  if not found or not exists (
+    select 1 from private.world_settlement_jobs job
+    where job.id = p_job_id and job.settlement_id = settlement.id
+      and job.job_kind = 'procedural_world'
+  ) then
+    raise sqlstate 'PT409' using message = 'Procedural command receipt is unavailable';
+  end if;
+
+  for operation in
+    select value
+    from jsonb_array_elements(coalesce(receipt.result -> 'operations', '[]'::jsonb))
+    where value ->> 'operation' = 'entity'
+      and value ->> 'entityKind' = 'npc'
+      and coalesce((value ->> 'reused')::boolean, false) = false
+  loop
+    begin
+      v_entity_id := (operation ->> 'entityId')::uuid;
+    exception when invalid_text_representation then
+      raise sqlstate 'PT409' using message = 'Procedural command receipt has an invalid canonical entity';
+    end;
+    if exists (
+      select 1
+      from private.world_canonical_entities entity
+      join private.world_generated_entity_lifecycle lifecycle on lifecycle.entity_id = entity.id
+      where entity.id = v_entity_id
+        and entity.save_id = settlement.save_id
+        and entity.origin = 'procedural'
+        and entity.entity_kind = 'npc'
+        and entity.lifecycle = 'active'
+        and lifecycle.entity_role = 'deep_npc'
+    ) then
+      promotion := private.world_promote_canonical_npc(settlement.save_id, v_entity_id);
+      if not coalesce((promotion ->> 'replayed')::boolean, false) then
+        materialized_count := materialized_count + 1;
+      end if;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'status', case when materialized_count > 0 then 'completed' else 'reused' end,
+    'promotedCount', materialized_count
+  );
+end
+$function$;
+
+create function public.world_retry_procedural_npc_package_materialization(
+  p_settlement_id uuid,
+  p_job_id uuid
+)
+returns jsonb
+language sql
+security definer
+set search_path = ''
+as $function$
+  select public.world_materialize_procedural_npc_packages(p_settlement_id, p_job_id)
+$function$;
+
 revoke all on table private.world_promoted_npc_package_receipts from public,anon,authenticated,service_role;
 revoke all on function private.world_promoted_npc_sheet_v2(private.world_canonical_entities),private.world_promote_canonical_npc(uuid,uuid) from public,anon,authenticated,service_role;
+revoke all on function public.world_materialize_procedural_npc_packages(uuid,uuid),public.world_retry_procedural_npc_package_materialization(uuid,uuid) from public,anon,authenticated;
 grant execute on function private.world_procedural_resident_capability(uuid,uuid),private.world_frozen_resident_evolution_base(uuid),private.world_promote_canonical_npc(uuid,uuid) to service_role;
+grant execute on function public.world_materialize_procedural_npc_packages(uuid,uuid),public.world_retry_procedural_npc_package_materialization(uuid,uuid) to service_role;
 
 commit;

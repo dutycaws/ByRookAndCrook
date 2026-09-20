@@ -2420,6 +2420,10 @@ export type Database = {
         }
         Returns: Json
       }
+      world_materialize_procedural_npc_packages: {
+        Args: { p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
       world_promote_supporting_actor: {
         Args: { p_entity_id: string; p_reason?: string; p_save_id: string }
         Returns: Json
@@ -2434,6 +2438,10 @@ export type Database = {
           p_save_id: string
           p_warning_id: string
         }
+        Returns: Json
+      }
+      world_retry_procedural_npc_package_materialization: {
+        Args: { p_job_id: string; p_settlement_id: string }
         Returns: Json
       }
       world_runtime_art_accept: {

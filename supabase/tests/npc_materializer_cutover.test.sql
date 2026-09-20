@@ -1,11 +1,15 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(13);
 
 select has_function('private','seed_world_npcs',array['uuid'],'new saves use the catalog-backed roster seeder');
 select has_function('private','maybe_arrive_world_npc',array['uuid','integer','uuid'],'community arrivals use the package-backed selection path');
 select has_function('private','world_promote_canonical_npc',array['uuid','uuid'],'promotion retains its public UUID contract');
 select has_table('private','world_promoted_npc_package_receipts','promoted residents have package-backed replay receipts');
+
+select lives_ok($$insert into private.npc_identities(id,origin,normalized_name,status,rating) values
+  ('66000000-0000-4000-8000-000000000041','procedural','generated-cutover-fixture','published','standard')$$,
+  'procedural package identities are admitted without a community author');
 
 insert into auth.users(id,email,role,aud) values
   ('66000000-0000-4000-8000-000000000001','materializer-cutover@example.test','authenticated','authenticated');

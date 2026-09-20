@@ -458,7 +458,7 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
           await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_commit',status:replayed?'reused':'completed',attempt:claim.attempt,...(replayed ? {} : {durationMs:elapsed(commitStarted)})});
           const promotionStarted=now();
           try {
-            const promotion=proceduralWorldPromotionStatus(await rpc(client,'world_discover_procedural_npc_promotions',{
+            const promotion=proceduralWorldPromotionStatus(await rpc(client,'world_materialize_procedural_npc_packages',{
               p_settlement_id:claim.settlementId,p_job_id:claim.jobId
             }));
             if (!promotion) throw new Error('Procedural NPC promotion receipt was malformed.');
@@ -466,11 +466,15 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
             return {status:'completed',kind:'procedural_world'};
           } catch {
             await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_promotion',status:'failed',attempt:claim.attempt,durationMs:elapsed(promotionStarted),errorCode:'promotion_failed'});
-            // The canonical command is already durable. Requeue only this exact
-            // receipt-backed job, then let its next claim replay without provider work.
+            // The canonical command is already durable. Retry only its exact
+            // immutable receipt so an uncertain first response cannot duplicate
+            // provider work, world commands, or resident packages.
             try {
-              await rpc(client,'world_retry_procedural_npc_promotion',{p_settlement_id:claim.settlementId,p_job_id:claim.jobId});
-            } catch { /* A concurrent claimer may have already taken the retry. */ }
+              const recovered=proceduralWorldPromotionStatus(await rpc(client,'world_retry_procedural_npc_package_materialization',{p_settlement_id:claim.settlementId,p_job_id:claim.jobId}));
+              if (!recovered) throw new Error('Procedural NPC package retry receipt was malformed.');
+              await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage:'procedural_world_promotion',status:recovered,attempt:claim.attempt});
+              return {status:'completed',kind:'procedural_world'};
+            } catch { /* The exact receipt remains available to an operator retry. */ }
             return {status:'failed',errorCode:'promotion_failed'};
           }
         } catch (cause) {

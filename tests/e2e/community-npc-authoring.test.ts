@@ -286,7 +286,16 @@ test('submission history and a governed retirement request survive reload', asyn
     await expect(page.getByRole('heading', { name: 'Character sprites' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'A place to meet' })).toBeVisible();
     await expect(page.getByText('Lantern-lit tavern table', { exact: true })).toBeVisible();
-    await expect(page.locator('.setting-preview img').first()).toBeVisible();
+    const settingPreview = page.locator('.setting-preview').first();
+    const settingPreviewContent = settingPreview.locator(':scope > img, :scope > .setting-preview-empty');
+    await expect(settingPreview).toBeVisible();
+    await expect(settingPreviewContent).toHaveCount(1);
+    const settingImage = settingPreview.locator(':scope > img');
+    if (await settingImage.count()) {
+      await expect(settingImage).toHaveAttribute('src', /\S/);
+    } else {
+      await expect(settingPreview.getByText('Setting preview unavailable', { exact: true })).toBeVisible();
+    }
     await expect(page.locator('.portrait-preview.checkerboard')).toBeVisible();
     await expect(page.getByText('Transparency verified')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

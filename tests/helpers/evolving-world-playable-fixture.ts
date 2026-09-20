@@ -86,10 +86,10 @@ async function drainFixtureClaims(service: RpcClient, settlementId: string): Pro
         p_settlement_id: claim.settlementId, p_job_id: claim.jobId, p_fence: claim.fence, p_proposal: proposal
       });
       if (committed.error) throw committed.error;
-      const promoted = await service.rpc('world_discover_procedural_npc_promotions', {
+      const materialized = await service.rpc('world_materialize_procedural_npc_packages', {
         p_settlement_id: claim.settlementId, p_job_id: claim.jobId
       });
-      if (promoted.error) throw promoted.error;
+      if (materialized.error) throw materialized.error;
     } else {
       const completed = await service.rpc('world_settlement_safe_result', {
         p_settlement_id: claim.settlementId, p_job_id: claim.jobId, p_fence: claim.fence,

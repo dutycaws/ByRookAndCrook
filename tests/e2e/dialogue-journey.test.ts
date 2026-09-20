@@ -6,6 +6,10 @@ import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
 
 const promptRegistry = fixturePromptRegistry();
 
+function barResidents(page: import('@playwright/test').Page) {
+  return page.getByRole('group', { name: 'Scene characters' }).getByRole('button');
+}
+
 /**
  * The community-NPC runtime deliberately owns its own bounded Bar projection.
  * Do not fall back to get_bar_snapshot here: that legacy projection cannot see
@@ -15,10 +19,29 @@ async function uuidBarSnapshot(player: Awaited<ReturnType<typeof createBrewedTav
   const result = await player.client.rpc('npc_bar_snapshot');
   expect(result.error).toBeNull();
   return result.data as {
-    save: { gold: number };
+    save: { id: string; gold: number };
     offerings: { beverages: unknown[]; intentCards: unknown[] };
     recent: { hospitality: Array<{ goldBalance: number }> };
   };
+}
+
+async function finishQueuedSettlement(player: Awaited<ReturnType<typeof createBrewedTavern>>, saveId: string) {
+  const status = await player.client.rpc('world_settlement_status', { p_save_id: saveId });
+  expect(status.error).toBeNull();
+  const settlementId = (status.data as { id?: string } | null)?.id;
+  expect(settlementId).toMatch(/^[0-9a-f-]{36}$/i);
+  for (let index = 0; index < 16; index += 1) {
+    const claim = await player.admin.rpc('world_settlement_claim', { p_settlement_id: settlementId! });
+    expect(claim.error).toBeNull();
+    const receipt = claim.data as { status?: string; jobId?: string; fence?: string };
+    if (!receipt.jobId || !receipt.fence) return;
+    const completed = await player.admin.rpc('world_settlement_safe_result', {
+      p_settlement_id: settlementId!, p_job_id: receipt.jobId, p_fence: receipt.fence,
+      p_kind: 'skipped', p_public_digest: 'The deterministic browser fixture completed this overnight moment.'
+    });
+    expect(completed.error).toBeNull();
+  }
+  throw new Error('The deterministic settlement fixture exceeded its bounded job count.');
 }
 
 test('dialogue recovers a lost result, consumes hospitality once, and carries a plan overnight', async ({page}) => {
@@ -32,7 +55,9 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await page.getByRole('button', {name:'Open the ledger'}).click();
     await expect(page).toHaveURL(/\/garden$/);
     await page.goto('/bar');
-    await page.getByRole('button', {name:'Lira Nightwind Elven Ranger'}).click();
+    const residents = barResidents(page);
+    await expect(residents).toHaveCount(2);
+    await expect(residents.nth(0)).toHaveAttribute('aria-pressed', 'true');
     const invalid = await page.request.post('/api/dialogue', {headers:{origin:new URL(page.url()).origin}, data:{message:'Missing command fields'}});
     expect(invalid.status()).toBe(400);
     expect((await page.request.post('/api/dialogue', {headers:{origin:'https://foreign.example'},data:{}})).status()).toBe(403);
@@ -65,19 +90,26 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await expect(page.locator('.npc-exchange')).toHaveCount(1);
     await expect(page.locator('.npc-exchange')).toContainText('I agree. I will scout on my next outing, then try diplomacy on the following one.');
     await page.getByRole('button',{name:'Close and begin next day'}).click();
+    await expect(page.getByRole('region', { name: 'The night is settling' })).toBeVisible();
+    await finishQueuedSettlement(player, completedStock.save.id);
+    await page.reload();
     await expect(page.getByText('The common room · Day 2',{exact:true})).toBeVisible();
-    await expect(page.locator('.npc-intention')).toContainText('some preparation');
-    await expect(page.locator('.npc-news')).toContainText(/prepared for (the )?(agreed objective|current milestone)/i);
-    await page.getByRole('button',{name:'Torvin Ashbeard Dwarven Merchant'}).click();
+    await expect(page.locator('.npc-intention')).toContainText('Next outing: Prepare · scouting');
+    await expect(page.locator('.npc-intention')).toContainText('Later: Attempt the objective · diplomacy');
+    await residents.nth(1).click();
     await expect(page.locator('.npc-exchange')).toHaveCount(0);
-    await expect(page.locator('.npc-intention')).toContainText('some preparation');
+    await expect(page.locator('.npc-intention')).toContainText('Current intention · active');
+    await expect(page.locator('.npc-intention')).toContainText('Readiness: unprepared');
     expect(requests).toBe(1);
     expect(pageErrors).toEqual([]);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
     await page.evaluate(()=>window.scrollTo(0,0));
     await page.screenshot({path:`test-results/dialogue-${test.info().project.name}.png`,fullPage:true});
   } finally {
-    expect((await player.admin.auth.admin.deleteUser(player.userId)).error).toBeNull();
+    const cleanup = await player.admin.auth.admin.deleteUser(player.userId);
+    // Immutable settlement history deliberately prevents this auth cascade once
+    // the save has advanced. The disposable test database is reset between runs.
+    if (cleanup.error && !/database error deleting user/i.test(cleanup.error.message)) throw cleanup.error;
   }
 });
 
