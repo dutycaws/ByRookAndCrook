@@ -1,8 +1,10 @@
 <script lang="ts">
   import type { PageProps } from './$types';
+  import PrivilegedWorkspaceNav from '$lib/components/community/PrivilegedWorkspaceNav.svelte';
 
   let { data, form }: PageProps = $props();
   let admin = $derived(data.community.capabilities.includes('admin'));
+  let reportResolutions = $state<Record<string, string>>({});
 
   const describeJson = (value: unknown) => JSON.stringify(value ?? {}, null, 2);
   type OptionChoice = { id: string; kind: string; value: string; targetKinds: string[] };
@@ -22,9 +24,13 @@
     return { actions: [...new Set(steps.map((step) => step.action).filter(Boolean))], approaches: [...new Set(steps.map((step) => step.approach).filter(Boolean))] };
   };
   const readableKind = (kind: string) => kind.replace(/[._]/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+  const reportResolution = (id: string) => reportResolutions[id] ?? 'dismiss';
+  const reportAction = (id: string) => reportResolution(id) === 'dismiss' ? 'none' : reportResolution(id);
+  const reportUphold = (id: string) => reportResolution(id) === 'dismiss' ? 'false' : 'true';
 </script>
 
-<main class="page-shell community-page">
+<main class="page-shell community-page review-desk-page">
+  <PrivilegedWorkspaceNav capabilities={data.community.capabilities} current="review" />
   <header>
     <p class="eyebrow">Community governance</p>
     <h1>Review desk</h1>
@@ -32,8 +38,14 @@
   </header>
 
   {#if form?.message}
-    <p class="community-notice">{form.message}</p>
+    <p class="community-notice" role="status" aria-live="polite">{form.message}</p>
   {/if}
+
+  <section class="review-desk-summary" aria-label="Review desk summary">
+    <div><strong>{submissions.length}</strong><span>submitted {submissions.length === 1 ? 'version' : 'versions'}</span></div>
+    <div><strong>{data.moderation.length}</strong><span>open moderation {data.moderation.length === 1 ? 'item' : 'items'}</span></div>
+    {#if admin}<div><strong>{data.users.length}</strong><span>matching access {data.users.length === 1 ? 'record' : 'records'}</span></div>{/if}
+  </section>
 
   <section>
     <h2>Submitted versions</h2>
@@ -41,40 +53,47 @@
     <div class="community-grid two reviewer-submission-grid">
       {#each submissions as item (item.versionId)}
         {@const requirements = campaignRequirements(item.sheet ?? {})}
-        <article class="community-card">
-          <p class="eyebrow">Immutable submitted version</p>
-          <h3>{item.sheet?.identity?.name ?? 'Unnamed NPC'}</h3>
-          <p>{item.sheet?.identity?.shortDescription ?? 'No description supplied.'}</p>
-          <dl class="reviewer-facts">
-            <div><dt>Candidate hash</dt><dd><code title={item.candidateHash}>{item.candidateHash?.slice(0, 16) ?? '—'}…</code></dd></div>
-            <div><dt>Frozen sheet</dt><dd><code title={item.frozenSheetHash}>{item.frozenSheetHash?.slice(0, 16) ?? '—'}…</code></dd></div>
-            <div><dt>Package state</dt><dd>{item.prospectivePackage?.state ?? 'awaiting review'}</dd></div>
-            <div><dt>Registry</dt><dd>{item.optionRegistryVersion ?? '—'}</dd></div>
-          </dl>
-          <details>
-            <summary>Evolution preview</summary>
-            <p>This is the prospective resident definition derived from the frozen sheet. Capability permissions are selected separately below.</p>
-            <pre>{describeJson(item.evolutionPreview)}</pre>
-          </details>
+        <article class="community-card reviewer-submission-card">
+          <header class="reviewer-submission-heading">
+            <div><p class="eyebrow">Immutable submitted version</p><h3>{item.sheet?.identity?.name ?? 'Unnamed NPC'}</h3><p>{item.sheet?.identity?.shortDescription ?? 'No description supplied.'}</p></div>
+            <span class="status-pill">{item.prospectivePackage?.state ?? 'awaiting review'}</span>
+          </header>
+          <section class="reviewer-checklist" aria-label="Review checklist">
+            <h4>Review checklist</h4>
+            <ul>
+              <li><span>Automated evaluation</span><strong>{item.evaluation?.status ?? 'not started'}</strong></li>
+              <li><span>Campaign coverage</span><strong>{requirements.actions.length + requirements.approaches.length} required choices</strong></li>
+              <li><span>Permanent outcomes</span><strong>{item.prospectivePackage?.terminalOutcomes?.length ?? 0} authored</strong></li>
+              <li><span>Available capabilities</span><strong>{item.optionChoices?.length ?? 0} server issued</strong></li>
+            </ul>
+          </section>
           {#if item.prospectivePackage?.terminalOutcomes?.length}
             <aside class="community-notice"><strong>Authored permanent-loss outcomes:</strong> {item.prospectivePackage.terminalOutcomes.join(', ')}. They are allowed only when the campaign’s authored conditions occur.</aside>
           {/if}
           <p class="reviewer-requirements"><strong>Campaign-required coverage:</strong> actions: {requirements.actions.join(', ') || 'none'} · approaches: {requirements.approaches.join(', ') || 'none'}. Select matching server options to approve.</p>
-          <p>Evaluation: {item.evaluation?.status ?? 'not started'}</p>
-          <details>
-            <summary>Evaluation details</summary>
-            <pre>{describeJson(item.evaluation?.result)}</pre>
+          <details class="reviewer-technical-evidence">
+            <summary>Technical evidence</summary>
+            <dl class="reviewer-facts">
+              <div><dt>Candidate hash</dt><dd><code title={item.candidateHash}>{item.candidateHash?.slice(0, 16) ?? '—'}…</code></dd></div>
+              <div><dt>Frozen sheet</dt><dd><code title={item.frozenSheetHash}>{item.frozenSheetHash?.slice(0, 16) ?? '—'}…</code></dd></div>
+              <div><dt>Package state</dt><dd>{item.prospectivePackage?.state ?? 'awaiting review'}</dd></div>
+              <div><dt>Registry</dt><dd>{item.optionRegistryVersion ?? '—'}</dd></div>
+            </dl>
+            <details><summary>Evolution preview</summary><p>This prospective resident definition is derived from the frozen sheet.</p><pre>{describeJson(item.evolutionPreview)}</pre></details>
+            <details><summary>Evaluation details</summary><pre>{describeJson(item.evaluation?.result)}</pre></details>
           </details>
-          <form method="POST" action="?/comment">
+          <form method="POST" action="?/comment" class="reviewer-stage reviewer-comment-form">
             <input type="hidden" name="npcId" value={item.npcId} />
             <input type="hidden" name="versionId" value={item.versionId} />
-            <input name="section" value="identity" />
-            <textarea name="body" required placeholder="Review comment"></textarea>
-            <button>Comment</button>
+            <div class="reviewer-stage-heading"><span>1</span><div><h4>Leave actionable feedback</h4><p>Anchor the note to the section the author should revise.</p></div></div>
+            <label>Draft section<select name="section"><option value="identity">Identity</option><option value="appearance">Appearance</option><option value="personality">Personality</option><option value="lore">Lore</option><option value="skills">Skills</option><option value="campaign">Campaign</option></select></label>
+            <label>What needs to change?<textarea name="body" required placeholder="Explain the specific change and why it matters."></textarea></label>
+            <button class="secondary-action">Add review comment</button>
           </form>
-          <form method="POST" action="?/decide" class="reviewer-approval">
+          <form method="POST" action="?/decide" class="reviewer-approval reviewer-stage">
             <input type="hidden" name="versionId" value={item.versionId} />
             <input type="hidden" name="decision" value="approve" />
+            <div class="reviewer-stage-heading"><span>2</span><div><h4>Approve a capability package</h4><p>Select only the server-issued capabilities supported by the frozen submission.</p></div></div>
             <fieldset>
               <legend>Reviewer-selected capabilities</legend>
               <p>These IDs are issued by the server for this candidate. The author cannot set them, and the raw capability package is never editable here.</p>
@@ -87,18 +106,19 @@
                 </fieldset>
               {/each}
             </fieldset>
-            <textarea name="notes" placeholder="Approval notes for the author"></textarea>
+            <label>Approval notes<textarea name="notes" placeholder="Record why this package is ready."></textarea></label>
             <button class="primary-action">Approve selected package</button>
           </form>
-          <form method="POST" action="?/decide" class="reviewer-nonapproval">
+          <form method="POST" action="?/decide" class="reviewer-nonapproval reviewer-stage">
             <input type="hidden" name="versionId" value={item.versionId} />
-            <textarea name="notes" required placeholder="Required notes for changes or rejection"></textarea>
-            <button name="decision" value="request_changes">Request changes</button>
-            <button name="decision" value="reject">Reject submission</button>
+            <h4>Or return this submission</h4>
+            <label>Required explanation<textarea name="notes" required placeholder="Tell the author what must change, or why this submission cannot proceed."></textarea></label>
+            <div class="reviewer-button-row"><button name="decision" value="request_changes">Request changes</button><button class="quiet-danger" name="decision" value="reject">Reject submission</button></div>
           </form>
-          <form method="POST" action="?/publish">
+          <form method="POST" action="?/publish" class="reviewer-stage reviewer-publish-stage">
             <input type="hidden" name="versionId" value={item.versionId} />
-            <button class="primary-action">Publish approved immutable package</button>
+            <div class="reviewer-stage-heading"><span>3</span><div><h4>Publish the approved package</h4><p>{item.prospectivePackage?.state === 'approved' ? 'Approval is recorded. Publishing makes this immutable package available to new saves.' : 'Approve a package before publication becomes available.'}</p></div></div>
+            <button class="primary-action" disabled={item.prospectivePackage?.state !== 'approved'}>Publish approved immutable package</button>
           </form>
         </article>
       {:else}
@@ -151,13 +171,21 @@
             <h3>{item.category}</h3>
             <p>Filed {new Date(item.createdAt).toLocaleString()}.</p>
             <a href={`?report=${item.id}#report-detail`}>Review protected evidence</a>
-            <form method="POST" action="?/resolveReport">
+            <form method="POST" action="?/resolveReport" class="report-resolution-form">
               <input type="hidden" name="reportId" value={item.id} />
-              <label>Action <select name="action"><option>none</option><option>reinstate</option><option>pause</option><option>quarantine</option><option>ban</option></select></label>
-              <textarea name="reviewerReason" required placeholder="Reason for reporter"></textarea>
-              <textarea name="creatorReason" required placeholder="Reason for creator"></textarea>
-              <button name="uphold" value="true">Uphold</button>
-              <button name="uphold" value="false">Dismiss</button>
+              <input type="hidden" name="action" value={reportAction(item.id)} />
+              <input type="hidden" name="uphold" value={reportUphold(item.id)} />
+              <fieldset>
+                <legend>Resolution</legend>
+                <label><input type="radio" name={`resolution-${item.id}`} value="dismiss" checked={reportResolution(item.id) === 'dismiss'} onchange={() => reportResolutions = { ...reportResolutions, [item.id]: 'dismiss' }} /> Dismiss the report</label>
+                <label><input type="radio" name={`resolution-${item.id}`} value="reinstate" checked={reportResolution(item.id) === 'reinstate'} onchange={() => reportResolutions = { ...reportResolutions, [item.id]: 'reinstate' }} /> Uphold and reinstate</label>
+                <label><input type="radio" name={`resolution-${item.id}`} value="pause" checked={reportResolution(item.id) === 'pause'} onchange={() => reportResolutions = { ...reportResolutions, [item.id]: 'pause' }} /> Uphold and pause</label>
+                <label><input type="radio" name={`resolution-${item.id}`} value="quarantine" checked={reportResolution(item.id) === 'quarantine'} onchange={() => reportResolutions = { ...reportResolutions, [item.id]: 'quarantine' }} /> Uphold and quarantine</label>
+                <label><input type="radio" name={`resolution-${item.id}`} value="ban" checked={reportResolution(item.id) === 'ban'} onchange={() => reportResolutions = { ...reportResolutions, [item.id]: 'ban' }} /> Uphold and ban</label>
+              </fieldset>
+              <label>Message to reporter<textarea name="reviewerReason" required placeholder="Explain the resolution to the reporter."></textarea></label>
+              <label>Message to creator<textarea name="creatorReason" required placeholder="Explain the resolution and any next step to the creator."></textarea></label>
+              <button class:quiet-danger={reportResolution(item.id) === 'quarantine' || reportResolution(item.id) === 'ban'}>{reportResolution(item.id) === 'dismiss' ? 'Dismiss report' : `Apply ${readableKind(reportResolution(item.id))}`}</button>
             </form>
           {:else if item.kind === 'retirement'}
             <p class="eyebrow">Retirement request</p>
@@ -179,7 +207,7 @@
   </section>
 
   {#if admin}
-    <section>
+    <section class="admin-access-section">
       <h2>Access administration</h2>
       <form class="community-card" method="GET">
         <input name="q" value={data.query} placeholder="Search email" />
@@ -201,16 +229,17 @@
           </article>
         {/each}
       </div>
-      <h2>Permanent NPC removal</h2>
-      <form class="community-card" method="POST" action="?/quarantine">
-        <p>Purge removes the NPC from saves and permanently deletes its private portrait master and runtime sprite. Governance-safe hashes and audit reasons remain.</p>
-        <label>NPC ID <input name="npcId" required pattern="[0-9a-fA-F-]{36}" autocomplete="off" /></label>
-        <label>Audit reason <textarea name="reason" minlength="3" required></textarea></label>
-        <label>Type PURGE to confirm <input name="confirmation" required pattern="PURGE" autocomplete="off" /></label>
-        <button name="purge" value="true">Permanently purge NPC</button>
-      </form>
-      <h2>Audit trail</h2>
-      <pre class="community-card">{describeJson(data.audit)}</pre>
+      <details class="community-card danger-zone">
+        <summary>Danger zone · permanent NPC removal</summary>
+        <form method="POST" action="?/quarantine">
+          <p>Purge removes the NPC from saves and permanently deletes its private portrait master and runtime sprite. Governance-safe hashes and audit reasons remain.</p>
+          <label>NPC ID <input name="npcId" required pattern="[0-9a-fA-F-]{36}" autocomplete="off" /></label>
+          <label>Audit reason <textarea name="reason" minlength="3" required></textarea></label>
+          <label>Type PURGE to confirm <input name="confirmation" required pattern="PURGE" autocomplete="off" /></label>
+          <button class="quiet-danger" name="purge" value="true">Permanently purge NPC</button>
+        </form>
+      </details>
+      <details class="community-card audit-disclosure"><summary>Audit trail</summary><pre>{describeJson(data.audit)}</pre></details>
     </section>
   {/if}
 </main>

@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(20);
+select plan(21);
 
 select has_table('private','npc_v2_review_candidates','V2 reviewer candidates freeze submitted sheets');
 select has_table('private','npc_v2_review_decisions','V2 review decisions persist server-resolved choices');
@@ -39,6 +39,7 @@ select throws_ok($$select public.npc_reviewer_decide('65000000-0000-4000-8000-00
 select throws_ok($$select public.npc_reviewer_decide('65000000-0000-4000-8000-000000000012','approve','Bad option.',null,array['effect.apply_economy_modifier'])$$,'PT400',null,'unissued option IDs are rejected');
 select throws_ok($$select public.npc_reviewer_decide('65000000-0000-4000-8000-000000000012','approve','Incomplete campaign coverage.',null,array['quest.action.prepare','effect.adjust_relationship'])$$,'PT422',null,'approval rejects options that omit an authored campaign approach');
 select is((public.npc_reviewer_decide('65000000-0000-4000-8000-000000000012','approve','Approved with narrow capabilities.',null,array['quest.action.prepare','quest.approach.scouting','effect.adjust_relationship','social.conceal'])->>'decision'),'approve','approval records only reviewed option IDs');
+select is((public.npc_reviewer_submission('65000000-0000-4000-8000-000000000012')#>>'{prospectivePackage,state}'),'approved','reviewer projection exposes when the immutable package is ready to publish');
 reset role;
 select is((select reviewer_id from private.npc_v2_review_decisions where version_id='65000000-0000-4000-8000-000000000012'),'65000000-0000-4000-8000-000000000002'::uuid,'decision records the reviewer actor');
 select is((select capability_registry_version from private.npc_v2_review_decisions where version_id='65000000-0000-4000-8000-000000000012'),'community-capability-options-v1','decision records the registry version');

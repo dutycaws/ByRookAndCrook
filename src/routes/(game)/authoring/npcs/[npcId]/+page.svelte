@@ -9,6 +9,8 @@
   import SandboxPanel from '$lib/components/community/SandboxPanel.svelte';
   import HistoryPanel from '$lib/components/community/HistoryPanel.svelte';
   import RetirementPanel from '$lib/components/community/RetirementPanel.svelte';
+  import PrivilegedWorkspaceNav from '$lib/components/community/PrivilegedWorkspaceNav.svelte';
+  import { onMount } from 'svelte';
 
   let { data, form }: PageProps = $props();
   let detail = $derived(data.detail as AuthoringWorkspaceDetail);
@@ -30,9 +32,32 @@
     ...detail.draft.sheet.appearance.attire.split(/[;,\n]/),
     ...detail.draft.sheet.appearance.notableFeatures.split(/[;,\n]/)
   ].map((item) => item.trim()).filter((item) => item.length > 0 && item.length <= 120))].slice(0, 12));
+  const readinessLabel = $derived(detail.preflight.length
+    ? `${detail.preflight.length} prerequisite${detail.preflight.length === 1 ? '' : 's'} remaining`
+    : !detail.capabilities.canSubmit
+      ? 'Submission unavailable'
+      : 'Ready for review');
+  let activeStep = $state('draft-editor');
+
+  onMount(() => {
+    const targets = ['draft-editor', 'portrait-artwork', 'setting-library', 'scene-preview', 'assistance-heading', 'sandbox-heading', 'history-heading']
+      .map((id) => document.getElementById(id))
+      .filter((target): target is HTMLElement => target !== null);
+    if (!('IntersectionObserver' in window) || !targets.length) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible?.target instanceof HTMLElement) activeStep = visible.target.id;
+    }, { rootMargin: '-18% 0px -58% 0px', threshold: [0.1, 0.4, 0.7] });
+    targets.forEach((target) => observer.observe(target));
+    return () => observer.disconnect();
+  });
 </script>
 
 <main class="page-shell community-page authoring-workspace">
+  <PrivilegedWorkspaceNav capabilities={data.community.capabilities} current="authoring" />
   <a class="workspace-backlink" href="/authoring/npcs">← Creator studio</a>
   <header class="workspace-masthead">
     <div>
@@ -47,19 +72,30 @@
     <div class:community-error={form.conflict} class:community-success={!form.conflict} class="community-notice" role={form.conflict ? 'alert' : 'status'} aria-live="polite">{form.message}</div>
   {/if}
 
+  <section class="workspace-readiness" aria-label="Draft readiness">
+    <div>
+      <p class="eyebrow">Draft readiness</p>
+      <strong>{readinessLabel}</strong>
+    </div>
+    <p>{detail.preflight.length ? 'Resolve the listed requirements before submitting a review version.' : detail.capabilities.canSubmit ? 'This draft can be submitted as an immutable review version.' : detail.capabilities.reasons.submit ?? 'This draft cannot be submitted right now.'}</p>
+    {#if detail.preflight.length}
+      <a href="#history-heading">View {detail.preflight.length === 1 ? 'requirement' : 'requirements'}</a>
+    {/if}
+  </section>
+
   <nav class="workspace-stepper" aria-label="Authoring steps">
-    <a href="#draft-editor"><span>01</span> Shape the companion</a>
-    <a href="#portrait-artwork"><span>02</span> Create artwork</a>
-    <a href="#setting-library"><span>03</span> Choose a setting</a>
-    <a href="#scene-preview"><span>04</span> Preview the scene</a>
-    <a href="#assistance-heading"><span>05</span> Refine a section</a>
-    <a href="#sandbox-heading"><span>06</span> Try the voice</a>
-    <a href="#history-heading"><span>07</span> Submit for review</a>
+    <a href="#draft-editor" aria-current={activeStep === 'draft-editor' ? 'step' : undefined}><span>01</span> Shape the companion</a>
+    <a href="#portrait-artwork" aria-current={activeStep === 'portrait-artwork' ? 'step' : undefined}><span>02</span> Create artwork</a>
+    <a href="#setting-library" aria-current={activeStep === 'setting-library' ? 'step' : undefined}><span>03</span> Choose a setting</a>
+    <a href="#scene-preview" aria-current={activeStep === 'scene-preview' ? 'step' : undefined}><span>04</span> Preview the scene</a>
+    <a href="#assistance-heading" aria-current={activeStep === 'assistance-heading' ? 'step' : undefined}><span>05</span> Optional assistance</a>
+    <a href="#sandbox-heading" aria-current={activeStep === 'sandbox-heading' ? 'step' : undefined}><span>06</span> Optional sandbox</a>
+    <a href="#history-heading" aria-current={activeStep === 'history-heading' ? 'step' : undefined}><span>07</span> Submit for review</a>
   </nav>
 
   <section class="workspace-intro" aria-label="How this workspace works">
     <div><p class="eyebrow">A calm way to author</p><h2>Build a person players will remember.</h2><p>Describe who they are, give them a place in the world, and test their voice before review. Every meaningful change is saved as a protected draft revision.</p></div>
-    <ol><li><strong>Shape</strong><span>Write the authored truth.</span></li><li><strong>Test</strong><span>Try optional assistance and a private conversation.</span></li><li><strong>Submit</strong><span>Freeze a version when it is ready for review.</span></li></ol>
+    <ol><li><strong>Shape</strong><span>Write the authored truth.</span></li><li><strong>Optional</strong><span>Use assistance or a private sandbox when useful.</span></li><li><strong>Submit</strong><span>Freeze a version when it is ready for review.</span></li></ol>
   </section>
 
   <section id="draft-editor" class="workspace-editor-region" aria-label="NPC draft editor">
@@ -86,3 +122,13 @@
     <RetirementPanel capability={detail.capabilities} retirement={detail.retirement} />
   </div>
 </main>
+
+<style>
+  .workspace-readiness { display: grid; grid-template-columns: minmax(12rem, auto) minmax(0, 1fr) auto; align-items: center; gap: .8rem 1.25rem; padding: .75rem 1rem; border: 1px solid #675027; background: rgb(24 18 9 / .72); }
+  .workspace-readiness p { margin: 0; color: var(--muted); }
+  .workspace-readiness .eyebrow { margin-bottom: .15rem; }
+  .workspace-readiness strong { color: var(--gold-bright); font-family: 'Cinzel', serif; }
+  .workspace-readiness a { color: #f0d383; }
+  .workspace-stepper a[aria-current='step'] { border-color: #d6a845; color: #ffe1a2; background: #2b1d09; box-shadow: inset 0 0 0 1px rgb(255 225 162 / .12); }
+  @media (max-width: 700px) { .workspace-readiness { grid-template-columns: 1fr; } }
+</style>
