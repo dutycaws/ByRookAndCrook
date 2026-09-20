@@ -332,6 +332,7 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     await uploadSprite(page, 'neutral', neutralOne);
     await expect(panel.getByRole('button', { name: 'Select Neutral' })).toBeEnabled();
     await panel.getByRole('button', { name: 'Select Neutral' }).click();
+    await expect(panel.getByRole('status').filter({ hasText: 'Portrait selected for these visual details.' })).toBeVisible();
     await page.reload();
     await expect(panel.getByRole('tab', { name: /^Neutral selected/ })).toBeVisible();
     await expect(panel.locator('.portrait-candidate.selected')).toHaveCount(1);
@@ -339,6 +340,7 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
 
     await uploadSprite(page, 'happy', happy);
     await panel.getByRole('button', { name: 'Select Happy' }).click();
+    await expect(panel.getByRole('status').filter({ hasText: 'Portrait selected for these visual details.' })).toBeVisible();
     await page.reload();
     await expect(panel.getByRole('tab', { name: /^Happy selected/ })).toBeVisible();
     const afterHappy = await expressionWorkspace(player, npcId);
@@ -351,6 +353,7 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     await expect(panel.getByLabel('I understand changing Neutral clears optional selections.')).toBeVisible();
     await panel.getByLabel('I understand changing Neutral clears optional selections.').check();
     await panel.getByRole('button', { name: 'Select Neutral' }).click();
+    await expect(panel.getByRole('status').filter({ hasText: 'Portrait selected for these visual details.' })).toBeVisible();
     await page.reload();
     await expect(panel.getByRole('tab', { name: /^Happy selected/ })).toHaveCount(0);
     await panel.getByRole('tab', { name: /^Happy/ }).click();
@@ -361,6 +364,7 @@ test('expression sprites keep Neutral authoritative while optional slots fall ba
     await expect(panel.getByRole('button', { name: 'Select Happy' })).toBeDisabled();
     await panel.getByLabel('I reviewed this sprite against the current Neutral anchor.').check();
     await panel.getByRole('button', { name: 'Select Happy' }).click();
+    await expect(panel.getByRole('status').filter({ hasText: 'Portrait selected for these visual details.' })).toBeVisible();
     await page.reload();
 
     const finalWorkspace = await expressionWorkspace(player, npcId);
