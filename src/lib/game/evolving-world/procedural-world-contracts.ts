@@ -3,11 +3,10 @@ import { WORLD_ENTITY_KINDS, type CapabilityEnvelope, type ContractIssue, type S
 
 /** The finite command language committed by the server-only procedural seam. */
 export const PROCEDURAL_WORLD_VERSION = 'procedural-world-v1' as const;
-export type ProceduralWorldOperation = 'entity' | 'quest' | 'public_event' | 'gameplay_unlock';
+export type ProceduralWorldOperation = 'entity' | 'public_event' | 'gameplay_unlock';
 
 export type ProceduralWorldCommand =
   | { operation: 'entity'; effectKind: 'create_entity'; sourceResidentId: string; entityKind: WorldEntityKind; entityKey: string; archetypeKey: string; proposedName: string; payload: Record<string, unknown> }
-  | { operation: 'quest'; effectKind: 'create_quest' | 'update_quest'; ownerResidentId: string; primitiveKey: string; action: string; approach: string; targetEntityRefs: string[]; motivation: string }
   | { operation: 'public_event'; effectKind: 'record_world_event'; sourceResidentId: string; templateKey: string; participantEntityRefs: string[]; title: string; summary: string; reuseKey: string }
   | { operation: 'gameplay_unlock'; effectKind: 'unlock_gameplay'; sourceResidentId: string; entityRef: string; family: 'herb_loaf_variant'; definition: { displayName: string } }
   | { operation: 'gameplay_unlock'; effectKind: 'unlock_gameplay'; sourceResidentId: string; entityRef: string; family: 'successor_provisions'; definition: { displayName: string; price: number; dailyStock: number } };
@@ -29,9 +28,9 @@ export interface FrozenProceduralWorldContext extends ProceduralWorldValidationC
   version: typeof PROCEDURAL_WORLD_VERSION;
 }
 
-export const PROCEDURAL_WORLD_CRITIC_CODES = ['proposal_shape','command_shape','entity_registry','quest_capability','event_registry','gameplay_unlock','budget'] as const;
+export const PROCEDURAL_WORLD_CRITIC_CODES = ['proposal_shape','command_shape','entity_registry','event_registry','gameplay_unlock','budget'] as const;
 export type ProceduralWorldCriticCode = (typeof PROCEDURAL_WORLD_CRITIC_CODES)[number];
-export const PROCEDURAL_WORLD_CRITIC_PATHS = ['commands','commands.entity','commands.quest','commands.public_event','commands.gameplay_unlock'] as const;
+export const PROCEDURAL_WORLD_CRITIC_PATHS = ['commands','commands.entity','commands.public_event','commands.gameplay_unlock'] as const;
 export type ProceduralWorldCriticPath = (typeof PROCEDURAL_WORLD_CRITIC_PATHS)[number];
 export type ProceduralWorldCriticInstruction = { code: ProceduralWorldCriticCode; path: ProceduralWorldCriticPath };
 export type ProceduralWorldCriticDecision =
@@ -144,13 +143,6 @@ export function validateProceduralWorldProposal(value: unknown, context: Procedu
       if (context.entityKinds[normalizeKey(command.entityKey)] !== kind) {
         plannedCanonicalKeys.add(canonicalKey); plannedCanonicalEntities += 1;
       }
-    } else if (command.operation === 'quest') {
-      if (!exact(command, ['operation','effectKind','ownerResidentId','primitiveKey','action','approach','targetEntityRefs','motivation']) || !['create_quest','update_quest'].includes(String(command.effectKind)) || !text(command.ownerResidentId, 128) || !uuidPattern.test(command.ownerResidentId) || !text(command.primitiveKey, 80) || !text(command.action, 40) || !text(command.approach, 40) || !Array.isArray(command.targetEntityRefs) || command.targetEntityRefs.length < 1 || command.targetEntityRefs.length > 3 || !command.targetEntityRefs.every((entry) => text(entry, 128)) || !text(command.motivation, 500)) return issue(path, 'quest_shape', 'Successor quest commands require finite action, approach, and targets.');
-      const capability = context.capabilities[command.ownerResidentId];
-      const targets = command.targetEntityRefs.map((entry) => resolveReference(entry, context));
-      if (!capability || !capability.allowedWorldEffects.includes(command.effectKind as 'create_quest' | 'update_quest') || !capability.allowedActions.includes(command.action) || !capability.allowedApproaches.includes(command.approach) || normalizeKey(command.primitiveKey) !== 'successor-quest' || targets.some((entry) => !entry || !capability.allowedTargetKinds.includes(entry.kind)) || new Set(targets.map((entry) => entry?.id)).size !== targets.length) return issue(path, 'quest_capability', 'The frozen resident capability and registered quest grammar must authorize this quest.');
-      const existing = context.activeQuestByResident[command.ownerResidentId];
-      if ((existing && (command.effectKind !== 'update_quest' || existing.primitiveKey !== normalizeKey(command.primitiveKey))) || (!existing && (command.effectKind !== 'create_quest' || command.action === 'abandon'))) return issue(path, 'quest_lifecycle', 'A resident has at most one active successor quest and updates must target it.');
     } else if (command.operation === 'public_event') {
       if (!exact(command, ['operation','effectKind','sourceResidentId','templateKey','participantEntityRefs','title','summary','reuseKey']) || command.effectKind !== 'record_world_event' || !text(command.sourceResidentId, 128) || !uuidPattern.test(command.sourceResidentId) || !text(command.templateKey, 80) || !Array.isArray(command.participantEntityRefs) || command.participantEntityRefs.length < 1 || command.participantEntityRefs.length > 8 || !command.participantEntityRefs.every((entry) => text(entry, 128)) || !text(command.title, 120) || !text(command.summary, 500) || !text(command.reuseKey, 64)) return issue(path, 'event_shape', 'Public world events use a bounded registered template, initiating resident, and public projection.');
       const template = normalizeKey(command.templateKey); const allowed = primitiveRegistry.worldEffects.find((entry) => entry.kind === 'record_world_event')!.targetKinds;
@@ -191,7 +183,6 @@ export function parseProceduralWorldProposal(value: unknown, context: Procedural
   const proposal = value as { commands: Array<Record<string, unknown>> };
   return { ok: true, value: { version: PROCEDURAL_WORLD_VERSION, commands: proposal.commands.map((command) => {
     if (command.operation === 'entity') return { operation:'entity', effectKind:'create_entity', sourceResidentId:command.sourceResidentId as string, entityKind:normalizedKind(command.entityKind as string)!, entityKey:normalizeKey(command.entityKey as string), archetypeKey:normalizeKey(command.archetypeKey as string), proposedName:(command.proposedName as string).trim(), payload:command.payload as Record<string, unknown> };
-    if (command.operation === 'quest') return { operation:'quest', effectKind:command.effectKind as 'create_quest' | 'update_quest', ownerResidentId:command.ownerResidentId as string, primitiveKey:normalizeKey(command.primitiveKey as string), action:command.action as string, approach:command.approach as string, targetEntityRefs:(command.targetEntityRefs as string[]).map((entry) => resolveReference(entry, context)!.id), motivation:(command.motivation as string).trim() };
     if (command.operation === 'public_event') return { operation:'public_event', effectKind:'record_world_event', sourceResidentId:command.sourceResidentId as string, templateKey:normalizeKey(command.templateKey as string), participantEntityRefs:(command.participantEntityRefs as string[]).map((entry) => resolveReference(entry, context)!.id), title:(command.title as string).trim(), summary:(command.summary as string).trim(), reuseKey:normalizeKey(command.reuseKey as string) };
     const definition = command.definition as Record<string, unknown>;
     if (command.family === 'successor_provisions') return { operation:'gameplay_unlock', effectKind:'unlock_gameplay', sourceResidentId:command.sourceResidentId as string, entityRef:normalizeKey(command.entityRef as string), family:'successor_provisions', definition:{ displayName:(definition.displayName as string).trim(), price:definition.price as number, dailyStock:definition.dailyStock as number } };

@@ -40,11 +40,13 @@
     </section>
     <section class="guest-section">
     <p class="eyebrow">Current quest</p>
-    {#if journal.intention}
-      <h3>{journal.intention.goal}</h3><p>{journal.intention.motivation}</p>
-      {#if journal.questStatus === 'active'}<p class="quest-readiness">{journal.preparation === 2 ? 'Well prepared' : journal.preparation === 1 ? 'Some preparation' : 'Unprepared'} · {journal.risk} risk</p>{/if}
+    {#if journal.currentQuest}
+      <h3>{journal.currentQuest.title}</h3><p>{journal.currentQuest.objective}</p>
+      {#if journal.questLifecycleStatus === 'active'}<p class="quest-readiness">{journal.currentQuest.readiness} readiness · {journal.currentQuest.risk} risk</p><p class="muted">Food and drink can help readiness.</p>{/if}
     {:else}<p class="muted">No active intention.</p>{/if}
-    {#if journal.warning}<p class="consequence-warning" role="note">{journal.warning}</p>{/if}
+    {#if journal.questLifecycleStatus === 'awaiting_transition'}<p class="muted">Considering their next step.</p>{/if}
+    {#if journal.questLifecycleStatus === 'departing'}<p class="consequence-warning" role="note">Leaving after the tavern closes.</p>{/if}
+    {#if journal.farewellText}<p class="consequence-warning" role="note">{journal.farewellText}</p>{/if}
     </section>
     {#if journal.disposition}
       <section class="guest-section" aria-label="How they seem lately">

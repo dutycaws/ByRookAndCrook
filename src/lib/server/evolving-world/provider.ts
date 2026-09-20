@@ -2,6 +2,7 @@ import type { PromptSnapshot } from '$lib/server/prompt-registry';
 import { parseFrozenCanonEventProposal, promptVersionForProviderStage, SettlementProviderError, type ProviderResult, type ProviderStage, type SettlementProvider } from './settlement-contracts';
 import { parseFrozenSocialEncounterContext, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, type FrozenSocialEncounterContext } from '$lib/game/evolving-world/social-encounter-contracts';
 import { parseFrozenProceduralWorldContext, parseProceduralWorldCriticDecision, parseProceduralWorldProposal, PROCEDURAL_WORLD_CRITIC_CODES, PROCEDURAL_WORLD_CRITIC_PATHS, type FrozenProceduralWorldContext } from '$lib/game/evolving-world/procedural-world-contracts';
+import { parseQuestTransitionCriticDecision, parseQuestTransitionProposal, QUEST_TRANSITION_CRITIC_CODES, QUEST_TRANSITION_CRITIC_PATHS, type QuestTransitionValidationContext } from '$lib/game/evolving-world/quest-transition-contracts';
 
 // Responses strict schemas require every nested object to have a closed shape.
 // The versioned proposal itself is a discriminated union of typed game commands,
@@ -30,15 +31,20 @@ const socialFinalCriticSchema = {
 const proceduralProposalSchema = { type:'object',additionalProperties:false,required:['proposalJson'],properties:{proposalJson:{type:'string',minLength:2,maxLength:12000}} };
 const proceduralCriticSchema = { type:'object',additionalProperties:false,required:['decision','instructions'],properties:{decision:{type:'string',enum:['accept','reject','repair']},instructions:{type:'array',minItems:0,maxItems:4,items:{type:'object',additionalProperties:false,required:['code','path'],properties:{code:{type:'string',enum:PROCEDURAL_WORLD_CRITIC_CODES},path:{type:'string',enum:PROCEDURAL_WORLD_CRITIC_PATHS}}}}} };
 const proceduralFinalCriticSchema = { type:'object',additionalProperties:false,required:['decision','instructions'],properties:{decision:{type:'string',enum:['accept','reject']},instructions:{type:'array',maxItems:0,items:{type:'object',additionalProperties:false,required:['code','path'],properties:{code:{type:'string',enum:PROCEDURAL_WORLD_CRITIC_CODES},path:{type:'string',enum:PROCEDURAL_WORLD_CRITIC_PATHS}}}}} };
+const questTransitionProposalSchema = { type:'object',additionalProperties:false,required:['proposalJson'],properties:{proposalJson:{type:'string',minLength:2,maxLength:6000}} };
+const questTransitionCriticSchema = { type:'object',additionalProperties:false,required:['decision','instructions'],properties:{decision:{type:'string',enum:['accept','reject','repair']},instructions:{type:'array',minItems:0,maxItems:4,items:{type:'object',additionalProperties:false,required:['code','path'],properties:{code:{type:'string',enum:QUEST_TRANSITION_CRITIC_CODES},path:{type:'string',enum:QUEST_TRANSITION_CRITIC_PATHS}}}}} };
+const questTransitionFinalCriticSchema = { type:'object',additionalProperties:false,required:['decision','instructions'],properties:{decision:{type:'string',enum:['accept','reject']},instructions:{type:'array',maxItems:0,items:{type:'object',additionalProperties:false,required:['code','path'],properties:{code:{type:'string',enum:QUEST_TRANSITION_CRITIC_CODES},path:{type:'string',enum:QUEST_TRANSITION_CRITIC_PATHS}}}}} };
 const digestSchema = { type:'object', additionalProperties:false, required:['summary','journalEntries','discoveredEntityIds'], properties:{summary:{type:'string'},journalEntries:{type:'array',items:{type:'string'}},discoveredEntityIds:{type:'array',items:{type:'string'}}} };
 const canonProposalStages = new Set<ProviderStage>(['canon_proposer','canon_repair']);
 const socialProposalStages = new Set<ProviderStage>(['social_encounter_proposer','social_encounter_repair']);
 const socialCriticStages = new Set<ProviderStage>(['social_encounter_critic','social_encounter_final_critic']);
 const proceduralProposalStages = new Set<ProviderStage>(['procedural_world_proposer','procedural_world_repair']);
 const proceduralCriticStages = new Set<ProviderStage>(['procedural_world_critic','procedural_world_final_critic']);
-const creativeStages = new Set<ProviderStage>(['proposer','repair','canon_proposer','canon_repair','social_encounter_proposer','social_encounter_repair','procedural_world_proposer','procedural_world_repair']);
+const questTransitionProposalStages = new Set<ProviderStage>(['quest_transition_proposer','quest_transition_repair']);
+const questTransitionCriticStages = new Set<ProviderStage>(['quest_transition_critic','quest_transition_final_critic']);
+const creativeStages = new Set<ProviderStage>(['proposer','repair','canon_proposer','canon_repair','social_encounter_proposer','social_encounter_repair','procedural_world_proposer','procedural_world_repair','quest_transition_proposer','quest_transition_repair']);
 const criticStages = new Set<ProviderStage>(['critic','final_critic','canon_critic','canon_final_critic']);
-function schema(stage: ProviderStage) { return stage === 'digest' ? digestSchema : stage === 'social_encounter_final_critic' ? socialFinalCriticSchema : stage === 'procedural_world_final_critic' ? proceduralFinalCriticSchema : socialCriticStages.has(stage) ? socialCriticSchema : proceduralCriticStages.has(stage) ? proceduralCriticSchema : criticStages.has(stage) ? criticSchema : canonProposalStages.has(stage) ? canonEventSchema : socialProposalStages.has(stage) ? socialProposalSchema : proceduralProposalStages.has(stage) ? proceduralProposalSchema : proposalSchema; }
+function schema(stage: ProviderStage) { return stage === 'digest' ? digestSchema : stage === 'social_encounter_final_critic' ? socialFinalCriticSchema : stage === 'procedural_world_final_critic' ? proceduralFinalCriticSchema : stage === 'quest_transition_final_critic' ? questTransitionFinalCriticSchema : socialCriticStages.has(stage) ? socialCriticSchema : proceduralCriticStages.has(stage) ? proceduralCriticSchema : questTransitionCriticStages.has(stage) ? questTransitionCriticSchema : criticStages.has(stage) ? criticSchema : canonProposalStages.has(stage) ? canonEventSchema : socialProposalStages.has(stage) ? socialProposalSchema : proceduralProposalStages.has(stage) ? proceduralProposalSchema : questTransitionProposalStages.has(stage) ? questTransitionProposalSchema : proposalSchema; }
 function outputText(result: any): string { return result.output?.filter((item:any)=>item.type==='message').flatMap((item:any)=>item.content ?? []).filter((item:any)=>item.type==='output_text').map((item:any)=>item.text).join('') ?? ''; }
 function exactPayload(value: unknown, keys: string[]): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
@@ -74,6 +80,40 @@ function parseProceduralPayload(stage: ProviderStage, payload: unknown): FrozenP
   }
   return null;
 }
+function questTransitionContext(value: unknown): QuestTransitionValidationContext | null {
+  if (!exactPayload(value, ['terminalEventId','residentId','frozenTargetRefs','capabilities']) && !exactPayload(value, ['terminalEventId','residentId','frozenTargetRefs','capabilities','nextAuthoredMilestone']) && !exactPayload(value, ['terminalEventId','residentId','frozenTargetRefs','capabilities','otherResidentIds']) && !exactPayload(value, ['terminalEventId','residentId','frozenTargetRefs','capabilities','nextAuthoredMilestone','otherResidentIds'])) return null;
+  const source=value as Record<string, unknown>; const capability=source.capabilities;
+  if (typeof source.terminalEventId !== 'string' || typeof source.residentId !== 'string' || !Array.isArray(source.frozenTargetRefs) || !source.frozenTargetRefs.every((item) => typeof item === 'string') || !capability || typeof capability !== 'object' || Array.isArray(capability)) return null;
+  const caps=capability as Record<string, unknown>;
+  if (!Array.isArray(caps.actions) || !caps.actions.every((item) => typeof item === 'string') || !Array.isArray(caps.approaches) || !caps.approaches.every((item) => typeof item === 'string') || typeof caps.allowGeneratedSuccessor !== 'boolean' || typeof caps.allowDeparture !== 'boolean') return null;
+  if ('nextAuthoredMilestone' in source && (!source.nextAuthoredMilestone || typeof source.nextAuthoredMilestone !== 'object' || Array.isArray(source.nextAuthoredMilestone) || typeof (source.nextAuthoredMilestone as Record<string, unknown>).id !== 'string')) return null;
+  if ('otherResidentIds' in source && (!Array.isArray(source.otherResidentIds) || !source.otherResidentIds.every((item) => typeof item === 'string'))) return null;
+  return source as QuestTransitionValidationContext;
+}
+function questTransitionFrozenContext(value: unknown): Record<string, unknown> | null {
+  if (!exactPayload(value, ['quest','terminalEvent','eventHistory','versionSheet','capabilityEnvelope','registeredActions','registeredApproaches','validCanonicalTargets','currentProfile','nextAuthoredMilestone','dialogueEvidence','hospitality','beliefs','socialEdges'])) return null;
+  try {
+    return JSON.stringify(value).length <= 65_536 ? value : null;
+  } catch { return null; }
+}
+function parseQuestTransitionPayload(stage: ProviderStage, payload: unknown): QuestTransitionValidationContext | null {
+  if (stage === 'quest_transition_proposer') {
+    if (!exactPayload(payload, ['context','frozenContext'])) return null;
+    return questTransitionFrozenContext(payload.frozenContext) ? questTransitionContext(payload.context) : null;
+  }
+  if (stage === 'quest_transition_critic' || stage === 'quest_transition_final_critic') {
+    if (!exactPayload(payload, ['context','frozenContext','proposal']) || !questTransitionFrozenContext(payload.frozenContext)) return null;
+    const context=questTransitionContext((payload as Record<string, unknown>).context);
+    return context && parseQuestTransitionProposal((payload as Record<string, unknown>).proposal, context).ok ? context : null;
+  }
+  if (stage === 'quest_transition_repair') {
+    if (!exactPayload(payload, ['context','frozenContext','proposal','instructions']) || !questTransitionFrozenContext(payload.frozenContext)) return null;
+    const source=payload as Record<string, unknown>; const context=questTransitionContext(source.context);
+    const repair=parseQuestTransitionCriticDecision({decision:'repair',instructions:source.instructions});
+    return context && parseQuestTransitionProposal(source.proposal, context).ok && repair?.decision === 'repair' ? context : null;
+  }
+  return null;
+}
 
 export function createSettlementProvider(config: Record<string, string | undefined>): SettlementProvider {
   const provider = config.NPC_PROVIDER ?? 'openai';
@@ -91,6 +131,8 @@ export function createSettlementProvider(config: Record<string, string | undefin
     if ((proceduralProposalStages.has(stage) || proceduralCriticStages.has(stage)) && !proceduralContext) {
       throw new SettlementProviderError('provider_malformed', 'The procedural world provider payload did not match the frozen contract.');
     }
+    const questTransitionContextValue=(questTransitionProposalStages.has(stage) || questTransitionCriticStages.has(stage)) ? parseQuestTransitionPayload(stage, payload) : null;
+    if ((questTransitionProposalStages.has(stage) || questTransitionCriticStages.has(stage)) && !questTransitionContextValue) throw new SettlementProviderError('provider_malformed', 'The quest transition provider payload did not match the frozen contract.');
     let response: Response;
     try {
       response = await fetch('https://api.openai.com/v1/responses', { method:'POST', signal, headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'}, body:JSON.stringify({
@@ -119,6 +161,11 @@ export function createSettlementProvider(config: Record<string, string | undefin
             const parsed=parseProceduralWorldProposal(JSON.parse(structured?.proposalJson), proceduralContext!);
             return parsed.ok ? parsed.value : null;
           })()
+        : questTransitionProposalStages.has(stage)
+          ? (() => {
+            const parsed=parseQuestTransitionProposal(JSON.parse(structured?.proposalJson), questTransitionContextValue!);
+            return parsed.ok ? parsed.value : null;
+          })()
         : socialCriticStages.has(stage)
             ? (() => {
               const decision=parseSocialEncounterCriticDecision(structured);
@@ -128,6 +175,11 @@ export function createSettlementProvider(config: Record<string, string | undefin
           ? (() => {
             const decision=parseProceduralWorldCriticDecision(structured);
             return stage === 'procedural_world_final_critic' && decision?.decision === 'repair' ? null : decision;
+          })()
+        : questTransitionCriticStages.has(stage)
+          ? (() => {
+            const decision=parseQuestTransitionCriticDecision(structured);
+            return stage === 'quest_transition_final_critic' && decision?.decision === 'repair' ? null : decision;
           })()
         : stage === 'proposer' || stage === 'repair'
           ? JSON.parse(structured?.proposalJson)

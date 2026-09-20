@@ -1,16 +1,16 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(44);
+select plan(38);
 
 select has_table('private','world_generated_supply_definitions','generated supply definitions are private and durable');
 select has_table('private','world_generated_supply_stock','generated supply stock is private and durable');
 select has_table('private','world_generated_supply_inventory','generated supply inventory is private and durable');
 select has_table('private','world_generated_supply_actions','generated supply actions preserve exact replay');
-select has_table('private','world_generated_supply_uses','successor quest supply use is private and bounded');
+select hasnt_table('private','world_generated_supply_uses','generated goods no longer attach to quest progress');
 select has_table('private','world_generated_supply_receipts','complete supply proposals have exact replay receipts');
 select has_function('public','world_generated_shop_projection',array['uuid'],'owner-scoped generated shop projection exists');
 select has_function('public','purchase_generated_supply',array['uuid','uuid','bigint','text','integer'],'generated supply purchase has an explicit revisioned contract');
-select has_function('public','use_generated_supply',array['uuid','uuid','bigint','text','uuid'],'generated supply use has an explicit revisioned contract');
+select hasnt_function('public','use_generated_supply',array['uuid','uuid','bigint','text','uuid'],'generated supply quest-use command is removed');
 select has_function('public','world_settlement_commit_procedural_world',array['uuid','uuid','uuid','jsonb'],'procedural commit wrapper remains the service entry point');
 select ok(not has_function_privilege('authenticated','private.world_generated_supply_install(uuid,uuid,jsonb)','execute'),'players cannot install generated supplies');
 select ok(has_function_privilege('authenticated','public.world_generated_shop_projection(uuid)','execute'),'owners can read the bounded generated shop projection');
@@ -45,18 +45,8 @@ select public.create_tavern();
 create temporary table pg_temp.unrelated_supply as
 select
   (public.npc_bar_snapshot()#>>'{save,id}')::uuid save_id,
-  '15700000-0000-4000-8000-000000000040'::uuid canonical_entity_id,
-  '15700000-0000-4000-8000-000000000041'::uuid quest_id;
+  '15700000-0000-4000-8000-000000000040'::uuid canonical_entity_id;
 reset role;
-alter table pg_temp.unrelated_supply add column resident_id uuid;
-update pg_temp.unrelated_supply
-set resident_id=(
-  select id
-  from private.world_npc_instances
-  where save_id=pg_temp.unrelated_supply.save_id
-  order by id
-  limit 1
-);
 insert into private.world_canonical_entities(
   id,save_id,entity_kind,entity_key,origin,payload,lifecycle
 )
@@ -69,15 +59,8 @@ select canonical_entity_id,save_id,'Unrelated provisions',7,2,'successor_provisi
 from pg_temp.unrelated_supply;
 insert into private.world_generated_supply_stock(canonical_entity_id,save_id,remaining_quantity)
 select canonical_entity_id,save_id,2 from pg_temp.unrelated_supply;
-insert into private.world_procedural_quests(
-  id,save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day
-)
-select quest_id,save_id,resident_id,'active','successor-quest','unrelated-generated-supply','{}'::jsonb,1
-from pg_temp.unrelated_supply;
 insert into private.world_generated_supply_inventory(save_id,canonical_entity_id,quantity)
 select save_id,canonical_entity_id,2 from pg_temp.unrelated_supply;
-insert into private.world_generated_supply_uses(save_id,quest_id,canonical_entity_id,quantity)
-select save_id,quest_id,canonical_entity_id,2 from pg_temp.unrelated_supply;
 
 create temporary table pg_temp.claim(settlement_id uuid,job_id uuid,fence uuid);
 insert into pg_temp.claim values(
@@ -228,54 +211,8 @@ select throws_ok($$select public.purchase_generated_supply(
 )$$,'PT409',null,'changed purchase replay is rejected');
 reset role;
 
-create temporary table pg_temp.quest(id uuid);
-with inserted as (
-  insert into private.world_procedural_quests(
-    save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day
-  )
-  select save_id,resident_id,'active','successor-quest','generated-supply-quest','{}'::jsonb,1
-  from pg_temp.fixture returning id
-)
-insert into pg_temp.quest select id from inserted;
-grant select on pg_temp.quest to authenticated;
-set local role authenticated;
-set local request.jwt.claim.role='authenticated';
-set local request.jwt.claim.sub='15700000-0000-4000-8000-000000000001';
-create temporary table pg_temp.use_result(result jsonb);
-grant select,insert on pg_temp.use_result to authenticated;
-insert into pg_temp.use_result
-select public.use_generated_supply(
-  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000031',1,'road-provisions',(select id from pg_temp.quest)
-);
-select is((select result->>'quantityUsed' from pg_temp.use_result),'1','successor quest use consumes one supply');
-select is(jsonb_array_length(public.world_generated_shop_projection((select save_id from pg_temp.fixture))->'inventory'),0,'used supply leaves the projected inventory');
-select is((public.world_generated_shop_projection((select save_id from pg_temp.fixture))#>>'{successorQuest,suppliesUsed}'),'1','successor quest projection reports bounded supply progress');
-reset role;
-select is((
-  select uses.quantity
-  from private.world_generated_supply_uses uses
-  where uses.save_id=(select save_id from pg_temp.fixture)
-    and uses.quest_id=(select id from pg_temp.quest)
-    and uses.canonical_entity_id=(select supply_entity_id from pg_temp.fixture)
-),1,'supply use records one authoritative progress unit');
-select is((
-  select count(*)
-  from private.world_generated_supply_uses uses
-  where uses.save_id=(select save_id from pg_temp.fixture)
-    and uses.quest_id=(select id from pg_temp.quest)
-    and uses.canonical_entity_id=(select supply_entity_id from pg_temp.fixture)
-),1::bigint,'supply use creates one durable progress row');
-set local role authenticated;
-set local request.jwt.claim.role='authenticated';
-set local request.jwt.claim.sub='15700000-0000-4000-8000-000000000001';
-select is((select revision from public.tavern_saves where id=(select save_id from pg_temp.fixture)),2::bigint,'supply use advances the save revision once');
-select is((public.use_generated_supply(
-  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000031',1,'road-provisions',(select id from pg_temp.quest)
-)->>'committedRevision'),'2','exact supply-use retry returns the saved result');
-select throws_ok($$select public.use_generated_supply(
-  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000032',2,'road-provisions','15700000-0000-4000-8000-000000000099'
-)$$,'PT422',null,'an unknown successor quest cannot receive supply progress');
-reset role;
+select is(jsonb_array_length(public.world_generated_shop_projection((select save_id from pg_temp.fixture))->'inventory'),1,'purchased generated goods remain ordinary inventory');
+select is(public.world_generated_shop_projection((select save_id from pg_temp.fixture)) ? 'successorQuest',false,'generated shop projection has no quest attachment state');
 
 update public.tavern_saves set day_minigame_completed=true where id=(select save_id from pg_temp.fixture);
 set local role authenticated;
@@ -285,9 +222,9 @@ create temporary table pg_temp.day_result(result jsonb);
 grant select,insert on pg_temp.day_result to authenticated;
 insert into pg_temp.day_result
 select public.advance_tavern_day(
-  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000033',2
+  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000033',1
 );
-select is((select current_day from public.tavern_saves where id=(select save_id from pg_temp.fixture)),2,'day closing succeeds after generated supply use');
+select is((select current_day from public.tavern_saves where id=(select save_id from pg_temp.fixture)),2,'day closing succeeds after a generated supply purchase');
 select is((public.world_generated_shop_projection((select save_id from pg_temp.fixture))#>>'{catalog,0,remainingStock}'),'3','a committed new day resets generated stock');
 reset role;
 update private.world_generated_supply_stock
@@ -298,7 +235,7 @@ set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='15700000-0000-4000-8000-000000000001';
 select is((public.advance_tavern_day(
-  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000033',2
+  (select save_id from pg_temp.fixture),'15700000-0000-4000-8000-000000000033',1
 )->>'newDay'),'2','exact day-close retry returns the original result');
 select is((public.world_generated_shop_projection((select save_id from pg_temp.fixture))#>>'{catalog,0,remainingStock}'),'1','day-close replay does not reset stock a second time');
 reset role;

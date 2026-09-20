@@ -21,7 +21,7 @@ describe('prompt registry core', () => {
   it('has one code-owned entry for each closed prompt key and deterministic release-1 hashes', () => {
     expect(Object.keys(PROMPT_MANIFEST).sort()).toEqual([...PROMPT_KEYS].sort());
     const release = initialPromptReleaseSnapshot('2026-09-16T00:00:00.000Z', 'fixture');
-    expect(Object.keys(release.prompts)).toHaveLength(26);
+    expect(Object.keys(release.prompts)).toHaveLength(30);
     expect(release.prompts['dialogue.speak'].bodyHash).toBe(sha256Hex(PROMPT_MANIFEST['dialogue.speak'].initialBody));
     expect(release.prompts['image.community_portrait'].contractHash).toBe(PROMPT_MANIFEST['image.community_portrait'].contract.hash);
     expect(release.prompts['dialogue.speak'].releaseId).toBe(release.releaseId);
@@ -29,6 +29,7 @@ describe('prompt registry core', () => {
     expect(release.prompts['dialogue.speak'].promptType).toBe('text_system');
     expect(PROMPT_MANIFEST['dialogue.speak'].initialBody).toBe(dialoguePrompts.speak);
     expect(PROMPT_MANIFEST['procedural.final_critic'].initialBody).toBe(SETTLEMENT_PROMPTS.procedural_world_final_critic);
+    expect(PROMPT_MANIFEST['quest_transition.final_critic'].initialBody).toBe(SETTLEMENT_PROMPTS.quest_transition_final_critic);
   });
 
   it('reproduces the current portrait prompt for neutral and expression-controlled release-1 dispatches', () => {

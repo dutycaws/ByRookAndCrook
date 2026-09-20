@@ -54,19 +54,42 @@ export interface PublicEvolutionEntry {
   disposition: PublicDisposition;
 }
 
+/**
+ * The Bar receives this deliberately small quest projection.  It is distinct
+ * from the package-pinned definition and settlement receipts: players learn
+ * what a resident is doing, not the odds, draws, or private rationale.
+ */
+export type QuestLifecycleStatus = 'active' | 'awaiting_transition' | 'departing' | 'departed';
+export interface PublicQuestStep { action: ActionKind; approach: Approach; }
+export interface CurrentQuest {
+  id: string;
+  origin: 'authored_milestone' | 'generated_successor';
+  title: string;
+  objective: string;
+  plan: PublicQuestStep[];
+  currentStep: number;
+  activationDay: number;
+  readiness: 'rising' | 'steady' | 'strained';
+  risk: 'low' | 'moderate' | 'high';
+}
+export interface PublicQuestHistoryEntry {
+  id: string;
+  day: number;
+  outcome: string;
+  text: string;
+  publicNews: boolean;
+}
+
 export interface Journal {
   instanceId: NpcInstanceId;
   npcId: NpcId;
   sequence: number;
   availability: 'present' | 'dead' | 'departed' | 'dismissed' | 'removed' | 'quarantined';
-  intention: Intention | null;
-  questStatus: string;
-  preparation: number;
-  nextStep: number;
-  risk: 'low' | 'moderate' | 'high' | 'none';
-  warning: string | null;
+  questLifecycleStatus: QuestLifecycleStatus;
+  currentQuest: CurrentQuest | null;
+  questHistory: PublicQuestHistoryEntry[];
+  farewellText: string | null;
   turns: Array<{ id: string; message: string; reply: string; day: number }>;
-  events: Array<{ id?: string; text: string; outcome: string; day: number; publicNews?: boolean }>;
   pending: { turnId: string; status: string; message: string; error: string | null } | null;
   disposition: PublicDisposition | null;
   evolution: PublicEvolutionEntry[];
@@ -76,5 +99,6 @@ export interface Journal {
 export function hasExecutableSteps(steps: Intention['steps']): boolean {
   return steps.length >= 1 && steps.length <= 3
     && ['attempt', 'abandon'].includes(steps.at(-1)!.action)
-    && steps.slice(0, -1).every(step => ['prepare', 'wait'].includes(step.action));
+    && steps.slice(0, -1).every(step => ['prepare', 'wait'].includes(step.action))
+    && steps.every(step => ['scouting', 'combat', 'diplomacy', 'trade'].includes(step.approach));
 }

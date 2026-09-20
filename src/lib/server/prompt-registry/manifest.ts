@@ -41,6 +41,7 @@ const resident = contract('resident-settlement-v1', 'world-settlement-v1', [], '
 const canon = contract('canon-settlement-v1', 'world-canon-event-v1', [], 'responses', 'world', 'public', 'canon_settlement');
 const social = contract('social-settlement-v1', 'social-encounter-v1', [], 'responses', 'world', 'mixed_server_only', 'social_settlement');
 const procedural = contract('procedural-settlement-v1', 'procedural-world-v1', [], 'responses', 'world', 'mixed_server_only', 'procedural_settlement');
+const questTransition = contract('quest-transition-v1', 'quest-transition-v1', [], 'responses', 'world', 'mixed_server_only', 'quest_transition');
 const portrait = contract('community-portrait-v1', null, [], 'images_edits', 'image_portrait', 'private_server_only', 'portrait_generation');
 const runtimeArt = contract('runtime-art-v1', null, [], 'images_generations', 'image_runtime', 'public', 'runtime_art');
 
@@ -69,6 +70,10 @@ export const PROMPT_MANIFEST: Readonly<Record<PromptKey, PromptManifestEntry>> =
   'procedural.critic': text('procedural.critic', 'Procedural world critic', 'Check a procedural world proposal.', SETTLEMENT_PROMPTS.procedural_world_critic, procedural, [], [edge('procedural.critic', 'procedural.repair', 'conditional')]),
   'procedural.repair': text('procedural.repair', 'Procedural world repair', 'Repair a procedural world proposal.', SETTLEMENT_PROMPTS.procedural_world_repair, procedural, [], [edge('procedural.repair', 'procedural.final_critic')]),
   'procedural.final_critic': text('procedural.final_critic', 'Procedural world final critic', 'Approve or reject a repaired procedural proposal.', SETTLEMENT_PROMPTS.procedural_world_final_critic, procedural),
+  'quest_transition.proposer': text('quest_transition.proposer', 'Quest transition proposal', 'Propose one bounded terminal quest transition.', SETTLEMENT_PROMPTS.quest_transition_proposer, questTransition, [], [edge('quest_transition.proposer', 'quest_transition.critic')]),
+  'quest_transition.critic': text('quest_transition.critic', 'Quest transition critic', 'Check a terminal quest transition.', SETTLEMENT_PROMPTS.quest_transition_critic, questTransition, [], [edge('quest_transition.critic', 'quest_transition.repair', 'conditional')]),
+  'quest_transition.repair': text('quest_transition.repair', 'Quest transition repair', 'Repair a terminal quest transition narrowly.', SETTLEMENT_PROMPTS.quest_transition_repair, questTransition, [], [edge('quest_transition.repair', 'quest_transition.final_critic')]),
+  'quest_transition.final_critic': text('quest_transition.final_critic', 'Quest transition final critic', 'Approve or reject a repaired terminal transition.', SETTLEMENT_PROMPTS.quest_transition_final_critic, questTransition),
   'image.community_portrait': image('image.community_portrait', 'Community portrait sprite', 'Render a private-reference NPC portrait.', portraitTemplate, portrait, ['portrait_context', 'identity_anchor_instruction']),
   'image.runtime_art': image('image.runtime_art', 'Runtime world art', 'Render public runtime world art.', runtimeArtTemplate, runtimeArt, ['public_appearance'])
 };
@@ -92,6 +97,7 @@ export const PROMPT_WORKFLOW_EDGES: readonly PromptWorkflowEdge[] = [
   edge('dialogue.speak', 'dialogue.validate'), edge('dialogue.validate', 'dialogue.review'), edge('dialogue.validate', 'dialogue.commit', 'conditional'), edge('dialogue.review', 'dialogue.fallback', 'conditional'), edge('dialogue.remember', 'dialogue.commit', 'conditional'),
   edge('authoring.reserve', 'authoring.assist', 'conditional'), edge('authoring.reserve', 'authoring.sandbox', 'conditional'), edge('authoring.assist', 'authoring.commit'), edge('authoring.sandbox', 'authoring.commit'),
   edge('settlement.validate', 'resident.proposer', 'conditional'), edge('settlement.validate', 'canon.proposer', 'conditional'), edge('settlement.validate', 'social.proposer', 'conditional'), edge('settlement.validate', 'procedural.proposer', 'conditional'), edge('resident.digest', 'settlement.commit'), edge('canon.final_critic', 'settlement.commit'), edge('social.final_critic', 'settlement.commit'), edge('procedural.final_critic', 'settlement.commit'), edge('settlement.validate', 'settlement.fallback', 'conditional'),
+  edge('quest_transition.validate', 'quest_transition.proposer'), edge('quest_transition.critic', 'quest_transition.commit', 'conditional'), edge('quest_transition.final_critic', 'quest_transition.commit', 'conditional'), edge('quest_transition.validate', 'quest_transition.fallback', 'conditional'),
   edge('portrait.reserve', 'image.community_portrait'), edge('image.community_portrait', 'portrait.validate'), edge('portrait.validate', 'portrait.storage'), edge('portrait.storage', 'portrait.commit'),
   edge('runtime_art.reserve', 'image.runtime_art'), edge('image.runtime_art', 'runtime_art.validate'), edge('runtime_art.validate', 'runtime_art.storage'), edge('runtime_art.storage', 'runtime_art.commit')
 ];

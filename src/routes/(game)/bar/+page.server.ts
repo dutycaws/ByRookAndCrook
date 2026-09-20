@@ -7,7 +7,7 @@ import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { presentBarPatrons } from '$lib/game/bar-scene';
 import { parsePublicSettlementStatus } from '$lib/game/evolving-world';
-import type { Journal, PublicDisposition, PublicEvolutionEntry } from '$lib/game/dialogue';
+import type { ActionKind, Approach, CurrentQuest, Journal, PublicDisposition, PublicEvolutionEntry, PublicQuestHistoryEntry, QuestLifecycleStatus } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -28,6 +28,55 @@ function nonNegativeInteger(value: unknown, minimum = 0): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
     ? value
     : null;
+}
+
+function questStatus(value: unknown): QuestLifecycleStatus {
+  return value === 'awaiting_transition' || value === 'departing' || value === 'departed' ? value : 'active';
+}
+
+function questStep(value: unknown): { action: ActionKind; approach: Approach } | null {
+  const candidate = record(value);
+  const action = candidate?.action;
+  const approach = candidate?.approach;
+  return (action === 'prepare' || action === 'attempt' || action === 'wait' || action === 'abandon')
+    && (approach === 'scouting' || approach === 'combat' || approach === 'diplomacy' || approach === 'trade')
+    ? { action, approach }
+    : null;
+}
+
+function currentQuest(value: unknown): CurrentQuest | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  const id = shortText(candidate.id, 80);
+  const origin = candidate.origin;
+  const title = shortText(candidate.title, 240);
+  const objective = shortText(candidate.objective, 2000);
+  const currentStep = nonNegativeInteger(candidate.currentStep);
+  const activationDay = nonNegativeInteger(candidate.activationDay);
+  const readiness = candidate.readiness;
+  const risk = candidate.risk;
+  const plan = Array.isArray(candidate.plan) ? candidate.plan.flatMap((step) => {
+    const parsed = questStep(step);
+    return parsed ? [parsed] : [];
+  }) : [];
+  if (!id || (origin !== 'authored_milestone' && origin !== 'generated_successor') || !title || !objective
+    || currentStep === null || activationDay === null || currentStep >= plan.length
+    || (readiness !== 'rising' && readiness !== 'steady' && readiness !== 'strained')
+    || (risk !== 'low' && risk !== 'moderate' && risk !== 'high')) return null;
+  return { id, origin, title, objective, plan, currentStep, activationDay, readiness, risk };
+}
+
+function publicQuestHistory(value: unknown): PublicQuestHistoryEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 24).flatMap((entry) => {
+    const candidate = record(entry);
+    const id = shortText(candidate?.id, 80);
+    const day = nonNegativeInteger(candidate?.day);
+    const outcome = shortText(candidate?.outcome, 64);
+    const text = shortText(candidate?.text, 1000);
+    if (!id || day === null || !outcome || !text) return [];
+    return [{ id, day, outcome, text, publicNews: candidate?.publicNews === true }];
+  });
 }
 
 /**
@@ -103,13 +152,15 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
       if(result.error)throw result.error;
       for (const [instanceId, raw] of Object.entries(result.data as Record<string, any>)) {
         const journal = raw as any;
+        const lifecycle = questStatus(journal.questLifecycleStatus);
         journals[instanceId]={
           instanceId, npcId:journal.npcId, sequence:Number(journal.sequence ?? 0),
-          availability:['active','between','failed','settled','abandoned'].includes(journal.status)?'present':journal.status,
-          intention:journal.campaign?.activePlan ? { goal:journal.currentMilestone?.objective ?? 'Current intention', motivation:journal.currentMilestone?.motivation ?? '', targets:journal.currentMilestone?.allowedTargets ?? [], steps:journal.campaign.activePlan } : null,
-          questStatus:journal.status, preparation:Number(journal.campaign?.preparation ?? 0), nextStep:Number(journal.campaign?.step ?? 0), risk:journal.risk ?? 'none', warning:null,
+          availability:lifecycle === 'departed' ? 'departed' : ['active','between','failed','settled','abandoned'].includes(journal.status) ? 'present' : journal.status,
+          questLifecycleStatus: lifecycle,
+          currentQuest: currentQuest(journal.currentQuest),
+          questHistory: publicQuestHistory(journal.questHistory),
+          farewellText: shortText(journal.farewellText, 1000),
           turns:(journal.turns ?? []).map((turn:any)=>({id:turn.turnId, message:turn.keeper, reply:turn.npc, day:turn.day})),
-          events:(journal.events ?? []).map((event:any)=>({id:event.id,text:event.text,outcome:event.outcome,day:event.day,publicNews:event.publicNews})),
           pending:journal.pending ? {turnId:journal.pending.turnId,status:journal.pending.status,message:journal.pending.message,error:journal.pending.error} : null,
           disposition: publicDisposition(journal.disposition),
           evolution: publicEvolution(journal.evolution)

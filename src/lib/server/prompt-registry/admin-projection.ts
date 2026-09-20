@@ -1,7 +1,7 @@
 import { PROMPT_MANIFEST, PROMPT_WORKFLOW_EDGES } from './manifest';
 import { PROMPT_KEYS, type PromptKey, type PromptWorkflow } from './contracts';
 
-const workflows = ['dialogue', 'authoring', 'resident_settlement', 'canon_settlement', 'social_settlement', 'procedural_settlement', 'portrait_generation', 'runtime_art'] as const;
+const workflows = ['dialogue', 'authoring', 'resident_settlement', 'canon_settlement', 'social_settlement', 'procedural_settlement', 'quest_transition', 'portrait_generation', 'runtime_art'] as const;
 export const PROMPT_WORKFLOWS = workflows;
 
 export type SafePromptExecutionRun = Readonly<{

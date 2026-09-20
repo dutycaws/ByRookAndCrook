@@ -2230,10 +2230,6 @@ export type Database = {
         }
         Returns: Json
       }
-      npc_world_accept_plan: {
-        Args: { p_actor: string; p_instance: string; p_steps: Json }
-        Returns: Json
-      }
       preview_apiary_command: {
         Args: { p_command_kind: string; p_payload: Json }
         Returns: Json
@@ -2355,16 +2351,6 @@ export type Database = {
         }
         Returns: Json
       }
-      use_generated_supply: {
-        Args: {
-          p_action_id: string
-          p_expected_revision: number
-          p_item_key: string
-          p_quest_id: string
-          p_save_id: string
-        }
-        Returns: Json
-      }
       world_demote_low_relevance_deep_npc: {
         Args: { p_reason?: string; p_save_id: string }
         Returns: Json
@@ -2429,6 +2415,36 @@ export type Database = {
         Returns: Json
       }
       world_public_codex: { Args: { p_save_id: string }; Returns: Json }
+      world_quest_transition_checkpoint: {
+        Args: {
+          p_fence: string
+          p_payload: Json
+          p_stage: string
+          p_transition_id: string
+        }
+        Returns: Json
+      }
+      world_quest_transition_claim: {
+        Args: { p_terminal_event_id: string }
+        Returns: Json
+      }
+      world_quest_transition_claim_next: { Args: never; Returns: Json }
+      world_quest_transition_commit: {
+        Args: { p_fence: string; p_proposal: Json; p_transition_id: string }
+        Returns: Json
+      }
+      world_quest_transition_fail: {
+        Args: {
+          p_failure_code: string
+          p_fence: string
+          p_transition_id: string
+        }
+        Returns: Json
+      }
+      world_quest_transition_heartbeat: {
+        Args: { p_fence: string; p_transition_id: string }
+        Returns: Json
+      }
       world_retire_generated_entity: {
         Args: {
           p_capability_id: string

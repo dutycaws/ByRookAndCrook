@@ -21,11 +21,10 @@ const provisionKey = 'road-provisions';
 function sourceResident(context: ProceduralContext): string {
   const entry = Object.entries(context.capabilities).find(([, capability]) =>
     capability.allowedWorldEffects.includes('create_entity')
-    && capability.allowedWorldEffects.includes('create_quest')
     && capability.allowedTargetKinds.includes('npc')
     && capability.allowedTargetKinds.includes('item')
   );
-  if (!entry) throw new Error('The deterministic playable fixture needs one resident authorized for NPC, item, and successor-quest creation.');
+  if (!entry) throw new Error('The deterministic playable fixture needs one resident authorized for NPC and item creation.');
   return entry[0];
 }
 
@@ -38,7 +37,7 @@ function deterministicProposal(context: ProceduralContext) {
               {
                 operation: 'entity', effectKind: 'create_entity', sourceResidentId: residentId,
                 entityKind: 'item', entityKey: provisionKey, archetypeKey: 'trade-good', proposedName: provisionName,
-                payload: { kind: 'travel food', summary: 'Durable provisions prepared for a successor quest.' }
+                payload: { kind: 'travel food', summary: 'Durable provisions for long journeys.' }
               },
               {
                 operation: 'gameplay_unlock', effectKind: 'unlock_gameplay', sourceResidentId: residentId,
@@ -53,11 +52,7 @@ function deterministicProposal(context: ProceduralContext) {
                   capabilities: { archetypeKey: 'scout' },
                   appearance: { physicalAppearance: 'A weathered traveler with observant eyes and a practical bearing.', attire: 'A green cloak, sturdy boots, and a well-kept travel satchel.', notableFeatures: 'A folded route map marked with careful charcoal notes.', mood: 'Cautiously hopeful after reaching the tavern.' }
                 }
-              },
-      {
-        operation: 'quest', effectKind: 'create_quest', ownerResidentId: residentId, primitiveKey: 'successor-quest',
-        action: 'prepare', approach: 'scouting', targetEntityRefs: [residentId], motivation: 'Prepare a safe route before the next journey.'
-      }
+              }
     ]
   };
 }

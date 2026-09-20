@@ -5,6 +5,7 @@ import type { Database } from '$lib/database.types';
 import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createSettlementProvider } from './provider';
+import { drainQuestTransitionQueue } from './quest-transition-worker';
 import { emitAiObservability, localAiObservabilitySink, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import { SETTLEMENT_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
 import { promptRegistryService, type PromptRegistryService } from '$lib/server/prompt-registry/service';
@@ -562,11 +563,17 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
 /** Serial claim processing makes the DB fence the only concurrency authority. */
 export async function drainWorldSettlementQueue(limit = 4, client = serviceClient(), runtime: SettlementRuntime = {}): Promise<SettlementOutcome[]> {
   if (!client) return []; const outcomes: SettlementOutcome[]=[];
+  const capacity=Math.max(1,Math.min(limit,4));
   const unattendedRuntime = { ...runtime, observability: runtime.observability ?? localAiObservabilitySink, promptRegistry: runtime.promptRegistry ?? promptRegistryService(client) };
-  for (let index=0; index<Math.max(1,Math.min(limit,4)); index+=1) {
+  for (let index=0; index<capacity; index+=1) {
     const next = await client.rpc('world_settlement_claim_next', {}); if (next.error) break;
     const outcome = await runSettlementClaim(client, next.data, unattendedRuntime); outcomes.push(outcome); if (outcome.status==='idle') break;
   }
+  // A terminal quest is created by a completed settlement. Drain a small
+  // separate batch after normal settlement work so a slow model never holds a
+  // day-close transaction or starves the settlement queue.
+  const remaining=capacity-outcomes.length;
+  if(remaining>0) outcomes.push(...await drainQuestTransitionQueue(remaining, client, unattendedRuntime));
   return outcomes;
 }
 type WorkerState = { running:boolean; timer:ReturnType<typeof setInterval>|null };

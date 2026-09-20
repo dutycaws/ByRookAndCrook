@@ -162,20 +162,22 @@
   {#if notice}<p class="form-message dialogue-notice" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
 
   <details class="dialogue-journal">
-    <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questStatus}</small></summary>
+    <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questLifecycleStatus.replace('_',' ')}</small></summary>
     <div class="journal-drawer">
       <section class="npc-intention">
-        <p class="eyebrow">{journal.availability==='present'?'Current intention':journal.availability==='dead'?'In memory':'Departed'} · {journal.questStatus}</p>
-        {#if journal.intention}<h3>{journal.intention.goal}</h3><p>{journal.intention.motivation}</p>{/if}
-        {#if journal.questStatus==='active'}<p>Readiness: {journal.preparation===2?'well prepared':journal.preparation===1?'some preparation':'unprepared'} · Risk: {journal.risk}</p>{/if}
-        {#if journal.questStatus==='active'&&journal.intention}
+        <p class="eyebrow">{journal.availability==='present'?'Current quest':journal.availability==='dead'?'In memory':'Departed'} · {journal.questLifecycleStatus.replace('_',' ')}</p>
+        {#if journal.currentQuest}<h3>{journal.currentQuest.title}</h3><p>{journal.currentQuest.objective}</p>{/if}
+        {#if journal.questLifecycleStatus==='awaiting_transition'}<p>They are considering their next step.</p>{/if}
+        {#if journal.questLifecycleStatus==='departing'}<p>They are leaving after the tavern closes.</p>{/if}
+        {#if journal.questLifecycleStatus==='active'&&journal.currentQuest}
+          <p>Readiness: {journal.currentQuest.readiness} · Risk: {journal.currentQuest.risk}. Food and drink can help their readiness.</p>
           <ol class="intention-steps" aria-label="Intended daily steps">
-            {#each journal.intention.steps as step,index}<li class:completed={index<journal.nextStep}>
-              {index<journal.nextStep?'Done':index===journal.nextStep?'Next outing':'Later'}: {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
+            {#each journal.currentQuest.plan as step,index}<li class:completed={index<journal.currentQuest.currentStep}>
+              {index<journal.currentQuest.currentStep?'Done':index===journal.currentQuest.currentStep?'Next outing':'Later'}: {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
             </li>{/each}
           </ol>
         {/if}
-        {#if journal.warning}<p class="form-message error" role="note">{journal.warning}</p>{/if}
+        {#if journal.farewellText}<p class="form-message" role="note">{journal.farewellText}</p>{/if}
       </section>
       {#if journal.disposition}
         <section class="npc-news" aria-label="How they seem lately">
@@ -196,7 +198,7 @@
           <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
         </section>
       {/if}
-      {#if journal.events.length}<div class="npc-news"><p class="eyebrow">News and remembered events</p><ul>{#each journal.events as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
+      {#if journal.questHistory.length}<div class="npc-news"><p class="eyebrow">Quest history</p><ul>{#each journal.questHistory as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
     </div>
   </details>
 </section>

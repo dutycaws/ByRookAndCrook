@@ -15,17 +15,10 @@ export interface GeneratedSupplyInventoryItem {
   name: string;
   quantity: number;
 }
-export interface GeneratedSupplyQuest {
-  questId: string;
-  state: 'active';
-  suppliesUsed: number;
-  summary: string;
-}
 export interface GeneratedSupplies {
   version: 'generated-shop-v1';
   catalog: GeneratedSupplyCatalogItem[];
   inventory: GeneratedSupplyInventoryItem[];
-  successorQuest: GeneratedSupplyQuest | null;
 }
 
 function uuid(value: unknown): value is string {
@@ -44,7 +37,7 @@ function boundedInteger(value: unknown, minimum: number, maximum: number): value
 
 /** Reject the complete server response when an unreviewed field reaches the shop boundary. */
 export function parseGeneratedSupplies(value: unknown): GeneratedSupplies {
-  if (!object(value) || !exact(value, ['version','catalog','inventory','successorQuest']) || value.version !== 'generated-shop-v1' || !Array.isArray(value.catalog) || !Array.isArray(value.inventory) || value.catalog.length > 40 || value.inventory.length > 40) throw new Error('Invalid generated shop projection');
+  if (!object(value) || !exact(value, ['version','catalog','inventory']) || value.version !== 'generated-shop-v1' || !Array.isArray(value.catalog) || !Array.isArray(value.inventory) || value.catalog.length > 40 || value.inventory.length > 40) throw new Error('Invalid generated shop projection');
   const catalog = value.catalog.map((item) => {
     if (!object(item)) throw new Error('Invalid generated supply catalog item');
     const valid = exact(item, ['entityId','itemKey','name','price','dailyStock','remainingStock']) && uuid(item.entityId) && KEY.test(String(item.itemKey)) && text(item.name, 120) && boundedInteger(item.price, 1, 100) && boundedInteger(item.dailyStock, 1, 10) && boundedInteger(item.remainingStock, 0, 10) && (item.remainingStock as number) <= (item.dailyStock as number);
@@ -56,10 +49,7 @@ export function parseGeneratedSupplies(value: unknown): GeneratedSupplies {
     return { entityId:item.entityId as string, itemKey:item.itemKey as string, name:(item.name as string).trim(), quantity:item.quantity as number };
   });
   if (new Set(catalog.map((item) => item.entityId)).size !== catalog.length || new Set(inventory.map((item) => item.entityId)).size !== inventory.length) throw new Error('Duplicate generated supply projection item');
-  const quest = value.successorQuest;
-  if (quest === null) return { version:'generated-shop-v1', catalog, inventory, successorQuest:null };
-  if (!object(quest) || !exact(quest, ['questId','state','suppliesUsed','summary']) || !uuid(quest.questId) || quest.state !== 'active' || !boundedInteger(quest.suppliesUsed, 0, 999) || !text(quest.summary, 240)) throw new Error('Invalid successor quest projection');
-  return { version:'generated-shop-v1', catalog, inventory, successorQuest:{ questId:quest.questId, state:'active', suppliesUsed:quest.suppliesUsed as number, summary:(quest.summary as string).trim() } };
+  return { version:'generated-shop-v1', catalog, inventory };
 }
 
 type RawRpc = (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
@@ -74,11 +64,5 @@ export async function getGeneratedSupplies(client: SupabaseClient<Database>, sav
 export async function purchaseGeneratedSupply(client: SupabaseClient<Database>, input: { saveId:string; actionId:string; expectedRevision:number; itemKey:string; quantity:number }) {
   const { data, error } = await rawRpc(client)('purchase_generated_supply', { p_save_id:input.saveId, p_action_id:input.actionId, p_expected_revision:input.expectedRevision, p_item_key:input.itemKey, p_quantity:input.quantity });
   if (error) throw new Error(error.code === 'PT422' || error.code === 'PT409' ? error.message : 'The generated supply purchase could not be completed.');
-  return data;
-}
-
-export async function useGeneratedSupply(client: SupabaseClient<Database>, input: { saveId:string; actionId:string; expectedRevision:number; itemKey:string; questId:string }) {
-  const { data, error } = await rawRpc(client)('use_generated_supply', { p_save_id:input.saveId, p_action_id:input.actionId, p_expected_revision:input.expectedRevision, p_item_key:input.itemKey, p_quest_id:input.questId });
-  if (error) throw new Error(error.code === 'PT422' || error.code === 'PT409' ? error.message : 'The generated supply could not be prepared.');
   return data;
 }

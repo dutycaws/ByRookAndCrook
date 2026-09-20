@@ -52,8 +52,8 @@ select throws_ok($$select public.world_settlement_commit_procedural_world((selec
 reset role;
 select is((select count(*) from private.world_procedural_public_events where job_id=(select j from pg_temp.attempt)), 1::bigint, 'replay does not duplicate the public event operation');
 
--- The frozen `npc` references are active resident instance IDs.  A quest can
--- target one directly, proving the server resolver agrees with the context.
+-- Quest generation has moved to the canonical transition workflow. The old
+-- procedural service rejects this command before touching its history table.
 create temporary table pg_temp.npc_target(s uuid,j uuid,f uuid);
 insert into pg_temp.npc_target values ('18000000-0000-4000-8000-000000000040','18000000-0000-4000-8000-000000000041','18000000-0000-4000-8000-000000000042');
 insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,fence,lease_until,deadline_at,input_snapshot,input_version)
@@ -63,13 +63,11 @@ select j,s,1,'procedural_world','processing',encode(extensions.digest(private.wo
 insert into private.world_settlement_attempts(job_id,attempt_number,fence,lease_until) select j,1,f,clock_timestamp()+interval '5 minutes' from pg_temp.npc_target;
 grant select on pg_temp.npc_target to service_role;
 set local role service_role; set local request.jwt.claim.role='service_role';
-create temporary table pg_temp.npc_target_result as
-select public.world_settlement_commit_procedural_world(s,j,f,jsonb_build_object('version','procedural-world-v1','commands',jsonb_build_array(jsonb_build_object('operation','quest','effectKind','create_quest','ownerResidentId',(select source_resident_id::text from pg_temp.fixture),'primitiveKey','successor-quest','action','prepare','approach','scouting','targetEntityRefs',jsonb_build_array((select source_resident_id::text from pg_temp.fixture)),'motivation','Meet the ranger at the old watch.')))) result from pg_temp.npc_target;
+select throws_ok($$select public.world_settlement_commit_procedural_world(s,j,f,jsonb_build_object('version','procedural-world-v1','commands',jsonb_build_array(jsonb_build_object('operation','quest','effectKind','create_quest','ownerResidentId',(select source_resident_id::text from pg_temp.fixture),'primitiveKey','successor-quest','action','prepare','approach','scouting','targetEntityRefs',jsonb_build_array((select source_resident_id::text from pg_temp.fixture)),'motivation','Meet the ranger at the old watch.')))) from pg_temp.npc_target$$,'PT400','Legacy procedural quest commands are retired; use the canonical quest transition service','general procedural generation cannot create a competing quest');
 reset role;
-select ok((select result->>'status'='completed' and result->'operations'->0->>'operation'='quest' from pg_temp.npc_target_result),'a procedural quest may target a frozen active resident NPC instance');
 
-select lives_ok($$insert into private.world_procedural_quests(save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day) select f.save_id,i.id,'active','successor-quest','fixture-one','{}',4 from pg_temp.fixture f join private.world_npc_instances i on i.save_id=f.save_id and i.id<>f.source_resident_id limit 1$$, 'one direct active successor quest can be recorded for a resident');
-select throws_ok($$insert into private.world_procedural_quests(save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day) select q.save_id,q.instance_id,'active','successor-quest','fixture-two','{}',4 from private.world_procedural_quests q where q.input_fingerprint='fixture-one'$$, '23505', null, 'unique active-quest index prevents a second active successor quest');
+select lives_ok($$insert into private.world_procedural_quests(save_id,instance_id,state,primitive_key,input_fingerprint,payload,started_day,ended_day) select f.save_id,i.id,'resolved','successor-quest','fixture-one','{}',4,4 from pg_temp.fixture f join private.world_npc_instances i on i.save_id=f.save_id and i.id<>f.source_resident_id limit 1$$, 'legacy procedural quest history remains readable for prototype migration');
+select is(private.world_procedural_world_context((select save_id from pg_temp.fixture))->'activeQuestByResident','{}'::jsonb,'legacy quest history is never projected as current authority');
 
 -- Every negative command receives its own lease.  That keeps an unexpected
 -- acceptance from turning the remaining assertions into receipt/replay PT409s.

@@ -64,7 +64,12 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
   const d=structuredClone(raw) as Decision;
   if(d.reaction && (d.evidence.length<3||!message.includes(d.evidence))) d.reaction=0;
   const p=d.intention;
-  if(p && (d.stance!=='agree'||base.questStatus!=='active'&&p.goal===base.intention?.goal||!p.goal.trim()||p.goal.length>300||!p.motivation.trim()||p.motivation.length>300
+  const activeIntention=base.intention;
+  const sameTargets=(left:unknown,right:unknown)=>Array.isArray(left)&&Array.isArray(right)
+    && left.length===right.length&&left.every((value,index)=>value===right[index]);
+  if(p && (d.stance!=='agree'||(base.questLifecycleStatus??base.questStatus)!=='active'||!activeIntention
+    ||p.goal!==activeIntention.goal||p.motivation!==activeIntention.motivation||!sameTargets(p.targets,activeIntention.targets)
+    ||!p.goal.trim()||p.goal.length>300||!p.motivation.trim()||p.motivation.length>300
     || !hasExecutableSteps(p.steps)
     ||p.targets.length<1||p.targets.length>5||p.targets.some(x=>!base.allowedTargets.includes(x)))) {
     d.intention=null; d.stance='clarify';

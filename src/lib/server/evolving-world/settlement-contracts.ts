@@ -17,6 +17,8 @@ export type SocialEncounterProviderStage = (typeof SOCIAL_ENCOUNTER_PROVIDER_STA
 export const PROCEDURAL_WORLD_SETTLEMENT_PROMPT_VERSION = 'procedural-world-v1' as const;
 export const PROCEDURAL_WORLD_PROVIDER_STAGES = ['procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair', 'procedural_world_final_critic'] as const;
 export type ProceduralWorldProviderStage = (typeof PROCEDURAL_WORLD_PROVIDER_STAGES)[number];
+export const QUEST_TRANSITION_PROVIDER_STAGES = ['quest_transition_proposer', 'quest_transition_critic', 'quest_transition_repair', 'quest_transition_final_critic'] as const;
+export type QuestTransitionProviderStage = (typeof QUEST_TRANSITION_PROVIDER_STAGES)[number];
 /**
  * Versioned provider-call ceilings for the two settlement flows. Canon admits
  * no provider-produced digest or news: a straight acceptance is proposer plus
@@ -27,10 +29,11 @@ export const SETTLEMENT_PROVIDER_CALL_BUDGETS = {
   canon: { maximum: 4, accepted: 2, stages: CANON_PROVIDER_STAGES },
   social_encounter: { maximum: 4, ordinary: 2, stages: SOCIAL_ENCOUNTER_PROVIDER_STAGES },
   procedural_world: { maximum: 4, ordinary: 2, stages: PROCEDURAL_WORLD_PROVIDER_STAGES },
+  quest_transition: { maximum: 4, ordinary: 2, stages: QUEST_TRANSITION_PROVIDER_STAGES },
   news: { maximum: 0, stages: [] }
 } as const;
 export type ResidentProviderStage = Exclude<SettlementStage, 'validated'>;
-export type ProviderStage = ResidentProviderStage | CanonProviderStage | SocialEncounterProviderStage | ProceduralWorldProviderStage;
+export type ProviderStage = ResidentProviderStage | CanonProviderStage | SocialEncounterProviderStage | ProceduralWorldProviderStage | QuestTransitionProviderStage;
 /** Provider stages remain namespaced while durable checkpoints retain their frozen original names. */
 export const CANON_CHECKPOINT_STAGE: Readonly<Record<CanonProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
   canon_proposer:'proposer', canon_critic:'critic', canon_repair:'repair', canon_final_critic:'final_critic'
@@ -41,16 +44,21 @@ export const SOCIAL_ENCOUNTER_CHECKPOINT_STAGE: Readonly<Record<SocialEncounterP
 export const PROCEDURAL_WORLD_CHECKPOINT_STAGE: Readonly<Record<ProceduralWorldProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
   procedural_world_proposer:'proposer', procedural_world_critic:'critic', procedural_world_repair:'repair', procedural_world_final_critic:'final_critic'
 };
+export const QUEST_TRANSITION_CHECKPOINT_STAGE: Readonly<Record<QuestTransitionProviderStage, Extract<SettlementStage, 'proposer' | 'critic' | 'repair' | 'final_critic'>>> = {
+  quest_transition_proposer:'proposer', quest_transition_critic:'critic', quest_transition_repair:'repair', quest_transition_final_critic:'final_critic'
+};
 export function checkpointStageForProviderStage(stage: ProviderStage): SettlementStage {
   if (stage in CANON_CHECKPOINT_STAGE) return CANON_CHECKPOINT_STAGE[stage as CanonProviderStage];
   if (stage in SOCIAL_ENCOUNTER_CHECKPOINT_STAGE) return SOCIAL_ENCOUNTER_CHECKPOINT_STAGE[stage as SocialEncounterProviderStage];
   if (stage in PROCEDURAL_WORLD_CHECKPOINT_STAGE) return PROCEDURAL_WORLD_CHECKPOINT_STAGE[stage as ProceduralWorldProviderStage];
+  if (stage in QUEST_TRANSITION_CHECKPOINT_STAGE) return QUEST_TRANSITION_CHECKPOINT_STAGE[stage as QuestTransitionProviderStage];
   return stage as SettlementStage;
 }
 export function promptVersionForProviderStage(stage: ProviderStage): string {
   if (stage in CANON_CHECKPOINT_STAGE) return CANON_SETTLEMENT_PROMPT_VERSION;
   if (stage in SOCIAL_ENCOUNTER_CHECKPOINT_STAGE) return SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION;
   if (stage in PROCEDURAL_WORLD_CHECKPOINT_STAGE) return PROCEDURAL_WORLD_SETTLEMENT_PROMPT_VERSION;
+  if (stage in QUEST_TRANSITION_CHECKPOINT_STAGE) return 'quest-transition-v1';
   return SETTLEMENT_PROMPT_VERSION;
 }
 export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'social_encounter' | 'procedural_world' | 'quest' | 'effects' | 'news' | 'finalize';

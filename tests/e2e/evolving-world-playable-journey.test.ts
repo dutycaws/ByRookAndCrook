@@ -6,7 +6,7 @@ import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
 
 const promptRegistry = fixturePromptRegistry();
 
-test('a generated provision and promoted procedural resident stay playable through public shop and bar projections', async ({ page }) => {
+test('a generated provision remains ordinary inventory while a promoted procedural resident stays playable', async ({ page }) => {
   const fixture = await createPlayableWorldFixture();
   try {
     expect(fixture.days).toBeLessThanOrEqual(30);
@@ -24,25 +24,21 @@ test('a generated provision and promoted procedural resident stay playable throu
     const supplies = page.locator('[aria-labelledby="generated-supplies-title"]');
     await expect(supplies.getByRole('heading', { name: 'New provisions' })).toBeVisible();
     await expect(supplies.getByRole('heading', { name: fixture.provisionName })).toHaveCount(1);
-    await expect(supplies.getByLabel('Active successor quest')).toBeVisible();
     await supplies.getByRole('button', { name: 'Buy provision' }).click();
     await expect(supplies.getByRole('status')).toContainText('Provision purchased.');
     await page.reload();
     await page.waitForLoadState('networkidle');
     await expect(supplies.getByText(`1 × ${fixture.provisionName}`)).toBeVisible();
-    await supplies.getByRole('button', { name: 'Prepare for quest' }).click();
-    await expect(supplies.getByRole('status')).toContainText('Provision prepared for the successor quest.');
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    await expect(supplies.getByText('1 provisions prepared')).toBeVisible();
     await expect(supplies.getByText(fixture.provisionName, { exact: true })).toHaveCount(1);
 
     const shopProjection = await fixture.client.rpc('world_generated_shop_projection', { p_save_id: fixture.saveId });
     expect(shopProjection.error).toBeNull();
     expect(JSON.stringify(shopProjection.data)).not.toMatch(/canonical|profile|prompt|storage|signed/i);
     expect((shopProjection.data as any).catalog).toHaveLength(1);
-    expect((shopProjection.data as any).inventory).toHaveLength(0);
-    expect((shopProjection.data as any).successorQuest.suppliesUsed).toBe(1);
+    expect((shopProjection.data as any).inventory).toEqual([
+      expect.objectContaining({ itemKey: fixture.provisionKey, quantity: 1 })
+    ]);
+    expect(shopProjection.data).not.toHaveProperty('successorQuest');
 
     await page.goto('/bar');
     await expect(page.getByText(fixture.promotedNpcName, { exact: true }).first()).toBeVisible();

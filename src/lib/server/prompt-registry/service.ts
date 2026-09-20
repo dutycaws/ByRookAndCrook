@@ -33,7 +33,7 @@ export class PromptRegistryService {
 
   /** Resolves the release persisted beside durable work; it never consults the
    * mutable active pointer.  Call this before every provider dispatch. */
-  async resolveForWork(kind: 'dialogue' | 'settlement' | 'authoring' | 'portrait' | 'runtime_art', workId: string): Promise<PromptReleaseSnapshot> {
+  async resolveForWork(kind: 'dialogue' | 'settlement' | 'quest_transition' | 'authoring' | 'portrait' | 'runtime_art', workId: string): Promise<PromptReleaseSnapshot> {
     const result = await this.client.rpc('prompt_registry_service_work_release', { p_work_kind: kind, p_work_id: workId });
     if (result.error || typeof result.data !== 'string') throw new Error(result.error?.message ?? 'Prompt release was not pinned for this work');
     return this.resolve(result.data);

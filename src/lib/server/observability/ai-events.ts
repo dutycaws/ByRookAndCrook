@@ -23,7 +23,9 @@ export const WORLD_SETTLEMENT_AI_STAGES = [
   'social_encounter_fallback',
   'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair',
   'procedural_world_final_critic', 'procedural_world_validate', 'procedural_world_commit', 'lease',
-  'procedural_world_fallback', 'procedural_world_promotion'
+  'procedural_world_fallback', 'procedural_world_promotion',
+  'quest_transition_proposer', 'quest_transition_critic', 'quest_transition_repair',
+  'quest_transition_final_critic', 'quest_transition_validate', 'quest_transition_commit', 'quest_transition_fallback'
 ] as const;
 
 export type DialogueAiStage = (typeof DIALOGUE_AI_STAGES)[number];
@@ -77,7 +79,8 @@ const providerStages = new Set<string>([
   'proposer', 'critic', 'repair', 'final_critic', 'digest',
   'canon_proposer', 'canon_critic', 'canon_repair', 'canon_final_critic',
   'social_encounter_proposer', 'social_encounter_critic', 'social_encounter_repair', 'social_encounter_final_critic',
-  'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair', 'procedural_world_final_critic'
+  'procedural_world_proposer', 'procedural_world_critic', 'procedural_world_repair', 'procedural_world_final_critic',
+  'quest_transition_proposer', 'quest_transition_critic', 'quest_transition_repair', 'quest_transition_final_critic'
 ]);
 
 function finiteInteger(value: unknown, minimum: number, maximum: number): value is number {

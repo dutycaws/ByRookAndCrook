@@ -30,5 +30,6 @@ export const SETTLEMENT_PROMPT_KEY = {
   proposer: 'resident.proposer', critic: 'resident.critic', repair: 'resident.repair', final_critic: 'resident.final_critic', digest: 'resident.digest',
   canon_proposer: 'canon.proposer', canon_critic: 'canon.critic', canon_repair: 'canon.repair', canon_final_critic: 'canon.final_critic',
   social_encounter_proposer: 'social.proposer', social_encounter_critic: 'social.critic', social_encounter_repair: 'social.repair', social_encounter_final_critic: 'social.final_critic',
-  procedural_world_proposer: 'procedural.proposer', procedural_world_critic: 'procedural.critic', procedural_world_repair: 'procedural.repair', procedural_world_final_critic: 'procedural.final_critic'
+  procedural_world_proposer: 'procedural.proposer', procedural_world_critic: 'procedural.critic', procedural_world_repair: 'procedural.repair', procedural_world_final_critic: 'procedural.final_critic',
+  quest_transition_proposer: 'quest_transition.proposer', quest_transition_critic: 'quest_transition.critic', quest_transition_repair: 'quest_transition.repair', quest_transition_final_critic: 'quest_transition.final_critic'
 } as const satisfies Record<string, PromptKey>;

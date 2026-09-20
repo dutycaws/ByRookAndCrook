@@ -46,6 +46,7 @@ describe('world canon event provider stages',()=>{
       canon:{maximum:4,accepted:2,stages:['canon_proposer','canon_critic','canon_repair','canon_final_critic']},
       social_encounter:{maximum:4,ordinary:2,stages:['social_encounter_proposer','social_encounter_critic','social_encounter_repair','social_encounter_final_critic']},
       procedural_world:{maximum:4,ordinary:2,stages:['procedural_world_proposer','procedural_world_critic','procedural_world_repair','procedural_world_final_critic']},
+      quest_transition:{maximum:4,ordinary:2,stages:['quest_transition_proposer','quest_transition_critic','quest_transition_repair','quest_transition_final_critic']},
       news:{maximum:0,stages:[]}
     });
     expect(SETTLEMENT_PROVIDER_CALL_BUDGETS.canon.stages).not.toContain('digest');

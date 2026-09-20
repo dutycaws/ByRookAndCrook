@@ -51,8 +51,9 @@ describe('dialogue boundaries',()=>{
     expect(validateDecision({...d,gold:1000},base,'hello').stance).toBe('clarify');
   });
   it('requires the only terminal action to be the last daily step',()=>{
-    const base={questStatus:'active',allowedTargets:['millhaven']};
-    const proposal={stance:'agree',reaction:0,subject:'quest',evidence:'',intention:{goal:'Guard Millhaven',motivation:'Protect travelers',targets:['millhaven'],steps:[] as any[]}};
+    const intention={goal:'Guard Millhaven',motivation:'Protect travelers',targets:['millhaven'],steps:[{action:'attempt',approach:'scouting'}]};
+    const base={questLifecycleStatus:'active',allowedTargets:['millhaven'],intention};
+    const proposal={stance:'agree',reaction:0,subject:'quest',evidence:'',intention:{...intention,steps:[] as any[]}};
     for(const actions of [['attempt','prepare','attempt'],['abandon','attempt'],['prepare'],['wait']]) {
       proposal.intention.steps=actions.map(action=>({action,approach:'scouting'}));
       expect(validateDecision(proposal,base,'Please consider this plan.').stance).toBe('clarify');
@@ -62,6 +63,8 @@ describe('dialogue boundaries',()=>{
       proposal.intention.steps=actions.map(action=>({action,approach:'scouting'}));
       expect(validateDecision(proposal,base,'Please consider this plan.').intention).toEqual(proposal.intention);
     }
+    expect(validateDecision({...proposal,intention:{...proposal.intention,goal:'Replace the authored objective'}},base,'Please consider this plan.')).toMatchObject({stance:'clarify',intention:null});
+    expect(validateDecision({...proposal,intention:{...proposal.intention,steps:[{action:'attempt',approach:'magic'}]}},base,'Please consider this plan.')).toMatchObject({stance:'clarify',intention:null});
   });
   it('local mode never falls back to a hosted provider',async()=>{
     await expect(createProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test-only-placeholder'}).generate('speak',{},new AbortController().signal,fixturePromptRelease.prompts['dialogue.speak'])).rejects.toThrow('not implemented');
