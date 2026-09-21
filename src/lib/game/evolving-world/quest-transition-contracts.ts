@@ -22,8 +22,10 @@ export type QuestTransitionValidationContext = {
   otherResidentIds?: readonly string[];
 };
 
-export const QUEST_TRANSITION_CRITIC_CODES = ['proposal_shape', 'terminal_event', 'authored_milestone', 'plan_shape', 'target_frozen', 'capability', 'successor_bounds', 'departure_safety'] as const;
-export const QUEST_TRANSITION_CRITIC_PATHS = ['proposal', 'terminalEventId', 'nextAuthoredMilestone', 'plan', 'targetRefs', 'successor', 'departure'] as const;
+/** Narrative review is deliberately closed as well: the model may identify a
+ * continuity defect, but cannot turn that into a new command surface. */
+export const QUEST_TRANSITION_CRITIC_CODES = ['proposal_shape', 'terminal_event', 'authored_milestone', 'plan_shape', 'target_frozen', 'capability', 'successor_bounds', 'departure_safety', 'author_fidelity', 'character_boundary', 'causal_continuity'] as const;
+export const QUEST_TRANSITION_CRITIC_PATHS = ['proposal', 'terminalEventId', 'nextAuthoredMilestone', 'plan', 'targetRefs', 'successor', 'departure', 'authorGoal', 'characterBoundary', 'causalContinuity'] as const;
 export type QuestTransitionCriticCode = (typeof QUEST_TRANSITION_CRITIC_CODES)[number];
 export type QuestTransitionCriticPath = (typeof QUEST_TRANSITION_CRITIC_PATHS)[number];
 export type QuestTransitionCriticInstruction = { code: QuestTransitionCriticCode; path: QuestTransitionCriticPath };
@@ -31,6 +33,12 @@ export type QuestTransitionCriticDecision = { decision: 'accept' | 'reject'; ins
 export type QuestTransitionParseResult = { ok: true; value: QuestTransitionProposal } | { ok: false; issues: ContractIssue[] };
 
 const deathLanguage = /\b(?:death|dead|die|died|dying|kill|killed|murder|murdered|suicide|corpse|funeral)\b/i;
+const criticPathsByCode: Readonly<Record<QuestTransitionCriticCode, readonly QuestTransitionCriticPath[]>> = {
+  proposal_shape: ['proposal'], terminal_event: ['terminalEventId'], authored_milestone: ['nextAuthoredMilestone'],
+  plan_shape: ['plan'], target_frozen: ['targetRefs'], capability: ['successor', 'departure'],
+  successor_bounds: ['successor'], departure_safety: ['departure'], author_fidelity: ['authorGoal'],
+  character_boundary: ['characterBoundary'], causal_continuity: ['causalContinuity']
+};
 
 function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype; }
 function exact(value: Record<string, unknown>, keys: readonly string[]): boolean { return keys.every((key) => key in value) && Object.keys(value).every((key) => keys.includes(key)); }
@@ -58,7 +66,10 @@ export function parseQuestTransitionCriticDecision(value: unknown): QuestTransit
   const instructions: QuestTransitionCriticInstruction[] = [];
   for (const instruction of value.instructions) {
     if (!object(instruction) || !exact(instruction, ['code', 'path']) || !QUEST_TRANSITION_CRITIC_CODES.includes(instruction.code as QuestTransitionCriticCode) || !QUEST_TRANSITION_CRITIC_PATHS.includes(instruction.path as QuestTransitionCriticPath)) return null;
-    instructions.push({ code: instruction.code as QuestTransitionCriticCode, path: instruction.path as QuestTransitionCriticPath });
+    const code = instruction.code as QuestTransitionCriticCode;
+    const path = instruction.path as QuestTransitionCriticPath;
+    if (!criticPathsByCode[code].includes(path)) return null;
+    instructions.push({ code, path });
   }
   if (new Set(instructions.map((instruction) => `${instruction.code}:${instruction.path}`)).size !== instructions.length) return null;
   return value.decision === 'repair' ? { decision: 'repair', instructions } : { decision: value.decision as 'accept' | 'reject', instructions: [] };

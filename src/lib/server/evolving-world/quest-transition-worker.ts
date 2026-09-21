@@ -93,10 +93,19 @@ function validationContext(claim: QuestTransitionClaim): QuestTransitionValidati
   const source = claim.frozenContext;
   const envelope = source.capabilityEnvelope;
   if (!object(envelope) || !Array.isArray(envelope.allowedActions) || !Array.isArray(envelope.allowedApproaches)
-    || !Array.isArray(envelope.allowedWorldEffects)
     || !envelope.allowedActions.every((value) => typeof value === 'string')
     || !envelope.allowedApproaches.every((value) => typeof value === 'string')
-    || !envelope.allowedWorldEffects.every((value) => typeof value === 'string')) return null;
+    || ('allowedWorldEffects' in envelope && (!Array.isArray(envelope.allowedWorldEffects) || !envelope.allowedWorldEffects.every((value) => typeof value === 'string')))
+    || ('allowGeneratedSuccessor' in envelope && typeof envelope.allowGeneratedSuccessor !== 'boolean')
+    || ('allowDeparture' in envelope && typeof envelope.allowDeparture !== 'boolean')) return null;
+  // 077 supplies the explicit booleans. Keep old frozen claims replayable by
+  // deriving their gates from the historical effect envelope instead of
+  // granting departure implicitly.
+  const legacyEffects = Array.isArray(envelope.allowedWorldEffects) ? envelope.allowedWorldEffects as string[] : [];
+  const allowGeneratedSuccessor = typeof envelope.allowGeneratedSuccessor === 'boolean'
+    ? envelope.allowGeneratedSuccessor : legacyEffects.includes('create_quest');
+  const allowDeparture = typeof envelope.allowDeparture === 'boolean'
+    ? envelope.allowDeparture : legacyEffects.includes('departure');
   const refs = Array.isArray(source.validCanonicalTargets)
     ? source.validCanonicalTargets.flatMap((target) => object(target) ? [target.id, target.ref].filter((value): value is string => typeof value === 'string') : [])
     : [];
@@ -111,7 +120,7 @@ function validationContext(claim: QuestTransitionClaim): QuestTransitionValidati
     frozenTargetRefs: [...new Set(refs)].slice(0, 300),
     capabilities: {
       actions: envelope.allowedActions as string[], approaches: envelope.allowedApproaches as string[],
-      allowGeneratedSuccessor: envelope.allowedWorldEffects.includes('create_quest'), allowDeparture: true
+      allowGeneratedSuccessor, allowDeparture
     },
     ...(milestone ? { nextAuthoredMilestone: milestone } : {}),
     ...(residents.length ? { otherResidentIds: [...new Set(residents)].slice(0, 32) } : {})

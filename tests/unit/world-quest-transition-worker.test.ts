@@ -21,6 +21,19 @@ function claim(checkpoints: unknown[] = []) {
     }
   };
 }
+function context13() {
+  return {
+    quest: { id: 'quest-1', saveId: 'save-1', instanceId, versionId: 'version-1', packageId: 'package-1', packageHash: 'hash', origin: 'authored_milestone', title: 'Keep the road safe', objective: 'Secure the northern road.', motivation: 'Lira protects travellers.', constraints: ['Do not endanger travellers.'], targetRefs: ['forest'], difficulty: 2, terminalDay: 3 },
+    terminalEvent: { id: terminalEventId, day: 3, step: 1, action: 'attempt', approach: 'scouting', outcome: 'succeeded', text: 'The road is safe.', publicNews: true },
+    eventHistory: [{ id: terminalEventId, day: 3, step: 1, action: 'attempt', approach: 'scouting', outcome: 'succeeded', text: 'The road is safe.', publicNews: true }],
+    versionSheet: { name: 'Lira', identity: '{"role":"ranger"}', personality: 'Steady and cautious.', lore: 'She knows the northern road.', boundaries: 'Never abandon travellers.' },
+    capabilityEnvelope: { allowGeneratedSuccessor: true, allowDeparture: false, allowedActions: ['prepare', 'attempt'], allowedApproaches: ['scouting'] },
+    registeredActions: ['prepare', 'attempt'], registeredApproaches: ['scouting'],
+    validCanonicalTargets: [{ id: 'target-1', ref: 'forest', kind: 'place' }], currentProfile: { summary: 'Trusted by the village.' },
+    nextAuthoredMilestone: { id: 'milestone-2', title: 'Trace the threat' }, dialogueEvidence: [], beliefs: [], socialEdges: []
+  };
+}
+function claim077(checkpoints: unknown[] = []) { return { ...claim(checkpoints), frozenContext: context13() }; }
 function registry() {
   const prompts = Object.fromEntries(['quest_transition.proposer', 'quest_transition.critic', 'quest_transition.repair', 'quest_transition.final_critic'].map((key) => [key, { key, releaseId: 'release-1', revisionId: 'revision-1', revision: 1, promptType: 'text_system', body: 'fixture', contentHash: 'x', bodyHash: 'x', contractId: 'quest-transition-v1', contractHash: 'x', modelLane: 'world', createdAt: '', createdBy: 'test' }]));
   return {
@@ -65,6 +78,12 @@ describe('quest transition worker', () => {
     expect(mock.calls.map((call) => call.name)).toEqual(expect.arrayContaining(['world_quest_transition_checkpoint', 'world_quest_transition_commit']));
   });
 
+  it('executes normally from the exact bounded thirteen-key 077 snapshot', async () => {
+    const mock = client(); const model = provider({ quest_transition_proposer: proposal, quest_transition_critic: { decision: 'accept', instructions: [] } });
+    await expect(runQuestTransitionClaim(mock.api, claim077(), { provider: model, promptRegistry: registry(), heartbeatMs: 99_999 })).resolves.toEqual({ status: 'completed', kind: 'next_authored_milestone' });
+    expect(model.calls).toEqual(['quest_transition_proposer', 'quest_transition_critic']);
+  });
+
   it('uses at most one repair then a final critic', async () => {
     const mock = client(); const model = provider({
       quest_transition_proposer: proposal,
@@ -74,6 +93,18 @@ describe('quest transition worker', () => {
     });
     await expect(runQuestTransitionClaim(mock.api, claim(), { provider: model, promptRegistry: registry(), heartbeatMs: 99_999 })).resolves.toMatchObject({ status: 'completed' });
     expect(model.calls).toHaveLength(4);
+  });
+
+  it('records validation_rejected and never commits when the final continuity critic rejects a repair', async () => {
+    const mock = client(); const model = provider({
+      quest_transition_proposer: proposal,
+      quest_transition_critic: { decision: 'repair', instructions: [{ code: 'causal_continuity', path: 'causalContinuity' }] },
+      quest_transition_repair: proposal,
+      quest_transition_final_critic: { decision: 'reject', instructions: [] }
+    });
+    await expect(runQuestTransitionClaim(mock.api, claim(), { provider: model, promptRegistry: registry(), heartbeatMs: 99_999 })).resolves.toEqual({ status: 'failed', errorCode: 'validation_rejected' });
+    expect(mock.calls.map((call) => call.name)).not.toContain('world_quest_transition_commit');
+    expect(mock.calls.find((call) => call.name === 'world_quest_transition_fail')?.args?.p_failure_code).toBe('validation_rejected');
   });
 
   it('reuses durable proposer and critic checkpoints without another model call', async () => {
@@ -93,6 +124,13 @@ describe('quest transition worker', () => {
     expect(mock.calls.map((call) => call.name)).toContain('world_quest_transition_fail');
     const failure = mock.calls.find((call) => call.name === 'world_quest_transition_fail');
     expect(failure?.args?.p_failure_code).toBe(expectedCode);
+  });
+
+  it('does not commit after an initial critic rejection', async () => {
+    const mock = client();
+    await expect(runQuestTransitionClaim(mock.api, claim077(), { provider: provider({ quest_transition_proposer: proposal, quest_transition_critic: { decision: 'reject', instructions: [] } }), promptRegistry: registry(), heartbeatMs: 99_999 })).resolves.toEqual({ status: 'failed', errorCode: 'validation_rejected' });
+    expect(mock.calls.map((call) => call.name)).not.toContain('world_quest_transition_commit');
+    expect(mock.calls.find((call) => call.name === 'world_quest_transition_fail')?.args?.p_failure_code).toBe('validation_rejected');
   });
 
   it('returns lease_lost for a stale fence and accepts a replayed commit receipt', async () => {

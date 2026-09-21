@@ -79,6 +79,21 @@ export interface PublicQuestHistoryEntry {
   text: string;
   publicNews: boolean;
 }
+/** A terminal quest plus its chronological, player-safe event record. */
+export interface PublicQuestArchiveQuest {
+  id: string;
+  origin: 'authored_milestone' | 'generated_successor';
+  title: string;
+  objective: string;
+  outcome: 'succeeded' | 'failed' | 'abandoned';
+  activationDay: number;
+  terminalDay: number;
+  events: PublicQuestHistoryEntry[];
+}
+export interface PublicQuestArchive {
+  items: PublicQuestArchiveQuest[];
+  nextCursor: string | null;
+}
 
 export interface Journal {
   instanceId: NpcInstanceId;
@@ -87,7 +102,9 @@ export interface Journal {
   availability: 'present' | 'dead' | 'departed' | 'dismissed' | 'removed' | 'quarantined';
   questLifecycleStatus: QuestLifecycleStatus;
   currentQuest: CurrentQuest | null;
+  /** @deprecated Compact legacy journal events; use questArchive for history. */
   questHistory: PublicQuestHistoryEntry[];
+  questArchive: PublicQuestArchive;
   farewellText: string | null;
   turns: Array<{ id: string; message: string; reply: string; day: number }>;
   pending: { turnId: string; status: string; message: string; error: string | null } | null;

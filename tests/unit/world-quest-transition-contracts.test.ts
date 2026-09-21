@@ -52,6 +52,9 @@ describe('quest transition contracts', () => {
   it('admits only bounded allow-listed critic repair instructions', () => {
     expect(parseQuestTransitionCriticDecision({ decision: 'accept', instructions: [] })).toEqual({ decision: 'accept', instructions: [] });
     expect(parseQuestTransitionCriticDecision({ decision: 'repair', instructions: [{ code: 'target_frozen', path: 'targetRefs' }, { code: 'plan_shape', path: 'plan' }] })).toEqual({ decision: 'repair', instructions: [{ code: 'target_frozen', path: 'targetRefs' }, { code: 'plan_shape', path: 'plan' }] });
+    expect(parseQuestTransitionCriticDecision({ decision: 'repair', instructions: [{ code: 'author_fidelity', path: 'authorGoal' }, { code: 'character_boundary', path: 'characterBoundary' }, { code: 'causal_continuity', path: 'causalContinuity' }] })).toMatchObject({ decision: 'repair' });
+    expect(parseQuestTransitionCriticDecision({ decision: 'repair', instructions: [{ code: 'author_fidelity', path: 'plan' }] })).toBeNull();
+    expect(parseQuestTransitionCriticDecision({ decision: 'repair', instructions: [{ code: 'causal_continuity', path: 'authorGoal' }] })).toBeNull();
     expect(parseQuestTransitionCriticDecision({ decision: 'repair', instructions: [{ code: 'arbitrary', path: 'proposal' }] })).toBeNull();
     expect(parseQuestTransitionCriticDecision({ decision: 'reject', instructions: [{ code: 'plan_shape', path: 'plan' }] })).toBeNull();
   });

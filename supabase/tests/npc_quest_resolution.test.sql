@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(27);
+select plan(31);
 
 select is(private.world_quest_readiness(0,-9),-30,'readiness clamps at its lower bound');
 select is(private.world_quest_readiness(2,9),30,'readiness clamps at its upper bound');
@@ -59,6 +59,10 @@ select ok((
   from private.world_quest_transitions transition
   where transition.terminal_event_id=(select id from pg_temp.main_success)
 ),'transition context retains the completed authored quest targets for a bounded generated successor');
+select is((select jsonb_object_length(frozen_context) from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),13,'bounded transition snapshot has the forward 13-key contract');
+select ok((select not frozen_context ? 'hospitality' and octet_length(frozen_context::text)<=65536 from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),'snapshot omits optional hospitality evidence and stays under the byte budget');
+select is((select context_fingerprint from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),(select encode(extensions.digest(private.world_canonical_json(frozen_context),'sha256'),'hex') from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),'snapshot fingerprint is derived from the final bounded projection');
+select is((select count(*) from private.world_quest_events where quest_id=(select quest_id from pg_temp.main_success)),2::bigint,'canonical quest history remains complete outside the bounded model snapshot');
 select throws_ok($$update private.world_quest_events set narration='rewrite' where id=(select id from pg_temp.main_success)$$,'55000',null,'terminal event remains append-only');
 
 create temporary table pg_temp.failure_prepare as select * from private.world_resolve_quest_step((select id from private.world_quests where save_id='71000000-0000-4000-8000-000000000012'),4,null);

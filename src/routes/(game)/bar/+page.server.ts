@@ -7,7 +7,7 @@ import { localScenePublicUrl } from '$lib/server/community-npc-jobs/local-assets
 import { PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { presentBarPatrons } from '$lib/game/bar-scene';
 import { parsePublicSettlementStatus } from '$lib/game/evolving-world';
-import type { ActionKind, Approach, CurrentQuest, Journal, PublicDisposition, PublicEvolutionEntry, PublicQuestHistoryEntry, QuestLifecycleStatus } from '$lib/game/dialogue';
+import type { ActionKind, Approach, CurrentQuest, Journal, PublicDisposition, PublicEvolutionEntry, PublicQuestArchive, PublicQuestArchiveQuest, PublicQuestHistoryEntry, QuestLifecycleStatus } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -68,7 +68,7 @@ function currentQuest(value: unknown): CurrentQuest | null {
 
 function publicQuestHistory(value: unknown): PublicQuestHistoryEntry[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 24).flatMap((entry) => {
+  return value.flatMap((entry) => {
     const candidate = record(entry);
     const id = shortText(candidate?.id, 80);
     const day = nonNegativeInteger(candidate?.day);
@@ -77,6 +77,29 @@ function publicQuestHistory(value: unknown): PublicQuestHistoryEntry[] {
     if (!id || day === null || !outcome || !text) return [];
     return [{ id, day, outcome, text, publicNews: candidate?.publicNews === true }];
   });
+}
+
+function publicQuestArchive(value: unknown): PublicQuestArchive {
+  const archive = record(value);
+  const nextCursor = archive?.nextCursor === null ? null : shortText(archive?.nextCursor, 80);
+  if (!archive || (archive.nextCursor !== null && !nextCursor) || !Array.isArray(archive.items)) {
+    return { items: [], nextCursor: null };
+  }
+  const items: PublicQuestArchiveQuest[] = archive.items.flatMap((entry) => {
+    const candidate = record(entry);
+    const id = shortText(candidate?.id, 80);
+    const origin = candidate?.origin;
+    const title = shortText(candidate?.title, 240);
+    const objective = shortText(candidate?.objective, 2000);
+    const outcome = candidate?.outcome;
+    const activationDay = nonNegativeInteger(candidate?.activationDay);
+    const terminalDay = nonNegativeInteger(candidate?.terminalDay);
+    const events = publicQuestHistory(candidate?.events);
+    if (!id || (origin !== 'authored_milestone' && origin !== 'generated_successor') || !title || !objective
+      || (outcome !== 'succeeded' && outcome !== 'failed' && outcome !== 'abandoned') || activationDay === null || terminalDay === null) return [];
+    return [{ id, origin, title, objective, outcome, activationDay, terminalDay, events }];
+  });
+  return { items, nextCursor };
 }
 
 /**
@@ -109,6 +132,8 @@ function publicEvolution(value: unknown): PublicEvolutionEntry[] {
 export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
   if (!await locals.getVerifiedUser()) redirect(303, '/login');
   setHeaders({ 'cache-control': 'private, no-store' });
+  const requested = uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc')! : null;
+  const historyCursor = uuid.test(url.searchParams.get('questCursor') ?? '') ? url.searchParams.get('questCursor')! : null;
   try {
     const snapshot = await getBarSnapshot(locals.supabase);
     let settlement = null;
@@ -124,7 +149,6 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
         // journal remain usable if that projection is temporarily unavailable.
         console.warn('bar_settlement_status_unavailable', { cause: cause instanceof Error ? cause.name : 'unknown' });
       }
-      const requested = uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc')! : null;
       const archived = url.searchParams.get('archive') === '1';
       const rosterFunction = archived ? 'npc_archived_roster' : 'npc_roster';
       const rawRoster: any[] = [];
@@ -147,6 +171,7 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
       }
       snapshot.roster = roster as typeof snapshot.roster;
       const instanceIds = roster.map((resident: any) => resident.instanceId);
+      const historyInstanceId = requested ?? roster[0]?.instanceId ?? null;
       if (instanceIds.length) {
         const result=await rpc('npc_journals',{p_instance_ids: instanceIds});
       if(result.error)throw result.error;
@@ -158,13 +183,25 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
           availability:lifecycle === 'departed' ? 'departed' : ['active','between','failed','settled','abandoned'].includes(journal.status) ? 'present' : journal.status,
           questLifecycleStatus: lifecycle,
           currentQuest: currentQuest(journal.currentQuest),
-          questHistory: publicQuestHistory(journal.questHistory),
+          // Archive pages come from the separately paged RPC below. Never
+          // display the compact journal's legacy event window as history.
+          questHistory: [],
+          questArchive: { items: [], nextCursor: null },
           farewellText: shortText(journal.farewellText, 1000),
           turns:(journal.turns ?? []).map((turn:any)=>({id:turn.turnId, message:turn.keeper, reply:turn.npc, day:turn.day})),
           pending:journal.pending ? {turnId:journal.pending.turnId,status:journal.pending.status,message:journal.pending.message,error:journal.pending.error} : null,
           disposition: publicDisposition(journal.disposition),
           evolution: publicEvolution(journal.evolution)
         };
+      }
+      if (historyInstanceId && journals[historyInstanceId]) {
+        const historyResult = await rpc('npc_quest_history_archive', {
+          p_instance_id: historyInstanceId,
+          p_limit: 20,
+          p_cursor: historyCursor
+        });
+        if (historyResult.error) throw historyResult.error;
+        journals[historyInstanceId].questArchive = publicQuestArchive(historyResult.data);
       }
       }
       // The roster is a bounded browse projection.  The illustrated room may
@@ -173,7 +210,7 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
       // presentation list explicit so the client never guesses availability.
       snapshot.patrons = presentBarPatrons(roster, journals) as typeof snapshot.patrons;
     }
-    return { snapshot, settlement, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: uuid.test(url.searchParams.get('npc') ?? '') ? url.searchParams.get('npc') : null, dialogueUnavailable:dialogueAvailability() };
+    return { snapshot, settlement, journals, archived: url.searchParams.get('archive') === '1', selectedNpcInstanceId: requested, questArchiveCursor: historyCursor, dialogueUnavailable:dialogueAvailability() };
   } catch (cause) {
     console.error('bar_load_failed', cause);
     error(500, 'The bar ledger is unavailable. Please try again.');

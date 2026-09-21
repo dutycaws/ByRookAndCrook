@@ -13,7 +13,7 @@ const frozenContext = () => ({
   capabilityEnvelope: { allowedActions: ['prepare', 'attempt', 'abandon'], allowedApproaches: ['scouting'] },
   registeredActions: ['prepare', 'attempt', 'abandon'], registeredApproaches: ['scouting'],
   validCanonicalTargets: [{ id: 'target-1', ref: 'millhaven', kind: 'place' }], currentProfile: {},
-  nextAuthoredMilestone: null, dialogueEvidence: [], hospitality: [], beliefs: [], socialEdges: []
+  nextAuthoredMilestone: null, dialogueEvidence: [], beliefs: [], socialEdges: []
 });
 const proposal = () => ({ version: 'quest-transition-v1', kind: 'successor', terminalEventId: 'terminal-event-1', title: 'North road', objective: 'Trace the lost caravan.', motivation: 'The evidence points north.', constraints: ['Keep the village informed.'], targetRefs: ['millhaven'], difficulty: 2, plan: [{ action: 'prepare', approach: 'scouting' }, { action: 'attempt', approach: 'scouting' }] });
 function completed(value: unknown) { return new Response(JSON.stringify({ status: 'completed', usage: { input_tokens: 5, output_tokens: 3 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }] }), { status: 200 }); }
@@ -49,5 +49,13 @@ describe('quest transition provider stages', () => {
     await expect(generate('quest_transition_repair', { context: context(), frozenContext: frozenContext(), proposal: proposal(), instructions: [{ code: 'not-real', path: 'plan' }] })).rejects.toMatchObject({ code: 'provider_malformed' });
     await expect(generate('quest_transition_proposer', { context: { ...context(), frozenTargetRefs: ['unknown'], extra: true }, frozenContext: frozenContext() })).rejects.toMatchObject({ code: 'provider_malformed' });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts only the thirteen-key bounded snapshot and continuity repair codes', async () => {
+    const fetch = vi.fn(async () => completed({ decision: 'repair', instructions: [{ code: 'causal_continuity', path: 'causalContinuity' }] }));
+    vi.stubGlobal('fetch', fetch);
+    await expect(generate('quest_transition_critic', { context: context(), frozenContext: frozenContext(), proposal: proposal() })).resolves.toMatchObject({ value: { decision: 'repair' } });
+    await expect(generate('quest_transition_proposer', { context: context(), frozenContext: { ...frozenContext(), hospitality: [] } })).rejects.toMatchObject({ code: 'provider_malformed' });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

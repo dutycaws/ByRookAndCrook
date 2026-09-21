@@ -2,7 +2,7 @@
   import { invalidateAll } from '$app/navigation';
   import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
   import type { BarSnapshot } from '$lib/game/serving';
-  let { npcId, name, journal, stock, unavailable }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null}=$props();
+  let { npcId, name, journal, stock, unavailable, archiveHref = null, archived = false }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null;archiveHref?:string|null;archived?:boolean}=$props();
   let message=$state(''); let intentCardId=$state(''); let offeringSelection=$state(''); let busy=$state(false);
   let frozen=$state<DialogueInput|null>(null); let notice=$state(''); let failure=$state(false);
   let hydrated=$state(false);
@@ -108,8 +108,8 @@
 <section class="npc-dialogue" aria-labelledby="conversation-heading">
   <h2 id="conversation-heading" class="sr-only">Talk with {name}</h2>
 
-  {#if journal.availability!=='present'}
-    <div class="dialogue-unavailable"><p class="eyebrow">{journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
+  {#if journal.availability!=='present' || archived}
+    <div class="dialogue-unavailable"><p class="eyebrow">{archived ? 'Read-only archive' : journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
   {:else}
     {#if unavailable}<p class="form-message dialogue-provider-notice" role="note">{unavailable}</p>{/if}
     <form onsubmit={send} class="dialogue-composer">
@@ -198,7 +198,16 @@
           <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
         </section>
       {/if}
-      {#if journal.questHistory.length}<div class="npc-news"><p class="eyebrow">Quest history</p><ul>{#each journal.questHistory as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
+      {#if journal.questArchive.items.length}
+        <section class="npc-news" aria-label="Quest archive"><p class="eyebrow">Quest archive</p>
+          {#each journal.questArchive.items as quest (quest.id)}
+            <article><p class="eyebrow">Days {quest.activationDay}–{quest.terminalDay} · {quest.origin === 'authored_milestone' ? 'Authored quest' : 'Successor quest'} · {quest.outcome}</p><h3>{quest.title}</h3><p>{quest.objective}</p>
+              {#if quest.events.length}<ul>{#each quest.events as event (event.id)}<li><small>Day {event.day} · {event.outcome}</small> {event.text}</li>{/each}</ul>{/if}
+            </article>
+          {/each}
+          {#if journal.questArchive.nextCursor && archiveHref}<a class="text-button" href={archiveHref}>Earlier quests</a>{/if}
+        </section>
+      {/if}
     </div>
   </details>
 </section>

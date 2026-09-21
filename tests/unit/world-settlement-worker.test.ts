@@ -413,10 +413,30 @@ describe('world settlement worker', () => {
     await runSettlementClaim(mock.api, claim(), {provider,heartbeatMs:99_999}); expect(JSON.stringify(payload)).not.toMatch(/pressure|profile|capability|roll|evidence/i);
   });
   it('limits a wake to four serial claims and stays inert in tests', async () => {
-    let claims=0; const mock=client({world_settlement_claim_next:()=>({data:claims++ < 6 ? claim() : {status:'idle'},error:null})});
+    let claims=0; const mock=client({world_quest_transition_claim_next:{status:'idle'},world_settlement_claim_next:()=>({data:claims++ < 6 ? claim() : {status:'idle'},error:null})});
     const provider=fixtureProvider({proposer:proposal,critic:{outcome:'reject',rationale:'no',instructions:[]},digest});
     // The default provider is intentionally not used by this queue seam test; direct parser confirms the cap without network work.
     const outcomes=await drainWorldSettlementQueue(4, mock.api, {provider,heartbeatMs:99_999,observability:()=>undefined}); expect(outcomes).toHaveLength(4); startWorldSettlementWorker();
+  });
+  it('reserves capacity for a due transition before ordinary work and retries transitions with unused capacity', async () => {
+    let transitionClaims=0; let settlementClaims=0;
+    const dueTransition={transitionId:id('401'),terminalEventId:id('402'),instanceId:id('403'),fence:id('404'),attempt:1,leaseUntil:new Date(Date.now()+120_000).toISOString(),frozenContext:{capabilityEnvelope:{allowedActions:['prepare','attempt'],allowedApproaches:['scouting']},nextAuthoredMilestone:{id:'next'}},checkpoints:[]};
+    const mock=client({
+      world_quest_transition_claim_next:()=>({data:transitionClaims++===0 ? dueTransition : {status:'idle'},error:null}),
+      world_quest_transition_heartbeat:{leaseUntil:new Date(Date.now()+120_000).toISOString()},
+      world_settlement_claim_next:()=>({data:settlementClaims++===0 ? claim() : {status:'idle'},error:null})
+    });
+    const provider=fixtureProvider({proposer:proposal,critic:{outcome:'reject',rationale:'no',instructions:[]},digest});
+    const outcomes=await drainWorldSettlementQueue(4,mock.api,{provider,heartbeatMs:99_999,observability:()=>undefined});
+    expect(outcomes).toHaveLength(2);
+    const names=mock.calls.map(call=>call.name);
+    const firstTransition=names.indexOf('world_quest_transition_claim_next');
+    const firstSettlement=names.indexOf('world_settlement_claim_next');
+    expect(firstTransition).toBeGreaterThanOrEqual(0);
+    expect(firstSettlement).toBeGreaterThan(firstTransition);
+    expect(names.indexOf('world_quest_transition_fail')).toBeLessThan(firstSettlement);
+    expect(names.lastIndexOf('world_quest_transition_claim_next')).toBeGreaterThan(firstSettlement);
+    expect(settlementClaims).toBe(2);
   });
   it('classifies a missing or local provider as unavailable without a network call', async () => {
     await expect(createSettlementProvider({}).generate('proposer',{},new AbortController().signal,promptRelease.prompts['resident.proposer'])).rejects.toMatchObject({code:'provider_unavailable'});

@@ -91,7 +91,10 @@ function questTransitionContext(value: unknown): QuestTransitionValidationContex
   return source as QuestTransitionValidationContext;
 }
 function questTransitionFrozenContext(value: unknown): Record<string, unknown> | null {
-  if (!exactPayload(value, ['quest','terminalEvent','eventHistory','versionSheet','capabilityEnvelope','registeredActions','registeredApproaches','validCanonicalTargets','currentProfile','nextAuthoredMilestone','dialogueEvidence','hospitality','beliefs','socialEdges'])) return null;
+  // This is an exact bounded projection, not an opportunistic provider input.
+  // Hospitality remains canonical audit data but is intentionally omitted from
+  // the transition prompt snapshot.
+  if (!exactPayload(value, ['quest','terminalEvent','eventHistory','versionSheet','capabilityEnvelope','registeredActions','registeredApproaches','validCanonicalTargets','currentProfile','nextAuthoredMilestone','dialogueEvidence','beliefs','socialEdges'])) return null;
   try {
     return JSON.stringify(value).length <= 65_536 ? value : null;
   } catch { return null; }

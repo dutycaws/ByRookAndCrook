@@ -565,15 +565,21 @@ export async function drainWorldSettlementQueue(limit = 4, client = serviceClien
   if (!client) return []; const outcomes: SettlementOutcome[]=[];
   const capacity=Math.max(1,Math.min(limit,4));
   const unattendedRuntime = { ...runtime, observability: runtime.observability ?? localAiObservabilitySink, promptRegistry: runtime.promptRegistry ?? promptRegistryService(client) };
-  for (let index=0; index<capacity; index+=1) {
+  // Reserve one slot for a transition due at this opening before ordinary
+  // settlement work consumes the bounded worker wake. A failure is deferred by
+  // the database, so later ordinary work can still complete this opening.
+  const firstTransitions=await drainQuestTransitionQueue(1,client,unattendedRuntime);
+  const firstClaimed=firstTransitions.filter(outcome=>outcome.status!=='idle');
+  outcomes.push(...firstClaimed);
+  let ordinaryClaimed=0;
+  for (let index=0; index<capacity-firstClaimed.length; index+=1) {
     const next = await client.rpc('world_settlement_claim_next', {}); if (next.error) break;
-    const outcome = await runSettlementClaim(client, next.data, unattendedRuntime); outcomes.push(outcome); if (outcome.status==='idle') break;
+    const outcome = await runSettlementClaim(client, next.data, unattendedRuntime);
+    if (outcome.status==='idle') break;
+    outcomes.push(outcome); ordinaryClaimed+=1;
   }
-  // A terminal quest is created by a completed settlement. Drain a small
-  // separate batch after normal settlement work so a slow model never holds a
-  // day-close transaction or starves the settlement queue.
-  const remaining=capacity-outcomes.length;
-  if(remaining>0) outcomes.push(...await drainQuestTransitionQueue(remaining, client, unattendedRuntime));
+  const remaining=capacity-firstClaimed.length-ordinaryClaimed;
+  if(remaining>0) outcomes.push(...(await drainQuestTransitionQueue(remaining,client,unattendedRuntime)).filter(outcome=>outcome.status!=='idle'));
   return outcomes;
 }
 type WorkerState = { running:boolean; timer:ReturnType<typeof setInterval>|null };
