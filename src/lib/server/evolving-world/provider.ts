@@ -50,6 +50,9 @@ function exactPayload(value: unknown, keys: string[]): value is Record<string, u
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
     && Object.keys(value).length === keys.length && keys.every((key) => key in value);
 }
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
 function parseSocialPayload(stage: ProviderStage, payload: unknown): FrozenSocialEncounterContext | null {
   if (stage === 'social_encounter_proposer') return parseFrozenSocialEncounterContext(payload);
   if (stage === 'social_encounter_critic' || stage === 'social_encounter_final_critic') {
@@ -100,17 +103,46 @@ function questTransitionFrozenContext(value: unknown): Record<string, unknown> |
   } catch { return null; }
 }
 function parseQuestTransitionPayload(stage: ProviderStage, payload: unknown): QuestTransitionValidationContext | null {
+  const dossier = (value: unknown): boolean => {
+    if (!exactPayload(value, ['version','fingerprint','manifest','coverage','bytes','evidence'])) return false;
+    const source = value as Record<string, unknown>;
+    if (source.version !== 'quest-transition-memory-dossier-v1' || typeof source.fingerprint !== 'string' || !/^[0-9a-f]{64}$/i.test(source.fingerprint)
+      || !plainObject(source.manifest) || !plainObject(source.coverage) || !plainObject(source.bytes) || !plainObject(source.evidence)) return false;
+    const manifest = source.manifest;
+    const coverage = source.coverage;
+    const bytes = source.bytes;
+    return exactPayload(manifest, ['transitionId','terminalEventId','sourceFingerprint','sourceVersions'])
+      && exactPayload(coverage, ['terminalEvent','eventHistory','dialogueEvidence','beliefs','socialEdges','sourceVersions'])
+      && exactPayload(bytes, ['frozenContext','dossier'])
+      && typeof manifest.transitionId === 'string' && typeof manifest.terminalEventId === 'string' && typeof manifest.sourceFingerprint === 'string'
+      && /^[0-9a-f]{64}$/i.test(manifest.sourceFingerprint) && Array.isArray(manifest.sourceVersions)
+      && Object.values(coverage).every((item) => typeof item === 'boolean' || (Number.isSafeInteger(item) && (item as number) >= 0))
+      && Number.isSafeInteger(bytes.frozenContext) && (bytes.frozenContext as number) >= 0 && Number.isSafeInteger(bytes.dossier) && (bytes.dossier as number) >= 0;
+  };
+  const transitionPayload = (value: unknown, fields: string[]): value is Record<string, unknown> => {
+    if (!exactPayload(value, fields) || !dossier((value as Record<string, unknown>).memoryDossier)) return false;
+    const source = value as Record<string, unknown>;
+    const memory = source.memoryDossier as Record<string, unknown>;
+    const manifest = memory.manifest as Record<string, unknown>;
+    // A dossier is evidence-bearing, not an independently chosen prompt view.
+    // Compare its canonical transport representation before a provider call so
+    // a proposer cannot be given different evidence than its critics.
+    try {
+      return JSON.stringify(memory.evidence) === JSON.stringify(source.frozenContext)
+        && manifest.terminalEventId === (source.context as Record<string, unknown>).terminalEventId;
+    } catch { return false; }
+  };
   if (stage === 'quest_transition_proposer') {
-    if (!exactPayload(payload, ['context','frozenContext'])) return null;
+    if (!transitionPayload(payload, ['context','frozenContext','memoryDossier'])) return null;
     return questTransitionFrozenContext(payload.frozenContext) ? questTransitionContext(payload.context) : null;
   }
   if (stage === 'quest_transition_critic' || stage === 'quest_transition_final_critic') {
-    if (!exactPayload(payload, ['context','frozenContext','proposal']) || !questTransitionFrozenContext(payload.frozenContext)) return null;
+    if (!transitionPayload(payload, ['context','frozenContext','memoryDossier','proposal']) || !questTransitionFrozenContext(payload.frozenContext)) return null;
     const context=questTransitionContext((payload as Record<string, unknown>).context);
     return context && parseQuestTransitionProposal((payload as Record<string, unknown>).proposal, context).ok ? context : null;
   }
   if (stage === 'quest_transition_repair') {
-    if (!exactPayload(payload, ['context','frozenContext','proposal','instructions']) || !questTransitionFrozenContext(payload.frozenContext)) return null;
+    if (!transitionPayload(payload, ['context','frozenContext','memoryDossier','proposal','instructions']) || !questTransitionFrozenContext(payload.frozenContext)) return null;
     const source=payload as Record<string, unknown>; const context=questTransitionContext(source.context);
     const repair=parseQuestTransitionCriticDecision({decision:'repair',instructions:source.instructions});
     return context && parseQuestTransitionProposal(source.proposal, context).ok && repair?.decision === 'repair' ? context : null;

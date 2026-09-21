@@ -18,6 +18,7 @@ import type { SettlementOutcome, SettlementRuntime, SettlementWorkerClient } fro
 import { createSettlementProvider } from './provider';
 import { env } from '$env/dynamic/private';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
+import { createHash } from 'node:crypto';
 
 type QuestTransitionCheckpoint = { stage: 'proposer' | 'critic' | 'repair' | 'final_critic'; payload: Record<string, unknown> };
 type QuestTransitionClaim = {
@@ -32,6 +33,26 @@ type QuestTransitionClaim = {
   checkpoints: QuestTransitionCheckpoint[];
 };
 type QuestTransitionRuntime = SettlementRuntime;
+type QuestTransitionMemoryDossier = Readonly<{
+  version: 'quest-transition-memory-dossier-v1';
+  fingerprint: string;
+  manifest: Readonly<{
+    transitionId: string;
+    terminalEventId: string;
+    sourceFingerprint: string;
+    sourceVersions: readonly Readonly<{ path: string; id: string; version?: string; hash?: string }>[];
+  }>;
+  coverage: Readonly<{
+    terminalEvent: boolean;
+    eventHistory: number;
+    dialogueEvidence: number;
+    beliefs: number;
+    socialEdges: number;
+    sourceVersions: number;
+  }>;
+  bytes: Readonly<{ frozenContext: number; dossier: number }>;
+  evidence: Record<string, unknown>;
+}>;
 
 const MAX_TOTAL_MS = 90_000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -132,6 +153,59 @@ function checkpoint(claim: QuestTransitionClaim, stage: QuestTransitionCheckpoin
 function usage(result: ProviderResult): Record<string, number> {
   return { input: result.usage.input, output: result.usage.output };
 }
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (object(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+function utf8Bytes(value: unknown): number { return new TextEncoder().encode(canonical(value)).byteLength; }
+function sourceVersions(value: unknown, path = '$', results: Array<{ path: string; id: string; version?: string; hash?: string }> = []): Array<{ path: string; id: string; version?: string; hash?: string }> {
+  if (Array.isArray(value)) { value.forEach((item, index) => sourceVersions(item, `${path}[${index}]`, results)); return results; }
+  if (!object(value)) return results;
+  const id = typeof value.id === 'string' ? value.id : undefined;
+  const version = typeof value.versionId === 'string' ? value.versionId : typeof value.version === 'string' ? value.version : undefined;
+  const hash = typeof value.packageHash === 'string' ? value.packageHash : typeof value.contentHash === 'string' ? value.contentHash : undefined;
+  if (id && (version || hash || path === '$.terminalEvent')) results.push({ path, id, ...(version ? { version } : {}), ...(hash ? { hash } : {}) });
+  Object.keys(value).sort().forEach((key) => sourceVersions(value[key], `${path}.${key}`, results));
+  return results;
+}
+function freeze<T>(value: T): T {
+  if (Array.isArray(value)) value.forEach(freeze);
+  else if (object(value)) Object.values(value).forEach(freeze);
+  return Object.freeze(value);
+}
+/**
+ * The context is already terminal-bound and durable.  This wrapper gives every
+ * model stage an explicit, replayable evidence dossier without re-querying a
+ * mutable memory index on a later settlement attempt.
+ */
+function memoryDossier(claim: QuestTransitionClaim): QuestTransitionMemoryDossier {
+  const evidence = claim.frozenContext;
+  const versions = sourceVersions(evidence);
+  const sourceFingerprint = createHash('sha256').update(canonical(evidence)).digest('hex');
+  const manifest = { transitionId: claim.transitionId, terminalEventId: claim.terminalEventId, sourceFingerprint, sourceVersions: versions };
+  const coverage = {
+    terminalEvent: object(evidence.terminalEvent) && evidence.terminalEvent.id === claim.terminalEventId,
+    eventHistory: Array.isArray(evidence.eventHistory) ? evidence.eventHistory.length : 0,
+    dialogueEvidence: Array.isArray(evidence.dialogueEvidence) ? evidence.dialogueEvidence.length : 0,
+    beliefs: Array.isArray(evidence.beliefs) ? evidence.beliefs.length : 0,
+    socialEdges: Array.isArray(evidence.socialEdges) ? evidence.socialEdges.length : 0,
+    sourceVersions: versions.length
+  };
+  const metadata = { version: 'quest-transition-memory-dossier-v1' as const, manifest, coverage, evidence };
+  const bytes = { frozenContext: utf8Bytes(evidence), dossier: utf8Bytes(metadata) };
+  const fingerprint = createHash('sha256').update(canonical({ ...metadata, bytes })).digest('hex');
+  return freeze({ version: metadata.version, fingerprint, manifest: freeze(manifest), coverage: freeze(coverage), bytes: freeze(bytes), evidence });
+}
+function dossierMeasurements(dossier: QuestTransitionMemoryDossier, reuse: 'fresh' | 'replayed'): { selectedRecordCount: number; sourceRecordCount: number; utf8Bytes: number; coverageGapCount: number; reuse: 'fresh' | 'replayed' } {
+  return {
+    selectedRecordCount: dossier.coverage.dialogueEvidence,
+    sourceRecordCount: dossier.coverage.eventHistory + dossier.coverage.dialogueEvidence + dossier.coverage.beliefs + dossier.coverage.socialEdges,
+    utf8Bytes: dossier.bytes.dossier,
+    coverageGapCount: dossier.coverage.terminalEvent ? 0 : 1,
+    reuse
+  };
+}
 
 class LeaseGuard {
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -179,6 +253,9 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
   const provider = runtime.provider ?? createSettlementProvider(privateRuntimeEnvironment(env));
   const observability = runtime.observability;
   const correlationId = `quest-transition:${claim.transitionId}`;
+  const dossier = memoryDossier(claim);
+  const freshMemoryContext = dossierMeasurements(dossier, 'fresh');
+  const replayedMemoryContext = dossierMeasurements(dossier, 'replayed');
   let calls = 0;
   try {
     const registry = runtime.promptRegistry;
@@ -190,27 +267,30 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
       if (!guard.canCall() || !await guard.beat()) throw new SettlementProviderError('provider_timeout', 'Quest transition lease was lost.');
       calls += 1;
       await registry.recordSafeRun({ executionId: correlationId, attempt: claim.attempt, workflow: 'quest_transition', nodeKey: stage, prompt, status: 'started' }).catch(() => undefined);
-      await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage, status: 'started', attempt: claim.attempt });
+      await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage, status: 'started', attempt: claim.attempt, memoryContext: freshMemoryContext });
       try {
         const result = await provider.generate(stage, payload, controller.signal, prompt);
         await registry.recordSafeRun({ executionId: correlationId, attempt: claim.attempt, workflow: 'quest_transition', nodeKey: stage, prompt, status: 'completed', model: result.model, durationMs: result.durationMs, inputTokens: result.usage.input, outputTokens: result.usage.output }).catch(() => undefined);
-        await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage, status: 'completed', attempt: claim.attempt, durationMs: result.durationMs, model: result.model, tokenUsage: result.usage });
+        await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage, status: 'completed', attempt: claim.attempt, durationMs: result.durationMs, model: result.model, tokenUsage: result.usage, memoryContext: freshMemoryContext });
         return result;
       } catch (cause) {
         await registry.recordSafeRun({ executionId: correlationId, attempt: claim.attempt, workflow: 'quest_transition', nodeKey: stage, prompt, status: 'failed', errorCode: errorCode(cause) }).catch(() => undefined);
-        await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage, status: 'failed', attempt: claim.attempt, errorCode: controller.signal.aborted ? 'provider_timeout' : errorCode(cause) });
+        await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage, status: 'failed', attempt: claim.attempt, errorCode: controller.signal.aborted ? 'provider_timeout' : errorCode(cause), memoryContext: freshMemoryContext });
         throw cause;
       }
     };
     if (!await guard.beat()) return { status: 'lease_lost', errorCode: 'lease_unavailable' };
-    const payloadBase = { context, frozenContext: claim.frozenContext };
+    // Constructed once per claim. Checkpoints preserve model outputs, while this
+    // deterministic artifact guarantees that stages resumed after a lease loss
+    // still see exactly the terminal-bound evidence they were originally given.
+    const payloadBase = { context, frozenContext: claim.frozenContext, memoryDossier: dossier };
     let proposal = checkpoint(claim, 'proposer')?.proposal;
     if (!proposal) {
       const result = await generate('quest_transition_proposer', payloadBase);
       proposal = result.value;
       await rpc(client, 'world_quest_transition_checkpoint', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_stage: 'proposer', p_payload: { proposal } });
     } else {
-      await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_proposer', status: 'reused', attempt: claim.attempt });
+      await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_proposer', status: 'reused', attempt: claim.attempt, memoryContext: replayedMemoryContext });
     }
     const parsedProposal = parseQuestTransitionProposal(proposal, context);
     if (!parsedProposal.ok) throw new TransitionValidationError('Quest transition proposal does not validate.');
@@ -219,7 +299,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
     if (!critic) {
       const result = await generate('quest_transition_critic', { ...payloadBase, proposal }); critic = result.value;
       await rpc(client, 'world_quest_transition_checkpoint', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_stage: 'critic', p_payload: { decision: critic } });
-    } else await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_critic', status: 'reused', attempt: claim.attempt });
+    } else await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_critic', status: 'reused', attempt: claim.attempt, memoryContext: replayedMemoryContext });
     let decision = parseQuestTransitionCriticDecision(critic);
     if (!decision || decision.decision === 'reject') throw new TransitionValidationError('Quest transition was rejected.');
     if (decision.decision === 'repair') {
@@ -227,7 +307,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
       if (!repaired) {
         const result = await generate('quest_transition_repair', { ...payloadBase, proposal, instructions: decision.instructions }); repaired = result.value;
         await rpc(client, 'world_quest_transition_checkpoint', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_stage: 'repair', p_payload: { proposal: repaired } });
-      } else await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_repair', status: 'reused', attempt: claim.attempt });
+      } else await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_repair', status: 'reused', attempt: claim.attempt, memoryContext: replayedMemoryContext });
       const parsedRepair = parseQuestTransitionProposal(repaired, context);
       if (!parsedRepair.ok) throw new TransitionValidationError('Repaired quest transition does not validate.');
       proposal = parsedRepair.value;
@@ -235,7 +315,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
       if (!final) {
         const result = await generate('quest_transition_final_critic', { ...payloadBase, proposal }); final = result.value;
         await rpc(client, 'world_quest_transition_checkpoint', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_stage: 'final_critic', p_payload: { decision: final } });
-      } else await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_final_critic', status: 'reused', attempt: claim.attempt });
+      } else await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_final_critic', status: 'reused', attempt: claim.attempt, memoryContext: replayedMemoryContext });
       decision = parseQuestTransitionCriticDecision(final);
       if (!decision || decision.decision !== 'accept') throw new TransitionValidationError('Repaired quest transition was rejected.');
     }

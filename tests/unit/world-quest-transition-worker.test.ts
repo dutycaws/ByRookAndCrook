@@ -57,11 +57,12 @@ function client(overrides: Record<string, unknown> = {}) {
   return { api, calls };
 }
 function provider(values: Record<string, unknown>) {
-  const calls: string[] = [];
+  const calls: string[] = []; const payloads: unknown[] = [];
   return {
-    calls,
-    async generate(stage: string) {
+    calls, payloads,
+    async generate(stage: string, payload: unknown) {
       calls.push(stage);
+      payloads.push(payload);
       const value = values[stage];
       if (value instanceof Error) throw value;
       return { value, model: 'fixture-model', usage: { input: 3, output: 2 }, durationMs: 1, promptVersion: 'quest-transition-v1' };
@@ -111,6 +112,23 @@ describe('quest transition worker', () => {
     const mock = client(); const model = provider({});
     await expect(runQuestTransitionClaim(mock.api, claim([{ stage: 'proposer', payload: { proposal } }, { stage: 'critic', payload: { decision: { decision: 'accept', instructions: [] } } }]), { provider: model, promptRegistry: registry(), heartbeatMs: 99_999 })).resolves.toMatchObject({ status: 'completed' });
     expect(model.calls).toEqual([]);
+  });
+
+  it('gives every stage one deterministic terminal-bound memory dossier and never emits its prose to telemetry', async () => {
+    const events: unknown[] = []; const mock = client(); const model = provider({
+      quest_transition_proposer: proposal,
+      quest_transition_critic: { decision: 'repair', instructions: [{ code: 'plan_shape', path: 'plan' }] },
+      quest_transition_repair: proposal,
+      quest_transition_final_critic: { decision: 'accept', instructions: [] }
+    });
+    await expect(runQuestTransitionClaim(mock.api, claim077(), { provider: model, promptRegistry: registry(), observability: (event) => { events.push(event); }, heartbeatMs: 99_999 })).resolves.toMatchObject({ status: 'completed' });
+    const dossiers = model.payloads.map((payload: any) => payload.memoryDossier);
+    expect(dossiers).toHaveLength(4);
+    expect(new Set(dossiers.map((dossier: any) => dossier.fingerprint)).size).toBe(1);
+    expect(dossiers[0]).toMatchObject({ version: 'quest-transition-memory-dossier-v1', manifest: { transitionId, terminalEventId, sourceFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }, coverage: { terminalEvent: true, eventHistory: 1 }, bytes: { frozenContext: expect.any(Number), dossier: expect.any(Number) } });
+    expect(dossiers[0].evidence).toBe((model.payloads[0] as any).frozenContext);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ memoryContext: expect.objectContaining({ utf8Bytes: dossiers[0].bytes.dossier, reuse: 'fresh' }) })]));
+    expect(JSON.stringify(events)).not.toContain('Steady and cautious');
   });
 
   it.each([
