@@ -25,9 +25,10 @@ describe('npc memory worker', () => {
     const args = api.rpc.mock.calls.find(([name]) => name === 'world_npc_memory_complete')?.[1];
     if (!args) throw new Error('Memory completion was not called.');
     expect(args).toMatchObject({ p_job_id: id, p_fence: fence, p_error_code: null });
-    expect(args.p_artifacts[0].content).toMatchObject({ mode: 'extractive-v1' });
-    expect(args.p_artifacts[0].content.summary).toContain('keeper: I will fund a guide, not weapons.');
-    expect(args.p_artifacts[0].contentHash).toBe(sha256Hex(canonicalJson(args.p_artifacts[0].content)));
+    const artifacts = args.p_artifacts as Array<{ content: { mode: string; summary: string }; contentHash: string }>;
+    expect(artifacts[0].content).toMatchObject({ mode: 'extractive-v1' });
+    expect(artifacts[0].content.summary).toContain('keeper: I will fund a guide, not weapons.');
+    expect(artifacts[0].contentHash).toBe(sha256Hex(canonicalJson(artifacts[0].content)));
   });
 
   it('does not report a winner when a retry has replaced its fence', async () => {
