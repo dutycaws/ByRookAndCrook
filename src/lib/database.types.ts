@@ -2053,6 +2053,16 @@ export type Database = {
         Args: { p_owner_id: string }
         Returns: Json
       }
+      npc_memory_retrieve: {
+        Args: {
+          p_cutoff_sequence?: number
+          p_instance_id: string
+          p_limit?: number
+          p_query?: string
+          p_view?: string
+        }
+        Returns: Json
+      }
       npc_my_capabilities: { Args: never; Returns: Json }
       npc_portrait_claim_generation_attempt: { Args: never; Returns: Json }
       npc_portrait_complete_generation_attempt: {
@@ -2081,6 +2091,10 @@ export type Database = {
       npc_public_creator: { Args: { p_normalized_name: string }; Returns: Json }
       npc_public_creator_npcs: {
         Args: { p_cursor?: string; p_limit?: number; p_normalized_name: string }
+        Returns: Json
+      }
+      npc_quest_history_archive: {
+        Args: { p_cursor?: string; p_instance_id: string; p_limit?: number }
         Returns: Json
       }
       npc_record_engagement: {
