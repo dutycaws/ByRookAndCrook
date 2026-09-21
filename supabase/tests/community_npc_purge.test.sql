@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(21);
+select plan(23);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000061','purge-player@example.test','authenticated','authenticated'),
@@ -42,8 +42,31 @@ insert into private.world_npc_dialogue_turns(
   (select version_id from pg_temp.mature_world),'18100000-0000-4000-8000-000000000061',
   'Please remember the old road.',0,0,1,'completed',now(),'{"reply":"I remember the old road."}'::jsonb,now()
 );
-insert into private.world_npc_memories(turn_id,instance_id,kind,text,quote,speaker)
-  values('18100000-3000-4000-8000-000000000001',(select instance_id from pg_temp.mature_world),'npc_statement','Lira remembers the old road.','old road','npc');
+insert into private.world_npc_memories(
+  id,turn_id,instance_id,kind,text,quote,speaker,save_id,record_root_id,
+  source_id,source_hash,occurred_day,occurred_sequence
+) values (
+  '18100000-3000-4000-8000-000000000004','18100000-3000-4000-8000-000000000001',
+  (select instance_id from pg_temp.mature_world),'npc_statement','Lira remembers the old road.','old road','npc',
+  (select save_id from pg_temp.mature_world),'18100000-3000-4000-8000-000000000004',
+  '18100000-3000-4000-8000-000000000001',
+  encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex'),1,0
+);
+insert into private.world_npc_memory_artifacts(
+  save_id,instance_id,artifact_kind,source_kind,source_ids,source_versions,
+  source_hash,processor_version,content,content_hash
+) values (
+  (select save_id from pg_temp.mature_world),(select instance_id from pg_temp.mature_world),'episode_summary','dialogue_turn',
+  array['18100000-3000-4000-8000-000000000001'::uuid],array[1::bigint],
+  encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex'),
+  'purge-fixture-v1','{"summary":"Old road."}'::jsonb,
+  encode(extensions.digest(convert_to('{"summary":"Old road."}','utf8'),'sha256'),'hex')
+);
+select private.world_npc_memory_enqueue(
+  (select save_id from pg_temp.mature_world),(select instance_id from pg_temp.mature_world),'dialogue_turn',
+  '18100000-3000-4000-8000-000000000001',1,0,
+  encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex')
+);
 insert into private.world_npc_quest_events(instance_id,day,outcome,narration,public_news)
   values((select instance_id from pg_temp.mature_world),1,'prepared','Lira prepared a private route.',true);
 insert into public.foods(save_id,name,quality_index,source_action_id,day_number,recipe_key,rules_version)
@@ -78,6 +101,8 @@ select is((select count(*) from private.world_npc_instances where id=(select ins
 select is((select count(*) from private.world_resident_package_pins where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal cascades the resident package pin with its resident');
 select is((select count(*) from private.world_npc_dialogue_turns where id='18100000-3000-4000-8000-000000000001'),0::bigint,'dialogue and memory cascade away with the removed resident');
 select is((select count(*) from private.world_npc_memories where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'significant dialogue memories are removed with their source exchange');
+select is((select count(*) from private.world_npc_memory_artifacts where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'derived memory artifacts are removed with a purged resident');
+select is((select count(*) from private.world_npc_memory_outbox where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'queued memory work is removed with a purged resident');
 select is((select count(*) from private.world_npc_quest_events where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'quest prose and public news are removed');
 select is((select count(*) from private.world_npc_hospitality_events where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'hospitality projections are removed');
 select is((select transcript from private.npc_reports where world_id=(select save_id from pg_temp.mature_world)),'[]'::jsonb,'report copy retains its record but not NPC narrative');
