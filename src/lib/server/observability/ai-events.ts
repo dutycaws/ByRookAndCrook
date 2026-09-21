@@ -11,6 +11,23 @@ export const AI_OBSERVABILITY_VERSION = 'ai-observability-v1' as const;
 export type AiWorkflow = 'dialogue' | 'world_settlement';
 export type AiEventStatus = 'started' | 'completed' | 'failed' | 'skipped' | 'reused';
 export type AiTokenUsage = { input: number; output: number };
+/**
+ * Bounded, content-free measurements from the shared NPC-memory context path.
+ * These are deliberately measurements rather than a context manifest: source
+ * IDs, retrieval terms, prompt text, selected records, and provider payloads
+ * do not belong in telemetry.
+ */
+export type AiMemoryContextMeasurements = Readonly<{
+  selectedRecordCount: number;
+  sourceRecordCount: number;
+  utf8Bytes: number;
+  configuredTokenCount?: number;
+  modelTokenCount?: number;
+  coverageGapCount: number;
+  reuse: 'fresh' | 'cache_hit' | 'replayed';
+  queryDurationMs?: number;
+  assemblyDurationMs?: number;
+}>;
 
 /** Current provider-call checkpoints. These are operational labels, not prompts. */
 export const DIALOGUE_AI_STAGES = ['investigate0', 'investigate1', 'deliberate', 'speak', 'review', 'rewrite', 'rereview', 'remember'] as const;
@@ -43,6 +60,7 @@ export type AiObservabilityEvent = Readonly<{
   durationMs?: number;
   model?: string;
   tokenUsage?: AiTokenUsage;
+  memoryContext?: AiMemoryContextMeasurements;
   errorCode?: string;
 }>;
 
@@ -58,6 +76,7 @@ export type AiObservabilityInput = Readonly<{
   durationMs?: number;
   model?: string;
   tokenUsage?: AiTokenUsage;
+  memoryContext?: AiMemoryContextMeasurements;
   errorCode?: unknown;
 }>;
 
@@ -68,6 +87,7 @@ const statusSet = new Set<AiEventStatus>(['started', 'completed', 'failed', 'ski
 const opaqueId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const stageName = /^[a-z][a-z0-9_:-]{0,79}$/;
 const modelName = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const memoryContextReuse = new Set<AiMemoryContextMeasurements['reuse']>(['fresh', 'cache_hit', 'replayed']);
 const permittedErrors = new Set([
   'provider_unavailable', 'provider_timeout', 'provider_malformed', 'provider_failed',
   'worker_failed', 'claim_malformed', 'lease_unavailable', 'lease_lost', 'commit_unknown',
@@ -94,6 +114,32 @@ function tokenUsage(value: unknown): AiTokenUsage | undefined {
   return { input: candidate.input, output: candidate.output };
 }
 
+function memoryContextMeasurements(value: unknown): AiMemoryContextMeasurements | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (!finiteInteger(candidate.selectedRecordCount, 0, 100_000)
+    || !finiteInteger(candidate.sourceRecordCount, 0, 100_000)
+    || !finiteInteger(candidate.utf8Bytes, 0, 10_000_000)
+    || !finiteInteger(candidate.coverageGapCount, 0, 100_000)
+    || typeof candidate.reuse !== 'string' || !memoryContextReuse.has(candidate.reuse as AiMemoryContextMeasurements['reuse'])) return undefined;
+  if (candidate.configuredTokenCount !== undefined && !finiteInteger(candidate.configuredTokenCount, 0, 10_000_000)) return undefined;
+  if (candidate.modelTokenCount !== undefined && !finiteInteger(candidate.modelTokenCount, 0, 10_000_000)) return undefined;
+  if (candidate.queryDurationMs !== undefined && !finiteInteger(candidate.queryDurationMs, 0, 24 * 60 * 60 * 1_000)) return undefined;
+  if (candidate.assemblyDurationMs !== undefined && !finiteInteger(candidate.assemblyDurationMs, 0, 24 * 60 * 60 * 1_000)) return undefined;
+  const measured: AiMemoryContextMeasurements = {
+    selectedRecordCount: candidate.selectedRecordCount,
+    sourceRecordCount: candidate.sourceRecordCount,
+    utf8Bytes: candidate.utf8Bytes,
+    coverageGapCount: candidate.coverageGapCount,
+    reuse: candidate.reuse as AiMemoryContextMeasurements['reuse']
+  };
+  if (candidate.configuredTokenCount !== undefined) (measured as { configuredTokenCount?: number }).configuredTokenCount = candidate.configuredTokenCount;
+  if (candidate.modelTokenCount !== undefined) (measured as { modelTokenCount?: number }).modelTokenCount = candidate.modelTokenCount;
+  if (candidate.queryDurationMs !== undefined) (measured as { queryDurationMs?: number }).queryDurationMs = candidate.queryDurationMs;
+  if (candidate.assemblyDurationMs !== undefined) (measured as { assemblyDurationMs?: number }).assemblyDurationMs = candidate.assemblyDurationMs;
+  return measured;
+}
+
 /**
  * Never forward raw error text. Known error codes survive; every other cause
  * becomes a single safe bucket that cannot leak a provider response or secret.
@@ -117,6 +163,7 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
   if (input.durationMs !== undefined && !finiteInteger(input.durationMs, 0, 24 * 60 * 60 * 1_000)) return null;
   if (input.model !== undefined && !modelName.test(input.model)) return null;
   if (input.tokenUsage !== undefined && !tokenUsage(input.tokenUsage)) return null;
+  if (input.memoryContext !== undefined && !memoryContextMeasurements(input.memoryContext)) return null;
   // Model identity and usage belong solely to a completed provider invocation.
   // This prevents checkpoint reuse and database commit events from looking like
   // billable model calls in dashboards.
@@ -144,6 +191,8 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
   if (input.model !== undefined) (event as { model?: string }).model = input.model;
   const usage = tokenUsage(input.tokenUsage);
   if (usage) (event as { tokenUsage?: AiTokenUsage }).tokenUsage = usage;
+  const memoryContext = memoryContextMeasurements(input.memoryContext);
+  if (memoryContext) (event as { memoryContext?: AiMemoryContextMeasurements }).memoryContext = memoryContext;
   const errorCode = sanitizeAiErrorCode(input.errorCode);
   if (errorCode) (event as { errorCode?: string }).errorCode = errorCode;
   return event;

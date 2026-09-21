@@ -14,6 +14,33 @@ describe('AI observability boundary', () => {
     });
   });
 
+  it('records only bounded, content-free memory-context measurements', () => {
+    const event = createAiObservabilityEvent({
+      correlationId: 'turn:memory-metrics', workflow: 'dialogue', stage: 'investigate0', status: 'completed', attempt: 1,
+      memoryContext: {
+        selectedRecordCount: 6, sourceRecordCount: 9, utf8Bytes: 8_192,
+        configuredTokenCount: 2_000, modelTokenCount: 1_948, coverageGapCount: 1,
+        reuse: 'cache_hit', queryDurationMs: 12, assemblyDurationMs: 8,
+        query: 'private keeper prose', sourceIds: ['do-not-log'], payload: { prompt: 'do-not-log' }
+      } as unknown as { selectedRecordCount: number; sourceRecordCount: number; utf8Bytes: number; coverageGapCount: number; reuse: 'cache_hit' }
+    }) as Record<string, unknown>;
+    expect(event.memoryContext).toEqual({
+      selectedRecordCount: 6, sourceRecordCount: 9, utf8Bytes: 8_192,
+      configuredTokenCount: 2_000, modelTokenCount: 1_948, coverageGapCount: 1,
+      reuse: 'cache_hit', queryDurationMs: 12, assemblyDurationMs: 8
+    });
+    expect(JSON.stringify(event)).not.toContain('private keeper prose');
+    expect(JSON.stringify(event)).not.toContain('do-not-log');
+  });
+
+  it('rejects malformed memory-context measurements rather than coercing them', () => {
+    const base = { correlationId: 'turn:memory-invalid', workflow: 'dialogue' as const, stage: 'investigate0', status: 'completed' as const, attempt: 1 };
+    expect(createAiObservabilityEvent({ ...base, memoryContext: { selectedRecordCount: 1, sourceRecordCount: 2, utf8Bytes: 50, coverageGapCount: 0, reuse: 'cache_hit' } })).not.toBeNull();
+    expect(createAiObservabilityEvent({ ...base, memoryContext: { selectedRecordCount: -1, sourceRecordCount: 2, utf8Bytes: 50, coverageGapCount: 0, reuse: 'fresh' } } as any)).toBeNull();
+    expect(createAiObservabilityEvent({ ...base, memoryContext: { selectedRecordCount: 1, sourceRecordCount: 2, utf8Bytes: 50, coverageGapCount: 0, reuse: 'provider_cached' } } as any)).toBeNull();
+    expect(createAiObservabilityEvent({ ...base, memoryContext: { selectedRecordCount: 1, sourceRecordCount: 2, utf8Bytes: 50, coverageGapCount: 0, reuse: 'fresh', modelTokenCount: 'unknown' } } as any)).toBeNull();
+  });
+
   it('structurally excludes prose, prompts, profiles, beliefs, raw output, chain-of-thought, and secrets', () => {
     const untrusted = {
       correlationId: 'turn:abc-123', workflow: 'dialogue', stage: 'speak', status: 'completed', attempt: 1,
