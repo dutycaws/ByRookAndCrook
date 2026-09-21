@@ -2063,6 +2063,17 @@ export type Database = {
         }
         Returns: Json
       }
+      npc_memory_retrieve_for_actor: {
+        Args: {
+          p_actor: string
+          p_cutoff_sequence?: number
+          p_instance_id: string
+          p_limit?: number
+          p_query?: string
+          p_view?: string
+        }
+        Returns: Json
+      }
       npc_my_capabilities: { Args: never; Returns: Json }
       npc_portrait_claim_generation_attempt: { Args: never; Returns: Json }
       npc_portrait_complete_generation_attempt: {

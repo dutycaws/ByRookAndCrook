@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(7);
+select plan(9);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000001','memory-owner@example.test','authenticated','authenticated'),
@@ -17,6 +17,7 @@ select (snapshot#>>'{save,id}')::uuid save_id,
        (snapshot->'roster'->0->>'versionId')::uuid version_id,
        (snapshot#>>'{save,revision}')::bigint revision
 from (select public.npc_bar_snapshot() snapshot) source;
+grant select on pg_temp.memory_fixture to service_role;
 reset role;
 
 insert into private.world_npc_dialogue_turns(id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until,result,completed_at)
@@ -41,7 +42,14 @@ select ok(exists(select 1 from private.world_npc_memory_outbox where source_id='
 select is((select public.npc_memory_retrieve(instance_id,'promise weapons')->'items'->0->>'quote' from pg_temp.memory_fixture),'I will fund a guide, not weapons.','lexical retrieval retains the decisive source quote');
 select is((select public.npc_memory_retrieve(instance_id,'')->'sourceFallback'->0->>'npc' from pg_temp.memory_fixture),'I accept those conditions.','canonical fallback keeps the NPC speaker verbatim');
 
+select throws_ok(format('select public.npc_memory_retrieve_for_actor(%L,%L,%L)', '18100000-0000-4000-8000-000000000001', (select instance_id from pg_temp.memory_fixture), 'promise'),'42501',null,'player clients cannot choose an actor for server retrieval');
 reset role;
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+set local request.jwt.claim.sub='00000000-0000-4000-8000-000000000099';
+select is((select public.npc_memory_retrieve_for_actor('18100000-0000-4000-8000-000000000001',instance_id,'promise')->'items'->0->>'quote' from pg_temp.memory_fixture),'I will fund a guide, not weapons.','service retrieval scopes evidence to the supplied player actor');
+reset role;
+
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000002';
