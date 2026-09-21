@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '$lib/database.types';
 import { hasExecutableSteps, type Decision, type DialogueInput } from '$lib/game/dialogue';
 import type { DialogueProvider } from './provider';
-import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, type ContextWindow } from './context';
+import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, utf8Bytes, type ContextWindow } from './context';
 import { matchesSchema, schemas, type Stage } from './schemas';
 import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
@@ -35,6 +35,58 @@ function privateCognition(window: ContextWindow) {
     currentSocial:window.context.filter(item=>item.category==='relationships').map(item=>
       item.data && typeof item.data==='object' ? (item.data as Record<string, unknown>).currentSocial ?? null : null)
   };
+}
+
+type MemoryRetrieval = {
+  cutoffSequence: number | null;
+  items: unknown[];
+  sourceFallback: unknown[];
+  watermarks: unknown[];
+};
+
+/** The 081 RPC already applies save/instance scope, disclosure policy, and cutoff. */
+function memoryRetrieval(value: unknown): MemoryRetrieval {
+  const raw=value && typeof value==='object' ? value as Record<string, unknown> : {};
+  return {
+    cutoffSequence:typeof raw.cutoffSequence==='number' ? raw.cutoffSequence : null,
+    items:Array.isArray(raw.items) ? raw.items : [],
+    sourceFallback:Array.isArray(raw.sourceFallback) ? raw.sourceFallback : [],
+    watermarks:Array.isArray(raw.watermarks) ? raw.watermarks : []
+  };
+}
+
+function memorySourceIds(retrieval: MemoryRetrieval): string[] {
+  const ids=new Set<string>();
+  for (const item of retrieval.items) {
+    if (!item || typeof item!=='object') continue;
+    const record=item as Record<string, unknown>;
+    for (const key of ['id','record_root_id','source_id']) if (typeof record[key]==='string') ids.add(record[key]);
+  }
+  for (const turn of retrieval.sourceFallback) {
+    if (turn && typeof turn==='object' && typeof (turn as Record<string, unknown>).turnId==='string') ids.add((turn as Record<string, string>).turnId);
+  }
+  return [...ids];
+}
+
+function initialMemoryQuery(message: string, recent: unknown): string {
+  const previous=Array.isArray(recent) ? recent.at(-1) : null;
+  const previousText=previous && typeof previous==='object'
+    ? [(previous as Record<string, unknown>).keeper,(previous as Record<string, unknown>).npc].filter((value): value is string=>typeof value==='string').join(' ')
+    : '';
+  return [message,previousText].filter(Boolean).join('\n').slice(0,400);
+}
+
+/** Content-free measurements only; the evidence itself remains checkpoint-only. */
+function memoryContextMeasurements(payload: unknown, reuse: 'fresh'|'replayed') {
+  const context=(payload && typeof payload==='object' && Array.isArray((payload as Record<string, unknown>).context))
+    ? (payload as {context:Array<Record<string, unknown>>}).context : [];
+  const memory=context.filter(entry=>entry.category==='memories');
+  const selectedRecordCount=memory.reduce((count,entry)=>count+(Array.isArray((entry.data as Record<string, unknown> | undefined)?.items)
+    ? ((entry.data as Record<string, unknown>).items as unknown[]).length : 0),0);
+  const sourceRecordCount=new Set(memory.flatMap(entry=>Array.isArray(entry.sourceIds) ? entry.sourceIds.filter((id): id is string=>typeof id==='string') : [])).size;
+  const coverageGapCount=memory.reduce((count,entry)=>count+(Array.isArray((entry.data as Record<string, unknown> | undefined)?.watermarks)
+    ? ((entry.data as Record<string, unknown>).watermarks as unknown[]).filter(watermark=>watermark && typeof watermark==='object' && (watermark as Record<string, unknown>).gapSequence!=null).length : 0),0);
+  return {selectedRecordCount,sourceRecordCount,utf8Bytes:utf8Bytes(payload),coverageGapCount,reuse};
 }
 
 export function publicDialogueWindow(window: ContextWindow): ContextWindow {
@@ -106,6 +158,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   const fence=turn.fence as string;
   const checkpoints=turn.checkpoints as Record<string,any>;
   let calls=0;
+  let contextWasReplayed=false;
   async function checkpoint(stage:string,value:unknown) {
     const r=await client.rpc('npc_dialogue_checkpoint',{p_actor:actor,p_turn_id:input.turnId,p_fence:fence,p_stage:stage,p_value:value as Json})
       .abortSignal(stage==='fail'?AbortSignal.timeout(1000):signal);
@@ -137,7 +190,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       throw new DialogueError('A response stage was invalid. Please retry.',503,'STRUCTURE');
     }
     await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'completed',model:out.model,durationMs:out.durationMs,inputTokens:out.usage.input,outputTokens:out.usage.output }).catch(()=>{});
-    await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage});
+    await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage,memoryContext:memoryContextMeasurements(payload,contextWasReplayed?'replayed':'fresh')});
     const recorded={...out,inputContext:describePayload(payload)};
     await checkpoint(name,recorded); checkpoints[name]=recorded;
     return out.value;
@@ -149,7 +202,27 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   try {
     const base=checkpoints.base?.value ?? await retrieve('base') as any;
     if(!checkpoints.base) await checkpoint('base',{value:base,contentVersion:turn.content_version});
-    const context:any[]=[]; const fetched=new Set<string>();
+    const memoryQuery=initialMemoryQuery(input.message,base.recent);
+    async function retrieveMemory(query:string) {
+      if (typeof base.instanceId!=='string') throw new DialogueError('The resident memory scope is unavailable. Please retry.',503,'CONTEXT_UNAVAILABLE');
+      const r=await client.rpc('npc_memory_retrieve_for_actor',{
+        p_actor:actor,p_instance_id:base.instanceId,p_query:query.slice(0,400),p_limit:12,
+        // The turn's expected sequence is captured before generation.  It is
+        // the immutable knowledge boundary for this turn, including retries.
+        p_cutoff_sequence:input.expectedConversationSequence,p_view:'speech'
+      }).abortSignal(signal);
+      if(r.error) throw databaseError(r.error);
+      return memoryRetrieval(r.data);
+    }
+    contextWasReplayed=!!checkpoints.memory;
+    const initialMemory:any=checkpoints.memory?.value ?? null;
+    const context:any[]=initialMemory ? [initialMemory] : []; const fetched=new Set<string>();
+    if(!checkpoints.memory) {
+      const data=await retrieveMemory(memoryQuery);
+      const evidence={category:'memories',query:memoryQuery,sourceIds:memorySourceIds(data),contentVersion:'npc-memory-v1',data};
+      context.push(evidence); fetched.add(evidenceKey(evidence));
+      await checkpoint('memory',{value:evidence,cutoffSequence:input.expectedConversationSequence,view:'speech'});
+    } else fetched.add(evidenceKey(initialMemory));
     let consequential=!!base.hospitality||!!base.playerIntent; let remember=false;
     for(let i=0;i<Math.min(2,Math.max(1,options.rounds??2));i++) {
       const investigationWindow=prepareContext(base,context);
@@ -160,11 +233,16 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       if(!checkpoints[evidenceName]) {
         for(const request of selected.requests.slice(0,3)) {
           const key=evidenceKey(request); if(fetched.has(key)) continue; fetched.add(key);
-          const data=await retrieve(request.category,request.query);
+          const data=request.category==='memories'
+            ? await retrieveMemory(request.query)
+            : await retrieve(request.category,request.query);
           const sourceIds:string[]=[];
-          const collect=(v:any)=>{if(!v||typeof v!=='object')return;if(typeof v.id==='string')sourceIds.push(v.id);for(const child of Object.values(v))collect(child);};
-          collect(data);
-          evidence.push({category:request.category,query:request.query.slice(0,200),sourceIds,contentVersion:turn.content_version,data});
+          if (request.category==='memories') sourceIds.push(...memorySourceIds(memoryRetrieval(data)));
+          else {
+            const collect=(v:any)=>{if(!v||typeof v!=='object')return;if(typeof v.id==='string')sourceIds.push(v.id);for(const child of Object.values(v))collect(child);};
+            collect(data);
+          }
+          evidence.push({category:request.category,query:request.query.slice(0,request.category==='memories'?400:200),sourceIds,contentVersion:request.category==='memories'?'npc-memory-v1':turn.content_version,data});
         }
         await checkpoint(evidenceName,{value:evidence});
       }

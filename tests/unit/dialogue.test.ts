@@ -15,6 +15,7 @@ function rpcResult(data: unknown) {
 }
 
 function cognitionClient(base: Record<string, unknown>) {
+  base.instanceId ??= npcId;
   const evidence: Record<string, unknown> = {
     beliefs:[{id:'belief-1',statement:'The keeper may be unreliable.',confidence:55,provenance:[{sourceKind:'dialogue_claim'}]}],
     relationships:{facts:[{text:'Mara is an ally.'}],relationships:[{name:'Mara',kind:'friend'}],currentSocial:[{toInstanceId:'mara',fear:82,respect:11}]},
@@ -24,6 +25,7 @@ function cognitionClient(base: Record<string, unknown>) {
     rpc(name:string,args?:Record<string, unknown>) {
       if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
       if(name==='npc_dialogue_context') return rpcResult(args?.p_category==='base' ? base : evidence[String(args?.p_category)] ?? []);
+      if(name==='npc_memory_retrieve_for_actor') return rpcResult({cutoffSequence:args?.p_cutoff_sequence ?? null,items:[],sourceFallback:[],watermarks:[]});
       if(name==='npc_dialogue_checkpoint') return rpcResult(null);
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed',reply:'Recorded.'});
       throw new Error(`Unexpected RPC ${name}`);
