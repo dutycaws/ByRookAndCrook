@@ -171,5 +171,10 @@ select ok(position('Irrelevant tavern weather memory 29' in public.npc_memory_ev
 select ok(not exists(select 1 from pg_temp.measurements where response_bytes<1 or query_elapsed_microseconds<0),'benchmark rows record nonnegative measured bytes and database elapsed microseconds');
 select ok((select min(maintenance_count)>=1 and min(embedding_count)>=0 and min(retry_count)>=0 from pg_temp.measurements),'benchmark rows record fixture maintenance, embedding, and retry counts without claiming savings');
 select ok((select count(*) from pg_temp.measurements where channel='v4_authorized_baseline' and required_source_recalled)=20,'authorized baseline supplies the required-source recall denominator');
+-- Non-counting diagnostic for reproducible fixture observations. It intentionally
+-- has no timing assertion and does not stand in for provider token metrics.
+select jsonb_build_object('diag',jsonb_build_object(
+ 'channels',(select jsonb_object_agg(channel,stats) from (select channel,jsonb_build_object('p50ResponseBytes',percentile_cont(.5) within group(order by response_bytes),'p95ResponseBytes',percentile_cont(.95) within group(order by response_bytes),'p50ElapsedMicroseconds',percentile_cont(.5) within group(order by query_elapsed_microseconds),'p95ElapsedMicroseconds',percentile_cont(.95) within group(order by query_elapsed_microseconds)) stats from pg_temp.measurements group by channel) channel_stats),
+ 'maintenanceCount',(select max(maintenance_count) from pg_temp.measurements),'embeddingCount',(select max(embedding_count) from pg_temp.measurements),'retryCount',(select max(retry_count) from pg_temp.measurements),'providerInputTokens','UNRUN')) as diag;
 select * from finish();
 rollback;

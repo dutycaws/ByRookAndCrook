@@ -105,13 +105,15 @@ create temporary table pg_temp.replay as select public.world_settlement_complete
 select is((select value->>'status' from pg_temp.replay),'completed','same job fence completion replays its exact durable action receipt');
 reset role;
 
-insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,deadline_at) values ('17100000-0000-4000-8000-000000000050','17100000-0000-4000-8000-000000000010',3,0,'deadline-v1','queued',clock_timestamp()-interval '1 second');
+insert into auth.users(id,email,role,aud) values ('17100000-0000-4000-8000-000000000003','deadline-owner@example.test','authenticated','authenticated');
+insert into public.tavern_saves(id,user_id,current_day) values ('17100000-0000-4000-8000-000000000070','17100000-0000-4000-8000-000000000003',3);
+insert into private.world_settlements(id,save_id,day_number,source_revision,input_fingerprint,status,deadline_at) values ('17100000-0000-4000-8000-000000000050','17100000-0000-4000-8000-000000000070',3,0,'deadline-v1','queued',clock_timestamp()-interval '1 second');
 insert into private.world_settlement_jobs(settlement_id,ordinal,job_kind,input_fingerprint) values ('17100000-0000-4000-8000-000000000050',1,'snapshot','deadline-job');
-update public.tavern_saves set world_phase='settling' where id='17100000-0000-4000-8000-000000000010';
+update public.tavern_saves set world_phase='settling' where id='17100000-0000-4000-8000-000000000070';
 set local role service_role; set local request.jwt.claim.role='service_role';
 select is((public.world_settlement_claim('17100000-0000-4000-8000-000000000050')->>'status'),'expired','deadline finalizer returns a terminal no-op receipt');
 reset role;
-select is((select world_phase from public.tavern_saves where id='17100000-0000-4000-8000-000000000010'),'open','deadline finalizer reopens the settling save phase');
+select is((select world_phase from public.tavern_saves where id='17100000-0000-4000-8000-000000000070'),'open','deadline finalizer reopens the isolated settling save phase');
 
 insert into auth.users(id,email,role,aud) values ('17100000-0000-4000-8000-000000000002','world-other@example.test','authenticated','authenticated');
 insert into public.tavern_saves(id,user_id) values ('17100000-0000-4000-8000-000000000060','17100000-0000-4000-8000-000000000002');

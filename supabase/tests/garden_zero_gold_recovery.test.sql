@@ -12,6 +12,7 @@ declare
   result jsonb;
   settlement_id uuid;
   claim jsonb;
+  settlement_terminal jsonb;
   processed integer := 0;
   request_role text := current_setting('request.jwt.claim.role', true);
 begin
@@ -28,8 +29,17 @@ begin
     processed := processed + 1;
     if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
   end loop;
+  settlement_terminal := claim;
+  -- The fixture has no narrative transition provider. Exercise the production
+  -- bounded failure/defer seam so an eligible transition remains awaiting for
+  -- the next opening rather than stranding this ordinary garden settlement.
+  loop
+    claim := public.world_quest_transition_claim_next();
+    exit when claim->>'status' = 'idle';
+    perform public.world_quest_transition_fail((claim->>'transitionId')::uuid,(claim->>'fence')::uuid,'FIXTURE_PROVIDER_UNAVAILABLE');
+  end loop;
   perform set_config('request.jwt.claim.role', coalesce(request_role, 'authenticated'), true);
-  if claim->>'status' <> 'completed'
+  if settlement_terminal->>'status' <> 'completed'
     or public.world_settlement_status(p_save_id, settlement_id)->>'status' <> 'completed'
     or (select world_phase from public.tavern_saves where id = p_save_id) <> 'open' then
     raise exception 'fixture worker did not terminalize and reopen settlement';

@@ -1,6 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { communityContext, requireCapability } from '$lib/server/community-npc-workspace';
 import { drainPortraitDeletionQueue } from '$lib/server/community-npc-jobs/portrait-service';
+import { clearProjectionCache } from '$lib/server/npc-memory/projection-cache';
 import type { Actions, PageServerLoad } from './$types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -82,6 +83,7 @@ async function quarantine(locals: App.Locals, request: Request) {
     p_reason: String(data.get('reason') ?? '')
   });
   if (result.error) return fail(400, { message: result.error.message });
+  clearProjectionCache();
   if (!purge) return { message: 'Community action recorded.' };
   try {
     const cleanup = await drainPortraitDeletionQueue();

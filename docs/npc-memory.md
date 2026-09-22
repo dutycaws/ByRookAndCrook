@@ -1,47 +1,31 @@
-# NPC memory operations and privacy
+# NPC memory
 
-Issue #33 adds a server-only, source-backed NPC-memory path. It improves context selection; it does not replace the canonical dialogue turn, quest, profile, or world-event records. A derived record is never authority to change a quest, fulfill a promise, grant a capability, or apply a game effect.
+NPC memory is a server-only, derived evidence layer. Canonical dialogue turns, quests, residents, and world events remain authoritative; memory never grants a capability, changes a quest, or applies an effect.
 
-## Configuration and limits
+## Configuration and workers
 
-The current provider settings remain the dialogue settings in the root, Git-ignored `.env`:
+`NPC_PROVIDER=openai` requires `OPENAI_API_KEY` and a verified `NPC_MODEL_INPUT_CAPACITY`. `NPC_CONTEXT_MODEL` defaults to `gpt-5.6-luna` and `NPC_CHARACTER_MODEL` to `gpt-5.6-terra`. The embedding worker additionally requires `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, a nonblank `NPC_EMBEDDING_PROCESSOR_VERSION`, `NPC_EMBEDDING_MODEL`, and `NPC_EMBEDDING_DIMENSIONS`. The extract, summary, embedding, and dispatch workers are source/version fenced and may be rebuilt by enqueuing a new processor version. Missing embeddings fall back safely to relational and lexical evidence; they do not block play.
 
-| Setting | Current behavior |
-| --- | --- |
-| `NPC_PROVIDER` | `openai` by default; `local` reports an explicit unimplemented provider. |
-| `NPC_CONTEXT_MODEL` | Defaults to `gpt-5.6-luna` for investigation, review, and the existing remember stage. |
-| `NPC_CHARACTER_MODEL` | Defaults to `gpt-5.6-terra` for deliberation and speech. |
-| `NPC_MODEL_INPUT_CAPACITY` | Required verified minimum capacity across `NPC_CONTEXT_MODEL` and `NPC_CHARACTER_MODEL`; it must exceed input tokens plus the 2,500 output and 2,500 repair reserves. |
-| `NPC_MAX_CALLS`, `NPC_INVESTIGATION_ROUNDS`, `NPC_DEADLINE_MS` | Keep their existing dialogue limits: 8 calls, 1–2 rounds, and 1,000–90,000 ms respectively. |
+Retrieval is owner/save/instance scoped and cutoff-bound. It combines current relational commitments and exact references, GIN lexical matches, and (only for an exact active immutable profile/vector) exact semantic matches with deterministic RRF. Recent/important fallback and unindexed source fallback are explicit rather than evidence of absence. Speech/review receive only player-visible or NPC-known material; transition can additionally use NPC-private material; system material is never returned.
 
-There is no separate memory-worker environment variable in this revision. A worker supplies its explicit processor kind/version and source loader. Embedding is optional and must be supplied by a server-only worker adapter; no external vector database or cache service is used.
+## Frozen contexts, replay, and cache
 
-The shared context assembler requires an explicit, verified tokenizer for the selected model. It measures canonical JSON with UTF-8 bytes and that tokenizer's count; it never estimates tokens from JavaScript character length or a bytes-per-token ratio. Callers provide positive byte/token ceilings. Missing required sources or an over-ceiling artifact returns an explicit recoverable context error. The currently integrated dialogue context uses a 64 KiB frozen-evidence ceiling and a 384 KiB provider-envelope ceiling; no model-aware dialogue tokenizer is configured yet, so token admission for that legacy path remains explicitly unsupported rather than estimated.
+Dialogue persists a canonical v4 artifact before generation: routine contexts are 64KiB/8k tokens and consequential contexts are 64KiB/16k. Transition evidence uses the same assembler: ordinary is 128KiB/32k overall (64KiB/16k attachment) and rich is 256KiB/64k overall (192KiB/48k attachment). Rich applies only when there is no next authored milestone and successor/departure is allowed. Every transition model stage receives the identical compact authorized dossier. Full Responses requests are capped at 384KiB UTF-8 and 80k input tokens plus output reserve. Durable `memory_context` checkpoints allow 512KiB; model checkpoints remain 16KiB.
 
-## Source records, retrieval, and context freezing
+Replay validates cutoff, source manifest, canonical payload/hash, tier, and verified byte/token metadata before provider work. A process-local LRU cache holds at most 32 deep-frozen accepted dialogue artifacts. Its opaque hashed key contains actor/instance/view/cutoff, policy/projection/tier, canonical manifest, and payload hash—never raw prose. Durable replay has priority. Exact cache hits avoid the token counter and emit `cache_hit`; changed source/profile/cutoff inputs miss. Committed dialogue/transition changes invalidate their instance, while mature setting removal and admin quarantine/purge clear the cache.
 
-On completion of a dialogue turn, the database enqueues an `extract` job keyed by source kind, source ID, source version, processor kind, and processor version. Existing completed turns are backfilled once by the migration. The worker reuses the committed `remember` output; it does not make a second extraction model call. Summary work has a deterministic extractive fallback that preserves speaker attribution and original words. Embedding work is optional; a missing embedding adapter must not affect gameplay.
+Purge/quarantine cascades remove derived sources, summaries, embeddings, outbox, dialogue checkpoints, transition contexts, and active fences while retaining only audit-safe tombstone evidence. Late completion/checkpoint writes are rejected.
 
-Memory retrieval is owner-scoped by the authenticated save and NPC instance, has a captured sequence cutoff, and allows only the requested view's disclosure classes. It selects unresolved commitments and quest-linked evidence first, then lexical matches, then bounded recent/important evidence. It also returns six bounded, completed source exchanges while derived memory is absent or behind. Watermark output distinguishes contiguous/examined progress from a gap; an empty index or a gap is not proof that no memory exists.
+## Deterministic evidence and evaluation status
 
-Each frozen context artifact includes a canonical payload, SHA-256 hash, source manifest (ID/version/hash), policy/projection versions, tokenizer ID, byte/token measurements, and required/included/missing-source coverage. Retrying a checkpoint must reuse that captured evidence rather than querying a newer index. The quest-transition worker similarly wraps its terminal-bound frozen context in one deterministic dossier for every proposer/critic/repair stage, with a source-version manifest and UTF-8 byte measurements.
+The long-horizon SQL fixture spans 30 game days, authored and generated-successor quests, corrections/withdrawals, irrelevant memories, and two-save/multi-NPC isolation. It verifies protected commitments/constraints, deterministic retrieval, explicit fallback, and required-source recall; its `diag` payload reports only fixture-derived channel response-byte/query-time distributions and maintenance, embedding, and retry counts. It makes no timing threshold or savings claim.
 
-## Scope and privacy rules
+Paid live narrative evaluation, independent human review, and real provider input-token/latency median/p95 measurements are **UNRUN**. No quality, grounding, or savings claim is implied by deterministic fixtures.
 
-The database source boundary checks the actor owns the NPC instance before returning evidence. Speech receives `player_visible` and `npc_known` material only; review/transition may also receive `npc_private`. `system` content is not returned. The cutoff prevents an NPC from learning a later exchange during a replay. Server-role code must still call the scoped boundary; it is not permission to dump another save's memory.
-
-Telemetry contains only allowlisted operational measurements: selected/source counts, UTF-8 bytes, configured or model token counts when actually available, gap count, fresh/cache-hit/replayed status, and query/assembly durations. It never accepts prompt text, queries, source IDs, selected prose, payloads, provider output, beliefs, profiles, or secrets. A telemetry sink failure is best-effort and cannot alter dialogue or settlement execution.
-
-## Queue operation, rebuild, retry, and purge
-
-Claiming uses a per-job fence and a five-minute lease. A worker must complete with that fence; a stale fence is rejected. Duplicate deliveries reuse the unique source/version/processor key, and accepted artifacts reuse the unique `(instance, artifact kind, source hash, processor version)` key. A completed job may legitimately produce no artifact: the watermark records that it was examined.
-
-To rebuild derived work, enqueue the affected canonical source set with a new processor version, then drain the bounded worker queue. This creates new immutable artifacts rather than overwriting accepted artifacts. The outbox claim function processes `pending` work and leases that expired while `processing`. A `failed` job is recorded with its sanitized error code and is not automatically claimed again in the current implementation; retry it by a deliberate re-enqueue/versioned rebuild after diagnosing the failure. Neither retries nor rebuilds may run inside a gameplay transaction.
-
-Purge and quarantine take precedence over derived context. The source tables' existing retention/purge controls remain authoritative. This initial memory migration has **not yet added a dedicated purge/quarantine invalidation hook** for memory artifacts, outbox rows, or already-frozen contexts; do not treat replay or a background worker as a safe way to restore removed source material. Before relying on memory in a purge-capable environment, add and verify that hook so it invalidates affected artifacts/cache/context and fences late workers. This gap is intentionally documented rather than represented as complete behavior.
-
-## Verification and live evaluation status
-
-Focused unit coverage exercises canonical UTF-8/token accounting, missing required-source errors, source-manifest stability, worker fences, idempotent artifacts, fallback summaries, queue drain bounds, and privacy-safe telemetry. Database and integration checks should additionally cover owner isolation, cutoff/disclosure denial, gap fallback, rebuilds, and purge invalidation before release.
-
-No opt-in live narrative evaluation has been run or passed for this implementation. In particular, there is no measured 90% grounding/continuity score, no human-review result, and no claimed token/latency saving. Live evaluations use paid provider calls and remain outside default CI until a labeled suite, independent review, and explicit pass/fail report are available.
+An opt-in paid transition narrative run must be reviewed independently using a
+bounded report with at least ten predeclared cases, a named reviewer, 1–5 scores,
+and a predeclared pass rule: at least 90% score 4/5 or higher. `npm run
+npc:eval:transition:review -- report.json` validates that report and refuses a
+`passed` label below the threshold. The prototype does not yet safely drive a
+transition fixture through paid execution, so this executable review contract is
+provided while the live run remains **UNRUN**.

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { runDialogue, type DialogueRuntimeOptions } from '../../src/lib/server/dialogue/orchestrator';
 import type { DialogueProvider } from '../../src/lib/server/dialogue/provider';
 import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
 import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, utf8Bytes } from '$lib/server/npc-memory/context';
+import { clearProjectionCache } from '$lib/server/npc-memory/projection-cache';
 
 const npcId='11111111-1111-4111-8111-111111111111';
 const instanceId='33333333-3333-4333-8333-333333333333';
@@ -14,6 +15,7 @@ const evidence=(overrides:Record<string,unknown>={})=>({retrievalVersion:'npc-me
 const memory=evidence();
 
 const rpcResult=(data:unknown)=>({abortSignal:async()=>({data,error:null})});
+afterEach(() => clearProjectionCache());
 
 describe('NPC memory dialogue context',()=>{
   it('retrieves a speech-safe source-backed memory view at the turn cutoff and freezes it for all later stages',async()=>{

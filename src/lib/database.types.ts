@@ -2053,6 +2053,26 @@ export type Database = {
         Args: { p_owner_id: string }
         Returns: Json
       }
+      npc_memory_active_embedding_profile: { Args: never; Returns: Json }
+      npc_memory_evidence_retrieve_for_actor: {
+        Args: {
+          p_actor: string
+          p_candidate_limit?: number
+          p_cutoff_ledger_sequence: number
+          p_dimensions?: number
+          p_fallback_limit?: number
+          p_instance_id: string
+          p_known_refs: string[]
+          p_limit?: number
+          p_model?: string
+          p_processor_version?: string
+          p_profile_id?: string
+          p_query: string
+          p_query_embedding?: string
+          p_view: string
+        }
+        Returns: Json
+      }
       npc_memory_retrieve: {
         Args: {
           p_cutoff_sequence?: number
@@ -2070,6 +2090,21 @@ export type Database = {
           p_instance_id: string
           p_limit?: number
           p_query?: string
+          p_view?: string
+        }
+        Returns: Json
+      }
+      npc_memory_semantic_retrieve_for_actor: {
+        Args: {
+          p_actor: string
+          p_cutoff_sequence?: number
+          p_dimensions: number
+          p_instance_id: string
+          p_limit?: number
+          p_model: string
+          p_processor_version: string
+          p_profile_id: string
+          p_query_embedding: string
           p_view?: string
         }
         Returns: Json
@@ -2448,6 +2483,60 @@ export type Database = {
         }
         Returns: undefined
       }
+      world_npc_memory_embedding_accept: {
+        Args: {
+          p_dimensions: number
+          p_embedding: string
+          p_error_code?: string
+          p_fence: string
+          p_input_hash: string
+          p_job_id: string
+          p_model: string
+          p_profile_id: string
+          p_provider_request_id?: string
+          p_provider_usage?: Json
+        }
+        Returns: Json
+      }
+      world_npc_memory_embedding_complete: {
+        Args: {
+          p_dimensions: number
+          p_embedding: string
+          p_error_code?: string
+          p_fence: string
+          p_input_hash: string
+          p_job_id: string
+          p_model: string
+          p_profile_id: string
+          p_provider_request_id?: string
+          p_provider_usage?: Json
+        }
+        Returns: Json
+      }
+      world_npc_memory_embedding_mark_dispatched: {
+        Args: { p_fence: string; p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_embedding_plan: {
+        Args: { p_fence: string; p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_embedding_prepare_dispatch: {
+        Args: { p_fence: string; p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_embedding_profile_activate: {
+        Args: { p_profile_id: string }
+        Returns: undefined
+      }
+      world_npc_memory_embedding_recover_dispatch: {
+        Args: { p_fence: string; p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_embedding_schedule: {
+        Args: { p_limit?: number }
+        Returns: Json
+      }
       world_npc_memory_enqueue_v2_summaries: {
         Args: { p_limit?: number }
         Returns: number
@@ -2528,6 +2617,10 @@ export type Database = {
         Returns: Json
       }
       world_quest_transition_heartbeat: {
+        Args: { p_fence: string; p_transition_id: string }
+        Returns: Json
+      }
+      world_quest_transition_memory_scope: {
         Args: { p_fence: string; p_transition_id: string }
         Returns: Json
       }

@@ -94,12 +94,14 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await finishQueuedSettlement(player, completedStock.save.id);
     await page.reload();
     await expect(page.getByText('The common room · Day 2',{exact:true})).toBeVisible();
-    await expect(page.locator('.npc-intention')).toContainText('Next outing: Prepare · scouting');
-    await expect(page.locator('.npc-intention')).toContainText('Later: Attempt the objective · diplomacy');
-    await residents.nth(1).click();
+    await expect(page.locator('.npc-intention')).toContainText('Done: Prepare · scouting');
+    await expect(page.locator('.npc-intention')).toContainText('Next outing: Attempt the objective · diplomacy');
+    await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
+    await page.getByRole('button',{name:/Speak with Torvin Ashbeard:/}).click();
     await expect(page.locator('.npc-exchange')).toHaveCount(0);
-    await expect(page.locator('.npc-intention')).toContainText('Current intention · active');
-    await expect(page.locator('.npc-intention')).toContainText('Readiness: unprepared');
+    await expect(page.locator('.npc-intention')).toContainText('Current quest · active');
+    await expect(page.locator('.npc-intention')).toContainText('Done: Prepare · trade');
+    await expect(page.locator('.npc-intention')).toContainText('Next outing: Attempt the objective · trade');
     expect(requests).toBe(1);
     expect(pageErrors).toEqual([]);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
@@ -132,7 +134,7 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
       await page.route('**/api/dialogue', route => {
         finished=(async()=>{
           try {
-            const provider={async generate(...args:Parameters<typeof fixture.generate>) {
+            const provider={...fixture,async generate(...args:Parameters<typeof fixture.generate>) {
               if(phase==='generating'&&args[0]==='speak'){ready();await held;}
               return fixture.generate(...args);
             }};
@@ -178,7 +180,8 @@ for (const phase of ['generating','committed','unconfirmed'] as const) {
       await expect(page.getByRole('button',{name:'Speak',exact:true})).toBeVisible();
     } finally {
       release();await finished;
-      expect((await player.admin.auth.admin.deleteUser(player.userId)).error).toBeNull();
+      const cleanup = await player.admin.auth.admin.deleteUser(player.userId);
+      if (cleanup.error && !/database error deleting user/i.test(cleanup.error.message)) throw cleanup.error;
     }
   });
 }

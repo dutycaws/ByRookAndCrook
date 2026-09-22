@@ -59,7 +59,7 @@ select ok((
   from private.world_quest_transitions transition
   where transition.terminal_event_id=(select id from pg_temp.main_success)
 ),'transition context retains the completed authored quest targets for a bounded generated successor');
-select is((select jsonb_object_length(frozen_context) from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),13,'bounded transition snapshot has the forward 13-key contract');
+select is((select count(*) from private.world_quest_transitions transition cross join lateral jsonb_object_keys(transition.frozen_context) where terminal_event_id=(select id from pg_temp.main_success)),13::bigint,'bounded transition snapshot has the forward 13-key contract');
 select ok((select not frozen_context ? 'hospitality' and octet_length(frozen_context::text)<=65536 from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),'snapshot omits optional hospitality evidence and stays under the byte budget');
 select is((select context_fingerprint from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),(select encode(extensions.digest(private.world_canonical_json(frozen_context),'sha256'),'hex') from private.world_quest_transitions where terminal_event_id=(select id from pg_temp.main_success)),'snapshot fingerprint is derived from the final bounded projection');
 select is((select count(*) from private.world_quest_events where quest_id=(select quest_id from pg_temp.main_success)),2::bigint,'canonical quest history remains complete outside the bounded model snapshot');

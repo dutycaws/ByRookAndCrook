@@ -23,6 +23,7 @@ import { retrieveNpcMemoryEvidence, type NpcMemoryEvidenceClient } from '$lib/se
 import { createNpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/provider';
 import type { NpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/contracts';
 import { assembleNpcMemoryContext, canonicalJson, canonicalNpcMemoryContextPayload, sha256Hex, TRANSITION_CONTEXT_TIERS, transitionContextTier, type NpcMemoryContextArtifact } from '$lib/server/npc-memory/context';
+import { invalidateProjectionInstance } from '$lib/server/npc-memory/projection-cache';
 
 type QuestTransitionCheckpoint = { stage: 'memory_context' | 'proposer' | 'critic' | 'repair' | 'final_critic'; payload: Record<string, unknown> };
 type QuestTransitionClaim = {
@@ -427,6 +428,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
     const result = await rpc(client, 'world_quest_transition_commit', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_proposal: proposal });
     const kind = committed(result, claim);
     await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_commit', status: kind ? 'completed' : 'failed', attempt: claim.attempt, errorCode: kind ? undefined : 'commit_unknown' });
+    if (kind) invalidateProjectionInstance(claim.instanceId);
     return kind ? { status: 'completed', kind } : { status: 'failed', errorCode: 'commit_unknown' };
   } catch (cause) {
     if (guard.lost || isLeaseError(cause)) return { status: 'lease_lost', errorCode: errorCode(cause) };

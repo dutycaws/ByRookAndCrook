@@ -115,6 +115,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const command = input(lira.npcId, lira.sequence, 'How is the quest going?');
     const provider = fixtureProvider();
     await expect(runDialogue(person.admin, person.userId, command, {
+      ...provider,
       async generate(stage, payload, signal, prompt) {
         const output = await provider.generate(stage, payload, signal, prompt);
         if (stage === 'review') {

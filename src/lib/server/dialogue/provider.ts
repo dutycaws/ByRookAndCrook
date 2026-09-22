@@ -5,7 +5,7 @@ export interface ContextCount { model: string; counterId: string; inputTokens: n
 export interface StageOutput { value: unknown; usage: { input: number; output: number }; model: string; durationMs: number; promptVersion: string; preflight?: { inputTokens: number; durationMs: number } }
 /** Prompt snapshots are supplied by the orchestrator after it resolves the
  * durable turn pin. Fixture implementations may ignore the fourth argument. */
-export interface DialogueProvider { countContext?(canonicalContext: string, signal: AbortSignal): Promise<ContextCount>; generate(stage: Stage, payload: unknown, signal: AbortSignal, prompt: PromptSnapshot): Promise<StageOutput> }
+export interface DialogueProvider { contextIdentity?: string; countContext?(canonicalContext: string, signal: AbortSignal): Promise<ContextCount>; generate(stage: Stage, payload: unknown, signal: AbortSignal, prompt: PromptSnapshot): Promise<StageOutput> }
 export class ProviderUnavailable extends Error {
   constructor(message: string) { super(message); this.name = 'ProviderUnavailable'; }
 }
@@ -52,7 +52,7 @@ export function createProvider(config: Record<string,string | undefined>): Dialo
   const provider = config.NPC_PROVIDER ?? 'openai';
   if (provider==='local') return { async countContext() { throw new ProviderUnavailable('Local model support is not implemented.'); }, async generate() { throw new ProviderUnavailable('Local model support is not implemented.'); } };
   if (provider!=='openai') throw new ProviderUnavailable('Unknown NPC provider.');
-  return { async countContext(canonicalContext,signal) {
+  return { contextIdentity:`${config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna'}:openai-responses-input-tokens-v1`, async countContext(canonicalContext,signal) {
     if (!config.OPENAI_API_KEY) throw new ProviderUnavailable('OpenAI is not configured.');
     const model=config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna'; const started=performance.now();
     const response=await fetch('https://api.openai.com/v1/responses/input_tokens',{method:'POST',headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,input:canonicalContext}),signal});

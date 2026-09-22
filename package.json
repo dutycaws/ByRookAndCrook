@@ -32,6 +32,7 @@
     "npc:catalog:check": "tsx scripts/first-party-npc-catalog.ts --check",
     "npc:catalog:generate": "tsx scripts/first-party-npc-catalog.ts --generate",
     "npc:eval:live": "tsx scripts/evaluate-npc-dialogue.ts --live",
+    "npc:eval:transition:review": "tsx scripts/evaluate-npc-transition-review.ts",
     "screenshots": "tsx scripts/capture-screenshots.ts",
     "motion:proof:capture": "tsx scripts/capture-motion-proofs.ts",
     "scene:acceptance:capture": "tsx scripts/capture-scene-acceptance.ts",
