@@ -7,7 +7,7 @@ export type NpcMemoryClaim = Readonly<{
   fence: string;
   saveId: string;
   instanceId: string;
-  sourceKind: 'dialogue_turn' | 'quest_event' | 'hospitality' | 'resident_evolution';
+  sourceKind: 'dialogue_turn' | 'quest_event' | 'hospitality' | 'resident_evolution' | 'memory_set';
   sourceId: string;
   sourceVersion: number;
   sourceHash: string;
@@ -41,3 +41,9 @@ export type NpcMemoryOutcome =
   | { status: 'completed'; artifacts: number; fallback: boolean }
   | { status: 'lease_lost' }
   | { status: 'failed'; errorCode: string };
+
+export type NpcMemorySummaryV2Provider = {
+  preflight(input: { systemPrompt: string; payload: Record<string, unknown>; model: string; maxSummaryChars: number; maxCitations: number; maxBytes: number; signal: AbortSignal }): Promise<{ prepared: NpcMemorySummaryV2Prepared; inputTokens: number; durationMs: number }>;
+  generate(input: { prepared: NpcMemorySummaryV2Prepared; signal: AbortSignal }): Promise<{ result: Record<string, unknown>; model: string; providerRequestId?: string; inputTokens: number; outputTokens: number; durationMs: number }>;
+};
+export type NpcMemorySummaryV2Prepared = Readonly<{ body: Record<string, unknown>; model: string; inputTokens: number; maxSummaryChars: number; maxCitations: number }>;
