@@ -2456,6 +2456,10 @@ export type Database = {
         Args: { p_limit?: number }
         Returns: number
       }
+      world_npc_memory_summary_finalize_v2: {
+        Args: { p_fence: string; p_job_id: string }
+        Returns: Json
+      }
       world_npc_memory_summary_load: {
         Args: { p_batch_ordinal: number; p_fence: string; p_job_id: string }
         Returns: Json
