@@ -9,8 +9,11 @@ import { resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import sharp from 'sharp';
 import type { NpcSheet } from '$lib/game/npc-sheet';
+import { portraitIdentityAnchorInstruction, releaseImagePrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
 
 export const PORTRAIT_STYLE_VERSION = 'community-npc-portrait-sprite-v1';
+/** The Sunburst alias is the deployed default; callers may explicitly override it. */
+export const DEFAULT_PORTRAIT_IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const PORTRAIT_REFERENCE_SET = 'brac-character-look-v1';
 export const PORTRAIT_REFERENCE_REVISION = 'brac-character-look-v1@private-v1';
 export const PORTRAIT_WIDTH = 1024;
@@ -62,7 +65,10 @@ export function portraitItemOptions(sheet: NpcSheet): string[] {
 
 /** No lore, campaign, private relationships, or arbitrary style directions enter this projection. */
 export function portraitVisualProjection(sheet: NpcSheet, controls: Partial<PortraitControls>) {
-  const selectedCues = sheet.personality.values.slice(0, 3).map((value) => clean(value, 80));
+  const selectedCues = sheet.personality.initialEntries
+    .filter((entry) => entry.active && ['value', 'preference', 'voice_trait'].includes(entry.kind))
+    .slice(0, 3)
+    .map((entry) => clean(entry.text, 80));
   const itemChoices = portraitItemOptions(sheet);
   const item = clean(controls.optionalItem, 240);
   if (item && !itemChoices.includes(item)) throw new PortraitProviderError('provider_malformed', 'Choose an optional item already present in attire or notable features.');
@@ -86,18 +92,22 @@ export function referenceSetHash(references: readonly Pick<PortraitReference, 'f
   return hash(JSON.stringify([...references].map(({ filename, sha256 }) => ({ filename, sha256 })).sort((a, b) => a.filename.localeCompare(b.filename))));
 }
 
-export function lockedPortraitPrompt(sheet: NpcSheet, controls: Partial<PortraitControls>) {
+export function portraitPromptContext(sheet: NpcSheet, controls: Partial<PortraitControls>) {
   const visual = portraitVisualProjection(sheet, controls);
   return [
-    `Create one original adult NPC portrait sprite for a cozy fantasy tavern game. Role: ${visual.title}.`,
+    `Role: ${visual.title}.`,
     `Physical appearance: ${visual.physicalAppearance}. Attire: ${visual.attire}. Notable features: ${visual.notableFeatures}. Mood: ${visual.mood}.`,
     `Personality cues: ${visual.personalityCues.join(', ') || 'none supplied'}. Pose: ${visual.controls.pose}. Expression: ${visual.controls.expression}. Clothing condition: ${visual.controls.clothingCondition.replace('_', '-')}.`,
     visual.controls.optionalItem ? `Include this authored item only: ${visual.controls.optionalItem}.` : '',
-    visual.controls.compositionNote ? `Composition-only note: ${visual.controls.compositionNote}.` : '',
-    'Locked visual style: cozy high-detail painterly fantasy realism; warm amber key light, restrained golden rim light, deep timber shadows; moss, aged brass, worn leather, and unbleached linen accents; tactile hair, fabric, leather, and metal.',
-    'Create a single upright, head-to-toe adult in a three-quarter pose with a readable face, natural hands, visible feet, and a clean silhouette. Output a 1024 by 1536 RGBA PNG with a genuinely transparent background and a transparent perimeter.',
-    'No environment, floor, furniture, frame, lettering, signature, watermark, interface, extra person, or baked contact shadow. The supplied private references define rendering quality only. Do not reproduce their identity, face, body, hair, clothing, accessories, or pose. Do not default to sexualized framing, exposure, or a body type.'
+    visual.controls.compositionNote ? `Composition-only note: ${visual.controls.compositionNote}.` : ''
   ].filter(Boolean).join('\n');
+}
+
+/** Prompt bodies always arrive from a release pinned by durable work. */
+export function lockedPortraitPrompt(sheet: NpcSheet, controls: Partial<PortraitControls>, slot: string, release: PromptReleaseSnapshot) {
+  return releaseImagePrompt(release, 'image.community_portrait', {
+    portrait_context: portraitPromptContext(sheet, controls), identity_anchor_instruction: portraitIdentityAnchorInstruction(slot)
+  }).rendered;
 }
 
 export function portraitProviderAvailability(config: Record<string, string | undefined>, projectRoot = process.cwd()): PortraitProviderAvailability {
@@ -112,7 +122,7 @@ export function portraitProviderConfiguration(config: Record<string, string | un
   if (provider === 'local') return { available: false, reason: 'local_not_implemented' };
   if (provider !== 'openai') return { available: false, reason: 'unknown_provider' };
   if (!(config.NPC_IMAGE_API_KEY ?? config.OPENAI_API_KEY)) return { available: false, reason: 'missing_image_api_key' };
-  return { available: true, provider: 'openai', model: config.NPC_IMAGE_MODEL ?? 'gpt-image-2' };
+  return { available: true, provider: 'openai', model: config.NPC_IMAGE_MODEL ?? DEFAULT_PORTRAIT_IMAGE_MODEL };
 }
 
 export function loadPrivatePortraitReferences(projectRoot = process.cwd()): PortraitReference[] {
@@ -132,7 +142,7 @@ export function loadPrivatePortraitReferences(projectRoot = process.cwd()): Port
 async function openAiImageRequest(config: Record<string, string | undefined>, request: PortraitProviderRequest, signal: AbortSignal): Promise<PortraitProviderResponse> {
   const apiKey = config.NPC_IMAGE_API_KEY ?? config.OPENAI_API_KEY;
   if (!apiKey) throw new PortraitProviderError('provider_unavailable', 'The image-generation API key is not configured.');
-  const model = config.NPC_IMAGE_MODEL ?? 'gpt-image-2';
+  const model = config.NPC_IMAGE_MODEL ?? DEFAULT_PORTRAIT_IMAGE_MODEL;
   const form = new FormData();
   form.set('model', model); form.set('prompt', request.prompt); form.set('size', '1024x1536'); form.set('background', 'transparent'); form.set('output_format', 'png');
   for (const reference of request.references) form.append('image[]', new Blob([new Uint8Array(reference.bytes)], { type: 'image/png' }), reference.filename);

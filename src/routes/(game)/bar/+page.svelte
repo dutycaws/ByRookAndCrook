@@ -3,16 +3,18 @@
   import { invalidateAll } from '$app/navigation';
   import { qualityLabel } from '$lib/game/contracts';
   import { reconcileBarSceneSelection, selectedBarPatron } from '$lib/game/bar-scene';
+  import { isActiveSettlement } from '$lib/game/evolving-world';
   import type { ServeCommand } from '$lib/game/serving';
   import NpcDialogue from '$lib/components/NpcDialogue.svelte';
   import BarStatusRail from '$lib/components/tavern/BarStatusRail.svelte';
   import GuestInspector from '$lib/components/tavern/GuestInspector.svelte';
   import TavernScene from '$lib/components/tavern/TavernScene.svelte';
+  import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
   function initialSelection() {
-    const patrons = data.snapshot?.patrons ?? [];
+    const patrons = data.archived ? data.snapshot?.roster ?? [] : data.snapshot?.patrons ?? [];
     return data.selectedNpcInstanceId
       && patrons.some((entry) => entry.instanceId === data.selectedNpcInstanceId)
         ? data.selectedNpcInstanceId
@@ -29,6 +31,7 @@
   let localError = $state<string | null>(null);
   let hydrated = $state(false);
   let closeCommand: {actionId:string;saveId:string;revision:number}|null=$state(null);
+  let displayedPatrons = $derived(data.archived ? data.snapshot?.roster ?? [] : data.snapshot?.patrons ?? []);
   const enhanceClose:SubmitFunction=({formData,cancel})=>{
     if(!data.snapshot||pending){cancel();return;}
     closeCommand??={actionId:crypto.randomUUID(),saveId:data.snapshot.save.id,revision:data.snapshot.save.revision};
@@ -43,7 +46,7 @@
     };
   };
   $effect(() => { hydrated = true; });
-  let patron = $derived(selectedBarPatron(data.snapshot?.patrons ?? [], selectedInstanceId));
+  let patron = $derived(selectedBarPatron(displayedPatrons, selectedInstanceId));
   let selectedKind = $derived(itemSelection.startsWith('food:') ? 'food' as const : 'beverage' as const);
   let selectedId = $derived(itemSelection.split(':', 2)[1] ?? '');
   let item = $derived(selectedKind === 'food'
@@ -52,7 +55,7 @@
 
   $effect(() => {
     if (unresolved) return;
-    const patrons = data.snapshot?.patrons ?? [];
+    const patrons = displayedPatrons;
     const reconciled = reconcileBarSceneSelection(patrons, { selectedKey: selectedInstanceId, focusedKey: focusedInstanceId });
     selectedInstanceId = reconciled.selectedKey;
     focusedInstanceId = reconciled.focusedKey;
@@ -101,6 +104,13 @@
   }
 
   function signed(value: number) { return value > 0 ? `+${value}` : String(value); }
+  function archivePageHref(cursor: string) {
+    const params = new URLSearchParams();
+    if (data.archived) params.set('archive', '1');
+    if (patron) params.set('npc', patron.instanceId);
+    params.set('questCursor', cursor);
+    return `/bar?${params}`;
+  }
 </script>
 
 <svelte:head>
@@ -109,25 +119,33 @@
 </svelte:head>
 
 <main class="bar-page">
-  {#if !data.snapshot}
+  {#if data.settlement && isActiveSettlement(data.settlement)}
+    <SettlementInterlude settlement={data.settlement} />
+  {:else if !data.snapshot}
     <section class="empty-state panel bar-empty-state">
       <h2>Open the doors</h2><p>Start your tavern in the garden, then bring your first brew to the bar.</p>
       <a class="primary-button inline-button" href="/garden">Start your tavern</a>
     </section>
   {:else}
+    <SettlementInterlude settlement={data.settlement} />
     <div class="tavern-dashboard">
       <BarStatusRail day={data.snapshot.save.currentDay} gold={data.snapshot.save.gold} drinks={data.snapshot.beverages.length} foods={data.snapshot.foods.length} recent={data.snapshot.history.length} />
-      <TavernScene patrons={data.snapshot.patrons} selected={patron} focusedKey={focusedInstanceId} journals={data.journals} day={data.snapshot.save.currentDay}
-        disabled={!hydrated || pending || !!unresolved}
-        onselect={(instanceId) => { if (!unresolved) selectedInstanceId = instanceId; }}
-        onfocus={(instanceId) => { focusedInstanceId = instanceId; }} />
+      {#if data.archived}
+        <section class="panel empty-state compact-empty"><h2>Past residents</h2><p>This is a read-only record. Departed and dismissed residents never return to the active tavern scene.</p></section>
+      {:else}
+        <TavernScene patrons={data.snapshot.patrons} selected={patron} focusedKey={focusedInstanceId} journals={data.journals} day={data.snapshot.save.currentDay}
+          disabled={!hydrated || pending || !!unresolved}
+          onselect={(instanceId) => { if (!unresolved) selectedInstanceId = instanceId; }}
+          onfocus={(instanceId) => { focusedInstanceId = instanceId; }} />
+      {/if}
       <GuestInspector selected={patron} journal={patron ? data.journals[patron.instanceId] ?? null : null} stock={data.snapshot}
         archived={data.archived} disabled={!hydrated || pending || !!unresolved}
+        archiveHref={patron && data.journals[patron.instanceId]?.questArchive.nextCursor ? archivePageHref(data.journals[patron.instanceId].questArchive.nextCursor!) : null}
         onarchive={(archived)=>window.location.assign(archived ? '/bar?archive=1' : '/bar')} />
-      {#if patron && data.journals[patron.instanceId]}{#key patron.instanceId}<NpcDialogue npcId={patron.npcId} name={patron.name} journal={data.journals[patron.instanceId]} stock={data.snapshot} unavailable={data.dialogueUnavailable}/>{/key}{/if}
+      {#if patron && data.journals[patron.instanceId]}{#key patron.instanceId}<NpcDialogue npcId={patron.npcId} name={patron.name} journal={data.journals[patron.instanceId]} stock={data.snapshot} unavailable={data.dialogueUnavailable} archived={data.archived} archiveHref={data.journals[patron.instanceId].questArchive.nextCursor ? archivePageHref(data.journals[patron.instanceId].questArchive.nextCursor!) : null}/>{/key}{/if}
     </div>
 
-    <div class="bar-utilities">
+    {#if !data.archived}<div class="bar-utilities">
       <section class="panel serving-panel" aria-labelledby="pour-title">
         <p class="eyebrow">From your cellar</p><h2 id="pour-title">Serve food or drink</h2>
         {#if data.snapshot.beverages.length === 0 && data.snapshot.foods.length === 0 && !unresolved}
@@ -175,6 +193,6 @@
         {#if data.snapshot.history.length === 0}<p class="muted">Your first serving will begin the journal.</p>
         {:else}<ol>{#each data.snapshot.history as event (event.actionId)}<li><div><strong>{event.itemName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}</small></div><p class="serve-effects">+{event.goldEarned} gold · Relationship {signed(event.relationshipChange)}</p></li>{/each}</ol>{/if}
       </section>
-    </div>
+    </div>{/if}
   {/if}
 </main>

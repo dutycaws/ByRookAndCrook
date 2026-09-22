@@ -8,6 +8,7 @@ import {
   type Child, type LauncherOptions
 } from '../../scripts/brac-app-dev';
 import type { ManagedProcessOptions, ProcessResult, ProjectLock } from '../../scripts/dev-process';
+import { runWorldSettlementWorker } from '../../scripts/run-world-settlement-worker';
 
 const api = 'http://127.0.0.1:57321';
 const published = 'local-publishable-key-1234';
@@ -80,7 +81,7 @@ function harness(root: string, overrides: Partial<LauncherOptions> & { cold?: bo
         `SUPABASE_SERVICE_ROLE_KEY=${service}`, 'CUSTOM_SETTING=kept'
       ].join('\n') + '\n');
       child = new FakeChild(result());
-    } else if (script === 'dev') child = new FakeChild();
+    } else if (script === 'dev' || script === 'simulation:worker') child = new FakeChild();
     else child = new FakeChild(result());
     calls.push({ command, args, options, child });
     return child;
@@ -122,6 +123,91 @@ describe('brac-app:dev launcher', () => {
     expect(h.released).toBe(1);
   }));
 
+  it('starts and supervises the settlement worker after database gates', async () => withRoot(async (root) => {
+    const h = harness(root);
+    expect(await runDevelopment(h.options)).toBe(130);
+    const order = commandNames(h.calls);
+    const workerIndex = order.indexOf('npm simulation:worker');
+    expect(workerIndex).toBeGreaterThan(order.indexOf('npm test:integration'));
+    expect(workerIndex).toBeLessThan(order.indexOf('npm dev'));
+    const worker = h.calls.find((call) => commandNames([call])[0] === 'npm simulation:worker')!;
+    expect(worker.options.env.PUBLIC_SUPABASE_URL).toBe(api);
+    expect(worker.options.env.SUPABASE_SERVICE_ROLE_KEY).toBe(service);
+    expect(worker.child.stopped).toBeGreaterThan(0);
+    const app = h.calls.find((call) => commandNames([call])[0] === 'npm dev')!;
+    expect(app.options.env.WORLD_SETTLEMENT_WORKER_MODE).toBe('external');
+
+    const failed = harness(root, { log: () => {} });
+    const original = failed.options.spawn!;
+    failed.options.spawn = (command, args, options) => args.includes('simulation:worker')
+      ? new FakeChild(result(1, '', 'worker crashed')) : original(command, args, options);
+    expect(await runDevelopment(failed.options)).toBe(1);
+    const failedApp = failed.calls.find((call) => commandNames([call])[0] === 'npm dev')!.child;
+    expect(failedApp.stopped).toBeGreaterThan(0);
+
+    const controller = new AbortController();
+    const drainLimits: number[] = [];
+    const artDrainLimits: number[] = [];
+    const pollOrder: string[] = [];
+    let inFlight = 0;
+    let maximumInFlight = 0;
+    let beganPoll!: () => void;
+    const pollBegan = new Promise<void>((resolve) => { beganPoll = resolve; });
+    const process = runWorldSettlementWorker({
+      signal: controller.signal,
+      drain: async (limit) => {
+        drainLimits.push(limit);
+        maximumInFlight = Math.max(maximumInFlight, ++inFlight);
+        pollOrder.push('settlement');
+        beganPoll();
+        inFlight--;
+        return [];
+      },
+      artDrain: async (limit) => { artDrainLimits.push(limit); pollOrder.push('art'); return []; },
+      log: { info: () => {}, warn: () => {} }
+    });
+    await pollBegan;
+    controller.abort();
+    await expect(Promise.race([
+      process,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('worker did not interrupt its poll wait')), 100))
+    ])).resolves.toBeUndefined();
+    expect(drainLimits).toEqual([4]);
+    expect(artDrainLimits).toEqual([4]);
+    expect(pollOrder).toEqual(['settlement', 'art']);
+    expect(maximumInFlight).toBe(1);
+
+    const onceLimits: number[] = [];
+    await runWorldSettlementWorker({
+      once: true,
+      drain: async (limit) => { onceLimits.push(limit); return []; },
+      artDrain: async (limit) => { onceLimits.push(limit); return []; },
+      log: { info: () => {}, warn: () => {} }
+    });
+    expect(onceLimits).toEqual([4, 4]);
+
+    const warnings: string[] = [];
+    const pollAfterSettlementFailure: string[] = [];
+    await runWorldSettlementWorker({
+      once: true,
+      drain: async () => { throw new Error('private settlement detail'); },
+      artDrain: async () => { pollAfterSettlementFailure.push('art'); return [{ status: 'accepted' }]; },
+      log: { info: () => {}, warn: (message) => warnings.push(message) }
+    });
+    expect(pollAfterSettlementFailure).toEqual(['art']);
+    expect(warnings).toEqual(['[simulation:worker] settlement poll failed; retrying.']);
+
+    const pollBeforeArtFailure: string[] = [];
+    await runWorldSettlementWorker({
+      once: true,
+      drain: async () => { pollBeforeArtFailure.push('settlement'); return [{ status: 'completed' }]; },
+      artDrain: async () => { throw new Error('private provider detail'); },
+      log: { info: () => {}, warn: (message) => warnings.push(message) }
+    });
+    expect(pollBeforeArtFailure).toEqual(['settlement']);
+    expect(warnings.at(-1)).toBe('[simulation:worker] runtime-art poll failed; retrying.');
+  }));
+
   it('reuses a healthy project stack while retaining responsibility for stopping it', async () => withRoot(async (root) => {
     const h = harness(root);
     expect(await runDevelopment(h.options)).toBe(130);
@@ -141,12 +227,17 @@ describe('brac-app:dev launcher', () => {
   }));
 
   it('cleans up an adopted stack after a later startup failure', async () => withRoot(async (root) => {
-    const h = harness(root, { cold: true });
+    const h = harness(root);
     const original = h.options.spawn!;
     h.options.spawn = (command, args, options) => args.includes('test:db')
       ? new FakeChild(result(1, '', 'database failure')) : original(command, args, options);
     expect(await runDevelopment(h.options)).toBe(1);
-    expect(commandNames(h.calls)).toContain('supabase stop');
+    const commands = commandNames(h.calls);
+    expect(commands.filter((name) => name === 'supabase stop')).toHaveLength(1);
+    expect(commands).not.toContain('npm test:integration');
+    expect(commands).not.toContain('npm simulation:worker');
+    expect(commands).not.toContain('npm dev');
+    expect(h.released).toBe(1);
   }));
 
   it('returns cancellation once and cleans up when stopped during a test stage', async () => withRoot(async (root) => {

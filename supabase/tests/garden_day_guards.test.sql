@@ -42,16 +42,21 @@ select is((select count(*) from public.garden_day_resolutions),0::bigint,'active
 set local request.jwt.claim.sub='16100000-0000-4000-8000-000000000003';
 select lives_ok($$ select public.create_tavern() $$,'dialogue-guard player can create a tavern');
 reset role;
-insert into public.dialogue_turns(
-  id,save_id,actor_id,patron_key,message,input_sequence,source_revision,day,status,lease_until
-) select '16100000-0000-4000-8000-000000000031',id,user_id,'lira','How fares the road?',0,revision,current_day,
-  'processing',now()+interval '5 minutes' from public.tavern_saves
-where user_id='16100000-0000-4000-8000-000000000003';
+insert into private.world_npc_dialogue_turns(
+  id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until
+) select
+  '16100000-0000-4000-8000-000000000031',save_row.id,resident.id,resident.npc_id,resident.version_id,
+  save_row.user_id,'How fares the road?',resident.conversation_sequence,save_row.revision,save_row.current_day,
+  'processing',now()+interval '5 minutes'
+from public.tavern_saves save_row
+join private.world_npc_instances resident on resident.save_id=save_row.id
+where save_row.user_id='16100000-0000-4000-8000-000000000003'
+order by resident.id limit 1;
 set local role authenticated;
 set local request.jwt.claim.sub='16100000-0000-4000-8000-000000000003';
 select throws_ok($$ select public.advance_tavern_day(
   (select id from public.tavern_saves),'16100000-0000-4000-8000-000000000032',0) $$,
-  'PT409','Finish or cancel the pending conversation before closing','live dialogue blocks garden resolution');
+  'PT409','Finish or cancel the active resident dialogue before closing','live dialogue blocks garden resolution');
 select is((select current_day from public.tavern_saves),1,'live dialogue leaves the day unchanged');
 select is((select count(*) from public.garden_day_resolutions),0::bigint,'live dialogue creates no garden resolution');
 

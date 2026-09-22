@@ -11,7 +11,7 @@ export interface Patron {
   relationship: number;
   status: string;
   rating: 'standard' | 'mature';
-  origin: 'first_party' | 'community';
+  origin: 'first_party' | 'community' | 'procedural';
   sceneStorageKey: string | null;
   creator: { displayName: string; profile: string } | null;
   sequence: number;
@@ -76,7 +76,7 @@ function isPatron(value: unknown): value is Patron {
     && Number.isSafeInteger(value.relationship)
     && typeof value.status === 'string'
     && (value.rating === 'standard' || value.rating === 'mature')
-    && (value.origin === 'first_party' || value.origin === 'community')
+    && (value.origin === 'first_party' || value.origin === 'community' || value.origin === 'procedural')
     && isNullableString(value.sceneStorageKey)
     && Number.isSafeInteger(value.sequence)
     && (creator === null || (isRecord(creator)

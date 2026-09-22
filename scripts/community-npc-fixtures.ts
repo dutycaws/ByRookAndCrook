@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
@@ -147,7 +146,7 @@ async function callVoid(client: RpcClient, fn: string, args: Record<string, unkn
 
 export function createFixtureNpcSheet(): NpcSheet {
   return {
-    schemaVersion: 'npc-sheet-v1',
+    schemaVersion: 'npc-sheet-v2',
     rating: 'standard',
     identity: {
       name: FIXTURE_NPC_NAME,
@@ -157,15 +156,29 @@ export function createFixtureNpcSheet(): NpcSheet {
     },
     appearance: {
       physicalAppearance: 'A compact traveler with ink-stained hands, wind-browned cheeks, and an observant gray gaze.',
+      silhouette: 'A weathered blue coat, brass compass, folded maps, and a many-pocketed satchel make Willow recognizable at a glance.',
+      palette: ['weathered-blue', 'brass', 'map-green'],
       attire: 'A weathered blue coat, many-pocketed satchel, and a brass compass kept on a cord beneath the collar.',
       notableFeatures: 'A folded vellum map is always tucked behind one ear, marked with bright green route pins.',
       mood: 'Calmly pleased when a plan makes room for safety, local knowledge, and a return route.'
     },
     personality: {
-      values: ['careful promises', 'shared knowledge'],
-      likes: ['well-kept ledgers', 'hot tea'],
-      dislikes: ['unmarked hazards', 'careless shortcuts'],
-      boundaries: ['Will not guide someone into a known danger', 'Will not present a guess as a surveyed fact']
+      dimensions: [
+        { key: 'care', label: 'Care', negativeAnchor: 'careless', positiveAnchor: 'protective', initialValue: 64, volatility: 1, ordinaryChangeThreshold: 25, definingRuptureThreshold: 100 },
+        { key: 'certainty', label: 'Certainty', negativeAnchor: 'speculative', positiveAnchor: 'verified', initialValue: 48, volatility: 0.75, ordinaryChangeThreshold: 25, definingRuptureThreshold: 100 }
+      ],
+      collections: [
+        { kind: 'value', maximumEntries: 4 }, { kind: 'boundary', maximumEntries: 4 },
+        { kind: 'preference', maximumEntries: 4 }, { kind: 'aversion', maximumEntries: 4 },
+        { kind: 'voice_trait', maximumEntries: 2 }
+      ],
+      initialEntries: [
+        { id: 'value_careful_promises', kind: 'value', text: 'Keeps careful promises and shares useful knowledge.', core: true, active: true },
+        { id: 'boundary_known_danger', kind: 'boundary', text: 'Will not guide someone into a known danger.', core: true, active: true },
+        { id: 'preference_ledgers', kind: 'preference', text: 'Enjoys well-kept ledgers and hot tea.', core: false, active: true },
+        { id: 'aversion_shortcuts', kind: 'aversion', text: 'Distrusts unmarked hazards and careless shortcuts.', core: true, active: true },
+        { id: 'voice_precise', kind: 'voice_trait', text: 'Speaks warmly and precisely, without presenting an uncertain route as safe.', core: true, active: true }
+      ]
     },
     lore: {
       entities: [{ id: 'north-road', namespace: 'place', name: 'North Road', description: 'An old trade road whose reliable markers have begun to disappear.' }],
@@ -250,39 +263,10 @@ export async function seedLocalCommunityNpcFixture(
 
 /** Scale data is explicitly opt-in and is inserted only into the disposable local database. */
 export function seedOptionalLocalCommunityNpcScale(databaseUrl: string, creatorId: string, saveId: string): void {
-  if (process.env.FIXTURE_NPC_SCALE !== '1') return;
-  const sql = `
-begin;
-insert into private.npc_identities(origin,creator_id,normalized_name,status,rating)
-select 'community','${creatorId}'::uuid,'scale fixture npc ' || lpad(n::text,4,'0'),'published','standard'
-from generate_series(1,1000) n on conflict(normalized_name) where name_reserved do nothing;
-
-with source as (select sheet from private.npc_versions where id='18181818-1818-4181-8181-181818181819'::uuid)
-insert into private.npc_versions(npc_id,version_number,schema_version,sheet,sheet_hash,state,published_at,created_by)
-select i.id,1,'npc-sheet-v1',
-  jsonb_set(source.sheet,'{identity,name}',to_jsonb(initcap(i.normalized_name))),
-  encode(extensions.digest((jsonb_set(source.sheet,'{identity,name}',to_jsonb(initcap(i.normalized_name))))::text,'sha256'),'hex'),
-  'published',now(),'${creatorId}'::uuid
-from private.npc_identities i cross join source
-where i.normalized_name like 'scale fixture npc %'
-  and not exists(select 1 from private.npc_versions v where v.npc_id=i.id);
-
-update private.npc_identities i set current_published_version_id=v.id
-from private.npc_versions v
-where i.id=v.npc_id and i.normalized_name like 'scale fixture npc %'
-  and i.current_published_version_id is distinct from v.id;
-
-insert into private.world_npc_instances(save_id,npc_id,version_id,arrived_day)
-select '${saveId}'::uuid,i.id,i.current_published_version_id,1 from private.npc_identities i
-where i.normalized_name like 'scale fixture npc %' and i.current_published_version_id is not null
-order by i.normalized_name limit 100
-on conflict(save_id,npc_id) do nothing;
-commit;`;
-  const container = 'supabase_db_by-rook-and-crook';
-  try {
-    execFileSync('docker', ['exec', '-i', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'], { input: sql, stdio: ['pipe', 'inherit', 'inherit'] });
-    console.info('Seeded opt-in community scale fixture: 1,000 identities and 100 residents.');
-  } catch (cause) {
-    throw new Error(`FIXTURE_NPC_SCALE=1 requires the local Supabase database container (${container}): ${cause instanceof Error ? cause.message : cause}`);
+  void databaseUrl;
+  void creatorId;
+  void saveId;
+  if (process.env.FIXTURE_NPC_SCALE === '1') {
+    console.warn('FIXTURE_NPC_SCALE is disabled until the scale fixture creates reviewed packages and materializes every resident through world_materialize_resident_from_version.');
   }
 }

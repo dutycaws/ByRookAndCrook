@@ -99,7 +99,7 @@ npm run fixtures:users:local
 
 The fixture command provisions the two pilot users, uploads and registers the setting library, and reports missing local media without inventing it. It assigns Lira Nightwind and Torvin Ashbeard to `keeper.one@example.test` and creates editable successor drafts copied from their current published versions. Their published versions remain unchanged. Keeper one is the local administrator and can approve changes to those first-party identities; keeper two remains available for independent-review testing.
 
-Portrait generation uses `NPC_IMAGE_API_KEY` when configured, otherwise the existing server-only `OPENAI_API_KEY`. `NPC_IMAGE_PROVIDER`, `NPC_IMAGE_MODEL`, and `NPC_IMAGE_DEADLINE_MS` control the adapter. Neutral must be selected before an optional expression can be uploaded, generated, or selected. AI optional-expression alternatives are anchored to the selected Neutral asset; a later Neutral change clears their selections and requires an explicit stale-anchor confirmation before reuse. Normal fixtures and automated tests do not make billable image requests.
+Portrait generation uses `NPC_IMAGE_API_KEY` when configured, otherwise the existing server-only `OPENAI_API_KEY`. `NPC_IMAGE_PROVIDER`, `NPC_IMAGE_MODEL`, and `NPC_IMAGE_DEADLINE_MS` control the adapter; the default model is the undated `gpt-image-2.5-sunburst` alias. Existing ignored `.env` files that explicitly pin `NPC_IMAGE_MODEL=gpt-image-2` must be updated, because the default does not override an explicit value. Drain or finish claimed or dispatched portrait-generation attempts before changing that setting, then restart the web and worker processes before accepting new attempts. This affects only community portrait generation; runtime-world art remains configured separately with `NPC_ART_MODEL=gpt-image-2.5-flare`. Neutral must be selected before an optional expression can be uploaded, generated, or selected. AI optional-expression alternatives are anchored to the selected Neutral asset; a later Neutral change clears their selections and requires an explicit stale-anchor confirmation before reuse. Normal fixtures and automated tests do not make billable image requests.
 
 Candidate previews are short-lived, authorization-checked URLs. An author can discard only an unselected, unpinned candidate in an editable draft. Submitted versions freeze the complete selected slot map, provenance, anchors, and Neutral fallback resolution. Quarantine, takedown, retirement, and purge retain governance-safe hashes and audit records while removing the private master and runtime derivative through the existing deletion worker.
 
@@ -115,7 +115,6 @@ This creates a 1,000-identity candidate pool and assigns 100 residents to one sa
 
 The community-specific database suites are:
 
-- `supabase/tests/community_npc_platform.test.sql`
 - `supabase/tests/community_npc_runtime.test.sql`
 - `supabase/tests/community_npc_authoring.test.sql`
 - `supabase/tests/community_npc_authoring_experience.test.sql`
@@ -123,6 +122,18 @@ The community-specific database suites are:
 - `supabase/tests/community_npc_bar_scaling.test.sql`
 - `supabase/tests/community_npc_purge.test.sql`
 - `supabase/tests/community_npc_engagement.test.sql`
+- `supabase/tests/npc_resident_packages.test.sql`
+- `supabase/tests/npc_v2_review_publication.test.sql`
+- `supabase/tests/npc_materializer_cutover.test.sql`
+- `supabase/tests/npc_legacy_cleanup.test.sql`
+- `supabase/tests/npc_package_observability.test.sql`
+- `supabase/tests/resident_evolution_dialogue_projection.test.sql`
+
+The V2 package, review-publication, and materializer suites replace the retired
+all-in-one platform fixture. They isolate the immutable release package,
+reviewer-selected capability registry, canonical materializer, runtime dialogue
+projection, observability, and legacy-source removal as independently diagnosable
+contracts.
 
 Use the standard repository checks after a local reset:
 

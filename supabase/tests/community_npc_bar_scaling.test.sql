@@ -10,22 +10,28 @@ set local request.jwt.claim.sub='18300000-0000-4000-8000-000000000011';
 select public.create_tavern();
 reset role;
 grant usage on schema private to service_role;
-grant all on private.npc_identities,private.npc_versions,private.world_npc_instances to service_role;
+grant select on private.npc_versions to service_role;
 grant select on public.tavern_saves to service_role;
 set local role service_role;
 create temporary table pg_temp.scale_npcs(id uuid primary key, version_id uuid not null);
-with identities as (
-  insert into private.npc_identities(origin,normalized_name,status,rating)
-  select 'first_party',format('scale resident %s',n),'published','standard' from generate_series(1,21) n
-  returning id,normalized_name
-), versions as (
-  insert into private.npc_versions(npc_id,version_number,sheet,sheet_hash,state,published_at)
-  select id,1,jsonb_build_object('identity',jsonb_build_object('name',initcap(normalized_name),'title','Scale resident','shortDescription','A test resident.')),
-    'scale-'||id::text,'published',now() from identities returning id,npc_id
-)
-insert into pg_temp.scale_npcs select npc_id,id from versions;
-insert into private.world_npc_instances(save_id,npc_id,version_id,arrived_day)
-select (select id from public.tavern_saves where user_id='18300000-0000-4000-8000-000000000011'::uuid),id,version_id,1 from pg_temp.scale_npcs;
+do $fixture$
+declare n integer; npc_id uuid; version_id uuid; fixture_sheet jsonb;
+begin
+  select version.sheet into fixture_sheet from private.npc_versions version where version.id='18181818-1818-4181-8181-181818181819';
+  for n in 1..21 loop
+    npc_id:=extensions.gen_random_uuid(); version_id:=extensions.gen_random_uuid();
+    fixture_sheet:=jsonb_set(jsonb_set(fixture_sheet,'{identity,name}',to_jsonb(format('Scale Resident %s',n))),'{identity,shortDescription}',to_jsonb(format('A package-backed pagination fixture resident %s.',n)));
+    perform private.npc_install_first_party_release(
+      npc_id,format('scale-resident-%s',n),n+2,version_id,'v1',1,true,fixture_sheet,
+      array['quest.action.prepare','quest.approach.scouting','effect.adjust_relationship','social.conceal']
+    );
+    insert into pg_temp.scale_npcs values(npc_id,version_id);
+  end loop;
+end
+$fixture$;
+select private.world_materialize_resident_from_version(
+  (select id from public.tavern_saves where user_id='18300000-0000-4000-8000-000000000011'::uuid),id,version_id,1
+) from pg_temp.scale_npcs;
 
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';

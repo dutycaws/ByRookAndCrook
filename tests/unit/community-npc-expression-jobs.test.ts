@@ -7,6 +7,7 @@ import {
   type PortraitGenerationAttempt, type PortraitWorkerClient
 } from '../../src/lib/server/community-npc-portraits/service.js';
 import { PortraitProviderError, type PrivatePortraitStorage } from '../../src/lib/server/community-npc-portraits/index.js';
+import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
 
 async function sprite() {
   return sharp({ create: { width: 1024, height: 1536, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
@@ -48,6 +49,14 @@ function rpc(calls: Array<{ name: string; args: Record<string, unknown> }>, fail
 }
 const refs = [{ revision: 'test@v1', filename: 'ref.png', sha256: 'f'.repeat(64), bytes: Buffer.from('reference') }];
 
+/** Durable attempts must resolve the exact release pinned at reservation. */
+function promptRegistryFixture() {
+  return fixturePromptRegistry({ onResolve(kind, workId) {
+      expect(kind).toBe('portrait');
+      expect(workId).toMatch(/^[0-9a-f-]{36}$/i);
+    } });
+}
+
 describe('durable NPC expression generation worker', () => {
   it('claims only valid fenced queue work', async () => {
     const valid = attempt(); const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
@@ -63,6 +72,7 @@ describe('durable NPC expression generation worker', () => {
     const png = await sprite();
     const outcome = await runPortraitGenerationAttempt(rpc(calls), attempt(), {
       config: { NPC_IMAGE_API_KEY: 'test' }, storage: privateStorage(), references: refs,
+      promptRegistry: promptRegistryFixture(),
       provider: { async generate() { return { bytes: png, provider: 'fixture', model: 'fixture', requestId: 'req-1' }; } }
     });
     expect(outcome).toEqual({ status: 'completed' });
@@ -78,6 +88,7 @@ describe('durable NPC expression generation worker', () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const outcome = await runPortraitGenerationAttempt(rpc(calls), attempt(), {
       config: { NPC_IMAGE_API_KEY: 'test' }, storage: privateStorage(), references: refs,
+      promptRegistry: promptRegistryFixture(),
       provider: { async generate() { throw new PortraitProviderError('provider_timeout', 'timed out'); } }
     });
     expect(outcome).toEqual({ status: 'failed', errorCode: 'provider_timeout' });
@@ -91,6 +102,7 @@ describe('durable NPC expression generation worker', () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const outcome = await runPortraitGenerationAttempt(rpc(calls), attempt(), {
       config: { NPC_IMAGE_API_KEY: 'test' }, storage: privateStorage(), references: refs,
+      promptRegistry: promptRegistryFixture(),
       provider: { async generate() { throw new PortraitProviderError('provider_refused', 'policy refusal'); } }
     });
     expect(outcome).toEqual({ status: 'failed', errorCode: 'provider_refused' });
@@ -108,6 +120,7 @@ describe('durable NPC expression generation worker', () => {
       const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
       await expect(runPortraitGenerationAttempt(rpc(calls), attempt(), {
         config: { NPC_IMAGE_API_KEY: 'test' }, storage: privateStorage(), references: refs,
+        promptRegistry: promptRegistryFixture(),
         provider: { async generate() { throw new PortraitProviderError(code, code); } }
       })).resolves.toEqual({ status: 'failed', errorCode: code });
       expect(calls.at(-1)).toMatchObject({ name: 'npc_portrait_complete_generation_attempt', args: {
@@ -124,6 +137,7 @@ describe('durable NPC expression generation worker', () => {
     let referenceNames: string[] = [];
     await expect(runPortraitGenerationAttempt(rpc(calls), expression, {
       config: { NPC_IMAGE_API_KEY: 'test' }, storage: storageWithMaster(masterKey, png), references: refs,
+      promptRegistry: promptRegistryFixture(),
       provider: { async generate(request) { referenceNames = request.references.map((reference) => reference.filename); return { bytes: png, provider: 'fixture', model: 'fixture' }; } }
     })).resolves.toEqual({ status: 'completed' });
     expect(referenceNames).toEqual(['ref.png', 'selected-neutral-anchor.png']);
@@ -146,6 +160,7 @@ describe('durable NPC expression generation worker', () => {
     const png = await sprite();
     const outcome = await runPortraitGenerationAttempt(rpc(calls, { npc_portrait_complete_generation_attempt: 'lease no longer valid' }), attempt(), {
       config: { NPC_IMAGE_API_KEY: 'test' }, storage: privateStorage(), references: refs,
+      promptRegistry: promptRegistryFixture(),
       provider: { async generate() { return { bytes: png, provider: 'fixture', model: 'fixture' }; } }
     });
     expect(outcome).toEqual({ status: 'lost_lease' });

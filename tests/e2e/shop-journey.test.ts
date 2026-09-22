@@ -84,7 +84,8 @@ test('Shop opens in Art6, transitions to Art8 detail, and restores browse focus 
     await expect(catalog.getByText('Elara Greenbloom', { exact: true })).toBeVisible();
     const backgroundUrl = await background.getAttribute('src');
     const elaraImage = elara.locator('img');
-    const cloverUrl = await page.locator('[data-good-key="seed_clover"] .good-art img').getAttribute('src');
+    const cloverArt = page.locator('[data-good-key="seed_clover"] .good-art');
+    const cloverImage = cloverArt.locator('img');
     if (backgroundUrl) {
       expect(backgroundUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
     } else {
@@ -95,10 +96,17 @@ test('Shop opens in Art6, transitions to Art8 detail, and restores browse focus 
     } else {
       await expect(elara).toContainText('Elara Greenbloom');
     }
-    expect(cloverUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
+    if (await cloverImage.count()) {
+      const cloverUrl = await cloverImage.getAttribute('src');
+      expect(cloverUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
+      expect((await page.request.get(cloverUrl!)).ok()).toBe(true);
+    } else {
+      // Fixture art is deliberately optional: a local checkout without the
+      // ignored runtime-media masters still renders the catalog icon.
+      await expect(cloverArt.locator('.good-icon')).toBeVisible();
+    }
     if (backgroundUrl) expect((await page.request.get(backgroundUrl)).ok()).toBe(true);
     if (await elaraImage.count()) expect((await page.request.get((await elaraImage.getAttribute('src'))!)).ok()).toBe(true);
-    expect((await page.request.get(cloverUrl!)).ok()).toBe(true);
     const [statusBox, merchantBox, catalogBox] = await Promise.all([status.boundingBox(), merchant.boundingBox(), catalog.boundingBox()]);
     expect(statusBox && merchantBox && catalogBox).toBeTruthy();
     expect(statusBox!.x).toBeLessThan(merchantBox!.x);

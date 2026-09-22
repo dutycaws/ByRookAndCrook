@@ -135,7 +135,7 @@ begin
     proposed:=coalesce(e.proposal->'replacement',e.proposal);
     if proposed is null then raise sqlstate 'PT422' using message='Assistance has no replacement'; end if;
     candidate:=jsonb_set(d.sheet,array[e.section_path],proposed,true);
-    perform private.assert_npc_sheet(candidate);
+    perform private.validate_npc_sheet_v2(candidate);
     update private.npc_drafts set sheet=candidate,revision=revision+1,updated_at=now() where id=d.id;
     update private.npc_sandboxes set invalidated_at=coalesce(invalidated_at,now()),updated_at=now() where draft_id=d.id and invalidated_at is null;
   end if;

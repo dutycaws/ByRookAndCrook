@@ -463,132 +463,6 @@ export type Database = {
           },
         ]
       }
-      dialogue_turns: {
-        Row: {
-          actor_id: string
-          beverage_id: string | null
-          calls: number
-          card_id: string | null
-          checkpoints: Json
-          completed_at: string | null
-          content_version: string
-          created_at: string
-          day: number
-          error_code: string | null
-          fence: string
-          id: string
-          input_sequence: number
-          intent_card_id: string | null
-          intent_snapshot: Json | null
-          interaction_version: string
-          lease_until: string
-          message: string
-          offering_beverage_id: string | null
-          offering_food_id: string | null
-          offering_kind: string | null
-          patron_key: string
-          result: Json | null
-          rule_version: string
-          save_id: string
-          source_revision: number
-          status: string
-        }
-        Insert: {
-          actor_id: string
-          beverage_id?: string | null
-          calls?: number
-          card_id?: string | null
-          checkpoints?: Json
-          completed_at?: string | null
-          content_version?: string
-          created_at?: string
-          day: number
-          error_code?: string | null
-          fence?: string
-          id: string
-          input_sequence: number
-          intent_card_id?: string | null
-          intent_snapshot?: Json | null
-          interaction_version?: string
-          lease_until: string
-          message: string
-          offering_beverage_id?: string | null
-          offering_food_id?: string | null
-          offering_kind?: string | null
-          patron_key: string
-          result?: Json | null
-          rule_version?: string
-          save_id: string
-          source_revision: number
-          status: string
-        }
-        Update: {
-          actor_id?: string
-          beverage_id?: string | null
-          calls?: number
-          card_id?: string | null
-          checkpoints?: Json
-          completed_at?: string | null
-          content_version?: string
-          created_at?: string
-          day?: number
-          error_code?: string | null
-          fence?: string
-          id?: string
-          input_sequence?: number
-          intent_card_id?: string | null
-          intent_snapshot?: Json | null
-          interaction_version?: string
-          lease_until?: string
-          message?: string
-          offering_beverage_id?: string | null
-          offering_food_id?: string | null
-          offering_kind?: string | null
-          patron_key?: string
-          result?: Json | null
-          rule_version?: string
-          save_id?: string
-          source_revision?: number
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "dialogue_turns_save_id_actor_id_fkey"
-            columns: ["save_id", "actor_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id", "user_id"]
-          },
-          {
-            foreignKeyName: "dialogue_turns_save_id_fkey"
-            columns: ["save_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "dialogue_turns_save_id_intent_card_id_fkey"
-            columns: ["save_id", "intent_card_id"]
-            isOneToOne: false
-            referencedRelation: "intent_cards"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "dialogue_turns_save_id_offering_beverage_id_fkey"
-            columns: ["save_id", "offering_beverage_id"]
-            isOneToOne: false
-            referencedRelation: "beverages"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "dialogue_turns_save_id_offering_food_id_fkey"
-            columns: ["save_id", "offering_food_id"]
-            isOneToOne: false
-            referencedRelation: "foods"
-            referencedColumns: ["save_id", "id"]
-          },
-        ]
-      }
       foods: {
         Row: {
           bake_session_id: string | null
@@ -1385,122 +1259,6 @@ export type Database = {
         }
         Relationships: []
       }
-      hospitality_events: {
-        Row: {
-          action_id: string
-          actor_id: string
-          beverage_id: string | null
-          committed_revision: number
-          created_at: string
-          day_number: number
-          food_id: string | null
-          gold_earned: number
-          input_expected_revision: number
-          item_kind: string
-          item_name: string
-          legacy_card_id: string | null
-          patron_key: string
-          quality_index: number
-          relationship_change: number
-          result: Json
-          rules_version: string
-          save_id: string
-          turn_id: string | null
-        }
-        Insert: {
-          action_id: string
-          actor_id: string
-          beverage_id?: string | null
-          committed_revision: number
-          created_at?: string
-          day_number: number
-          food_id?: string | null
-          gold_earned: number
-          input_expected_revision: number
-          item_kind: string
-          item_name: string
-          legacy_card_id?: string | null
-          patron_key: string
-          quality_index: number
-          relationship_change: number
-          result: Json
-          rules_version: string
-          save_id: string
-          turn_id?: string | null
-        }
-        Update: {
-          action_id?: string
-          actor_id?: string
-          beverage_id?: string | null
-          committed_revision?: number
-          created_at?: string
-          day_number?: number
-          food_id?: string | null
-          gold_earned?: number
-          input_expected_revision?: number
-          item_kind?: string
-          item_name?: string
-          legacy_card_id?: string | null
-          patron_key?: string
-          quality_index?: number
-          relationship_change?: number
-          result?: Json
-          rules_version?: string
-          save_id?: string
-          turn_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "hospitality_events_patron_key_fkey"
-            columns: ["patron_key"]
-            isOneToOne: false
-            referencedRelation: "patron_catalog"
-            referencedColumns: ["patron_key"]
-          },
-          {
-            foreignKeyName: "hospitality_events_save_id_actor_id_fkey"
-            columns: ["save_id", "actor_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id", "user_id"]
-          },
-          {
-            foreignKeyName: "hospitality_events_save_id_beverage_id_fkey"
-            columns: ["save_id", "beverage_id"]
-            isOneToOne: false
-            referencedRelation: "beverages"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "hospitality_events_save_id_fkey"
-            columns: ["save_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "hospitality_events_save_id_food_id_fkey"
-            columns: ["save_id", "food_id"]
-            isOneToOne: false
-            referencedRelation: "foods"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "hospitality_events_save_id_legacy_card_id_fkey"
-            columns: ["save_id", "legacy_card_id"]
-            isOneToOne: false
-            referencedRelation: "social_cards"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "hospitality_events_turn_id_fkey"
-            columns: ["turn_id"]
-            isOneToOne: false
-            referencedRelation: "dialogue_turns"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       ingredient_batches: {
         Row: {
           bake_bonus: number
@@ -1618,91 +1376,6 @@ export type Database = {
         }
         Relationships: []
       }
-      intent_card_plays: {
-        Row: {
-          actor_id: string
-          card_id: string
-          card_key: string
-          catalog_version: string
-          created_at: string
-          day_number: number
-          intent_snapshot: Json
-          patron_key: string
-          save_id: string
-          tier: string
-          turn_id: string
-        }
-        Insert: {
-          actor_id: string
-          card_id: string
-          card_key: string
-          catalog_version: string
-          created_at?: string
-          day_number: number
-          intent_snapshot: Json
-          patron_key: string
-          save_id: string
-          tier: string
-          turn_id: string
-        }
-        Update: {
-          actor_id?: string
-          card_id?: string
-          card_key?: string
-          catalog_version?: string
-          created_at?: string
-          day_number?: number
-          intent_snapshot?: Json
-          patron_key?: string
-          save_id?: string
-          tier?: string
-          turn_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "intent_card_plays_card_key_catalog_version_fkey"
-            columns: ["card_key", "catalog_version"]
-            isOneToOne: false
-            referencedRelation: "intent_card_catalog"
-            referencedColumns: ["card_key", "version"]
-          },
-          {
-            foreignKeyName: "intent_card_plays_patron_key_fkey"
-            columns: ["patron_key"]
-            isOneToOne: false
-            referencedRelation: "patron_catalog"
-            referencedColumns: ["patron_key"]
-          },
-          {
-            foreignKeyName: "intent_card_plays_save_id_actor_id_fkey"
-            columns: ["save_id", "actor_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id", "user_id"]
-          },
-          {
-            foreignKeyName: "intent_card_plays_save_id_card_id_fkey"
-            columns: ["save_id", "card_id"]
-            isOneToOne: true
-            referencedRelation: "intent_cards"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "intent_card_plays_save_id_fkey"
-            columns: ["save_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "intent_card_plays_turn_id_fkey"
-            columns: ["turn_id"]
-            isOneToOne: false
-            referencedRelation: "dialogue_turns"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       intent_cards: {
         Row: {
           card_key: string
@@ -1819,84 +1492,6 @@ export type Database = {
         }
         Relationships: []
       }
-      patron_catalog: {
-        Row: {
-          arc_steps: string[]
-          arc_title: string
-          description: string
-          display_name: string
-          icon: string
-          initial_relationship: number
-          patron_key: string
-          prices: number[]
-          rules_version: string
-          title: string
-        }
-        Insert: {
-          arc_steps: string[]
-          arc_title: string
-          description: string
-          display_name: string
-          icon: string
-          initial_relationship: number
-          patron_key: string
-          prices: number[]
-          rules_version: string
-          title: string
-        }
-        Update: {
-          arc_steps?: string[]
-          arc_title?: string
-          description?: string
-          display_name?: string
-          icon?: string
-          initial_relationship?: number
-          patron_key?: string
-          prices?: number[]
-          rules_version?: string
-          title?: string
-        }
-        Relationships: []
-      }
-      patron_states: {
-        Row: {
-          arc_progress: number
-          patron_key: string
-          relationship: number
-          save_id: string
-          updated_at: string
-        }
-        Insert: {
-          arc_progress?: number
-          patron_key: string
-          relationship: number
-          save_id: string
-          updated_at?: string
-        }
-        Update: {
-          arc_progress?: number
-          patron_key?: string
-          relationship?: number
-          save_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "patron_states_patron_key_fkey"
-            columns: ["patron_key"]
-            isOneToOne: false
-            referencedRelation: "patron_catalog"
-            referencedColumns: ["patron_key"]
-          },
-          {
-            foreignKeyName: "patron_states_save_id_fkey"
-            columns: ["save_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       plant_catalog: {
         Row: {
           base_bake_bonus: number
@@ -1962,96 +1557,6 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
-      }
-      serving_events: {
-        Row: {
-          action_id: string
-          actor_id: string
-          arc_change: number
-          beverage_id: string
-          card_id: string | null
-          committed_revision: number
-          created_at: string
-          day_number: number
-          gold_earned: number
-          input_expected_revision: number
-          patron_key: string
-          relationship_change: number
-          result: Json
-          rules_version: string
-          save_id: string
-        }
-        Insert: {
-          action_id: string
-          actor_id: string
-          arc_change: number
-          beverage_id: string
-          card_id?: string | null
-          committed_revision: number
-          created_at?: string
-          day_number: number
-          gold_earned: number
-          input_expected_revision: number
-          patron_key: string
-          relationship_change: number
-          result: Json
-          rules_version: string
-          save_id: string
-        }
-        Update: {
-          action_id?: string
-          actor_id?: string
-          arc_change?: number
-          beverage_id?: string
-          card_id?: string | null
-          committed_revision?: number
-          created_at?: string
-          day_number?: number
-          gold_earned?: number
-          input_expected_revision?: number
-          patron_key?: string
-          relationship_change?: number
-          result?: Json
-          rules_version?: string
-          save_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "serving_events_patron_key_fkey"
-            columns: ["patron_key"]
-            isOneToOne: false
-            referencedRelation: "patron_catalog"
-            referencedColumns: ["patron_key"]
-          },
-          {
-            foreignKeyName: "serving_events_save_id_actor_id_fkey"
-            columns: ["save_id", "actor_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id", "user_id"]
-          },
-          {
-            foreignKeyName: "serving_events_save_id_beverage_id_fkey"
-            columns: ["save_id", "beverage_id"]
-            isOneToOne: true
-            referencedRelation: "beverages"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "serving_events_save_id_card_id_fkey"
-            columns: ["save_id", "card_id"]
-            isOneToOne: true
-            referencedRelation: "social_cards"
-            referencedColumns: ["save_id", "id"]
-          },
-          {
-            foreignKeyName: "serving_events_save_id_fkey"
-            columns: ["save_id"]
-            isOneToOne: false
-            referencedRelation: "tavern_saves"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       social_cards: {
         Row: {
@@ -2119,6 +1624,7 @@ export type Database = {
           rules_version: string
           updated_at: string
           user_id: string
+          world_phase: string
         }
         Insert: {
           community_npc_level?: number
@@ -2134,6 +1640,7 @@ export type Database = {
           rules_version?: string
           updated_at?: string
           user_id: string
+          world_phase?: string
         }
         Update: {
           community_npc_level?: number
@@ -2149,6 +1656,7 @@ export type Database = {
           rules_version?: string
           updated_at?: string
           user_id?: string
+          world_phase?: string
         }
         Relationships: []
       }
@@ -2206,46 +1714,6 @@ export type Database = {
         Returns: Json
       }
       create_tavern: { Args: never; Returns: Json }
-      dialogue_begin: {
-        Args: {
-          p_actor: string
-          p_intent_card?: string
-          p_message: string
-          p_offering_item?: string
-          p_offering_kind?: string
-          p_patron: string
-          p_sequence: number
-          p_turn: string
-        }
-        Returns: Json
-      }
-      dialogue_checkpoint: {
-        Args: {
-          p_actor: string
-          p_fence: string
-          p_stage: string
-          p_turn: string
-          p_value?: Json
-        }
-        Returns: undefined
-      }
-      dialogue_complete: {
-        Args: { p_actor: string; p_fence: string; p_turn: string }
-        Returns: Json
-      }
-      dialogue_context: {
-        Args: {
-          p_actor: string
-          p_category?: string
-          p_query?: string
-          p_turn: string
-        }
-        Returns: Json
-      }
-      dialogue_status: {
-        Args: { p_cancel?: boolean; p_turn: string }
-        Returns: Json
-      }
       fold_bake: {
         Args: {
           p_action_id: string
@@ -2266,8 +1734,6 @@ export type Database = {
         }
         Returns: Json
       }
-      get_bar_snapshot: { Args: never; Returns: Json }
-      get_npc_journal: { Args: { p_patron: string }; Returns: Json }
       get_tavern_snapshot: { Args: never; Returns: Json }
       harvest_crop: {
         Args: {
@@ -2587,6 +2053,27 @@ export type Database = {
         Args: { p_owner_id: string }
         Returns: Json
       }
+      npc_memory_retrieve: {
+        Args: {
+          p_cutoff_sequence?: number
+          p_instance_id: string
+          p_limit?: number
+          p_query?: string
+          p_view?: string
+        }
+        Returns: Json
+      }
+      npc_memory_retrieve_for_actor: {
+        Args: {
+          p_actor: string
+          p_cutoff_sequence?: number
+          p_instance_id: string
+          p_limit?: number
+          p_query?: string
+          p_view?: string
+        }
+        Returns: Json
+      }
       npc_my_capabilities: { Args: never; Returns: Json }
       npc_portrait_claim_generation_attempt: { Args: never; Returns: Json }
       npc_portrait_complete_generation_attempt: {
@@ -2617,6 +2104,10 @@ export type Database = {
         Args: { p_cursor?: string; p_limit?: number; p_normalized_name: string }
         Returns: Json
       }
+      npc_quest_history_archive: {
+        Args: { p_cursor?: string; p_instance_id: string; p_limit?: number }
+        Returns: Json
+      }
       npc_record_engagement: {
         Args: {
           p_actor: string
@@ -2635,6 +2126,41 @@ export type Database = {
         Returns: string
       }
       npc_resident: { Args: { p_instance: string }; Returns: Json }
+      npc_resident_package_observations_recent: {
+        Args: { p_limit?: number }
+        Returns: {
+          actor_id: string
+          duration_ms: number
+          error_code: string
+          id: number
+          instance_id: string
+          npc_id: string
+          occurred_at: string
+          operation: string
+          package_hash: string
+          package_id: string
+          save_id: string
+          source_kind: string
+          status: string
+          version_id: string
+        }[]
+      }
+      npc_resident_package_record_failure: {
+        Args: {
+          p_actor_id: string
+          p_duration_ms?: number
+          p_error_code?: string
+          p_instance_id?: string
+          p_npc_id: string
+          p_operation: string
+          p_package_hash?: string
+          p_package_id?: string
+          p_save_id?: string
+          p_source_kind: string
+          p_version_id: string
+        }
+        Returns: undefined
+      }
       npc_reviewer_comment: {
         Args: {
           p_body: string
@@ -2648,6 +2174,7 @@ export type Database = {
         Args: {
           p_decision: string
           p_notes?: string
+          p_option_ids?: string[]
           p_rating?: string
           p_version_id: string
         }
@@ -2728,10 +2255,6 @@ export type Database = {
         }
         Returns: Json
       }
-      npc_world_accept_plan: {
-        Args: { p_actor: string; p_instance: string; p_steps: Json }
-        Returns: Json
-      }
       preview_apiary_command: {
         Args: { p_command_kind: string; p_payload: Json }
         Returns: Json
@@ -2741,6 +2264,79 @@ export type Database = {
         Returns: Json
       }
       project_garden_day: { Args: never; Returns: Json }
+      prompt_registry_activate: {
+        Args: {
+          p_candidates: Json
+          p_expected_active_release: string
+          p_label: string
+          p_reason?: string
+          p_warning_acknowledgements?: Json
+        }
+        Returns: Json
+      }
+      prompt_registry_create_candidate: {
+        Args: {
+          p_body: string
+          p_change_note?: string
+          p_contract_hash: string
+          p_contract_id: string
+          p_key: string
+          p_parent_revision_id?: string
+        }
+        Returns: Json
+      }
+      prompt_registry_detail: { Args: { p_key: string }; Returns: Json }
+      prompt_registry_recent_runs: {
+        Args: { p_limit?: number; p_workflow?: string }
+        Returns: Json
+      }
+      prompt_registry_restore: {
+        Args: {
+          p_expected_active_release: string
+          p_label: string
+          p_reason?: string
+          p_restore_release: string
+          p_warning_acknowledgements?: Json
+        }
+        Returns: Json
+      }
+      prompt_registry_service_record_run: {
+        Args: {
+          p_attempt: number
+          p_duration_ms?: number
+          p_error_code?: string
+          p_execution_id: string
+          p_input_tokens?: number
+          p_model?: string
+          p_node_key: string
+          p_output_tokens?: number
+          p_prompt_key: string
+          p_release_id: string
+          p_revision_id: string
+          p_status: string
+          p_workflow: string
+        }
+        Returns: undefined
+      }
+      prompt_registry_service_resolve: {
+        Args: { p_release_id?: string }
+        Returns: Json
+      }
+      prompt_registry_service_work_release: {
+        Args: { p_work_id: string; p_work_kind: string }
+        Returns: string
+      }
+      prompt_registry_summary: { Args: never; Returns: Json }
+      purchase_generated_supply: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_item_key: string
+          p_quantity: number
+          p_save_id: string
+        }
+        Returns: Json
+      }
       score_bake: {
         Args: {
           p_action_id: string
@@ -2751,38 +2347,26 @@ export type Database = {
         }
         Returns: Json
       }
-      serve_beverage: {
-        Args: {
-          p_action_id?: string
-          p_beverage_id: string
-          p_card_id?: string
-          p_expected_revision?: number
-          p_patron_key: string
-          p_save_id: string
-        }
-        Returns: Json
-      }
-      serve_hospitality: {
-        Args: {
-          p_action_id: string
-          p_expected_revision: number
-          p_item_id: string
-          p_item_kind: string
-          p_legacy_card_id?: string
-          p_patron_key: string
-          p_save_id: string
-        }
-        Returns: Json
-      }
-      start_bake: {
-        Args: {
-          p_action_id: string
-          p_expected_revision: number
-          p_ingredient_batch_id: string
-          p_save_id: string
-        }
-        Returns: Json
-      }
+      start_bake:
+        | {
+            Args: {
+              p_action_id: string
+              p_expected_revision: number
+              p_ingredient_batch_id: string
+              p_save_id: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_action_id: string
+              p_expected_revision: number
+              p_ingredient_batch_id: string
+              p_recipe_key: string
+              p_save_id: string
+            }
+            Returns: Json
+          }
       start_brew: {
         Args: {
           p_action_id: string
@@ -2790,6 +2374,269 @@ export type Database = {
           p_ingredient_batch_id: string
           p_save_id: string
         }
+        Returns: Json
+      }
+      world_demote_low_relevance_deep_npc: {
+        Args: { p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_developer_inspector: { Args: { p_save_id: string }; Returns: Json }
+      world_developer_requeue_runtime_art_job: {
+        Args: {
+          p_actor_id: string
+          p_job_id: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_developer_requeue_settlement_job: {
+        Args: {
+          p_actor_id: string
+          p_job_id: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_developer_set_runtime_art_appearance: {
+        Args: {
+          p_actor_id: string
+          p_appearance_version: string
+          p_entity_id: string
+          p_public_appearance: string
+          p_reason: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_generated_gameplay_availability: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_generated_shop_projection: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_irreversible_warning_status: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_issue_irreversible_entity_warning: {
+        Args: {
+          p_capability_id: string
+          p_public_message: string
+          p_save_id: string
+          p_target_entity_id: string
+        }
+        Returns: Json
+      }
+      world_materialize_procedural_npc_packages: {
+        Args: { p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_promote_supporting_actor: {
+        Args: { p_entity_id: string; p_reason?: string; p_save_id: string }
+        Returns: Json
+      }
+      world_public_codex: { Args: { p_save_id: string }; Returns: Json }
+      world_quest_transition_checkpoint: {
+        Args: {
+          p_fence: string
+          p_payload: Json
+          p_stage: string
+          p_transition_id: string
+        }
+        Returns: Json
+      }
+      world_quest_transition_claim: {
+        Args: { p_terminal_event_id: string }
+        Returns: Json
+      }
+      world_quest_transition_claim_next: { Args: never; Returns: Json }
+      world_quest_transition_commit: {
+        Args: { p_fence: string; p_proposal: Json; p_transition_id: string }
+        Returns: Json
+      }
+      world_quest_transition_fail: {
+        Args: {
+          p_failure_code: string
+          p_fence: string
+          p_transition_id: string
+        }
+        Returns: Json
+      }
+      world_quest_transition_heartbeat: {
+        Args: { p_fence: string; p_transition_id: string }
+        Returns: Json
+      }
+      world_retire_generated_entity: {
+        Args: {
+          p_capability_id: string
+          p_entity_id: string
+          p_input_fingerprint: string
+          p_reason?: string
+          p_save_id: string
+          p_warning_id: string
+        }
+        Returns: Json
+      }
+      world_retry_procedural_npc_package_materialization: {
+        Args: { p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_runtime_art_accept: {
+        Args: {
+          p_attempt: number
+          p_fence: string
+          p_job_id: string
+          p_runtime_key: string
+          p_sha256: string
+        }
+        Returns: Json
+      }
+      world_runtime_art_authorize_delivery: {
+        Args: { p_entity_id: string; p_render_id: string; p_save_id: string }
+        Returns: Json
+      }
+      world_runtime_art_claim_next: {
+        Args: { p_lease_seconds?: number }
+        Returns: Json
+      }
+      world_runtime_art_fail: {
+        Args: {
+          p_attempt: number
+          p_fence: string
+          p_job_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
+      world_runtime_art_projection: {
+        Args: { p_save_id: string }
+        Returns: Json
+      }
+      world_runtime_art_replace_accepted: {
+        Args: { p_job_id: string; p_runtime_key: string; p_sha256: string }
+        Returns: Json
+      }
+      world_runtime_art_service_runtime_key: {
+        Args: { p_render_id: string }
+        Returns: Json
+      }
+      world_runtime_art_set_appearance: {
+        Args: {
+          p_appearance_version: string
+          p_entity_id: string
+          p_public_appearance: string
+          p_save_id: string
+        }
+        Returns: undefined
+      }
+      world_settlement_checkpoint: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_model?: string
+          p_payload: Json
+          p_prompt_version?: string
+          p_settlement_id: string
+          p_stage: string
+          p_usage?: Json
+        }
+        Returns: Json
+      }
+      world_settlement_claim: {
+        Args: { p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_claim_next: { Args: never; Returns: Json }
+      world_settlement_commit_canon: {
+        Args: {
+          p_event: Json
+          p_fence: string
+          p_job_id: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_commit_mutation: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_proposal_fingerprint: string
+          p_public_digest: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_commit_procedural_world: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_commit_social_encounter: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_proposal: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_complete: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_output?: Json
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_complete_news: {
+        Args: { p_fence: string; p_job_id: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_enqueue: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_input_snapshot: Json
+          p_input_version: string
+          p_save_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_fail: {
+        Args: {
+          p_failure_code: string
+          p_fence: string
+          p_job_id: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_heartbeat: {
+        Args: { p_fence: string; p_settlement_id: string }
+        Returns: Json
+      }
+      world_settlement_safe_result: {
+        Args: {
+          p_fence: string
+          p_job_id: string
+          p_kind: string
+          p_public_digest: string
+          p_settlement_id: string
+        }
+        Returns: Json
+      }
+      world_settlement_status: {
+        Args: { p_save_id: string; p_settlement_id?: string }
         Returns: Json
       }
     }

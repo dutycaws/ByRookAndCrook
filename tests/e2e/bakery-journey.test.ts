@@ -88,6 +88,12 @@ test('harvested ingredients become persistent food through the reload-safe baker
     await expect(page.getByText('Resplendent Hearth Loaf', { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('img', { name: 'Bakery environment artwork could not be loaded' })).toBeVisible();
     await page.getByRole('link', { name: 'Offer it at the bar' }).click();
+    await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
+    const lira = page
+      .getByRole('group', { name: 'Scene characters' })
+      .getByRole('button', { name: 'Speak with Lira Nightwind: Lira Nightwind' });
+    await lira.click();
+    await expect(lira).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('radio', { name: 'Resplendent Hearth Loaf Resplendent' })).toBeChecked();
     const intentCards = page.getByRole('group', { name: 'Choose your intent' });
     await expect(intentCards).toContainText('Insight');

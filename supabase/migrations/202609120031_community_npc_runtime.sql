@@ -116,9 +116,6 @@ language sql stable security definer set search_path='' as $$
     select e.quality_index from private.world_npc_hospitality_events e
       join private.world_npc_instances w on w.id=e.instance_id
       where e.save_id=p_save and w.npc_id=p_npc and e.day_number=p_day
-    union all
-    select e.quality_index from public.hospitality_events e
-      where e.save_id=p_save and e.patron_key=p_npc::text and e.day_number=p_day
   ) supplied
 $$;
 
@@ -156,12 +153,12 @@ begin
   if p_kind='beverage' then
     select * into b from public.beverages where save_id=p_save and id=p_item;
     if not found or exists(select 1 from private.world_npc_hospitality_events where save_id=p_save and beverage_id=p_item)
-       or exists(select 1 from public.hospitality_events where save_id=p_save and beverage_id=p_item) then raise sqlstate 'PT409' using message='Drink is unavailable'; end if;
+      then raise sqlstate 'PT409' using message='Drink is unavailable'; end if;
     v_name:=b.name; v_quality:=b.quality_index;
   else
     select * into f from public.foods where save_id=p_save and id=p_item;
     if not found or exists(select 1 from private.world_npc_hospitality_events where save_id=p_save and food_id=p_item)
-       or exists(select 1 from public.hospitality_events where save_id=p_save and food_id=p_item) then raise sqlstate 'PT409' using message='Food is unavailable'; end if;
+      then raise sqlstate 'PT409' using message='Food is unavailable'; end if;
     v_name:=f.name; v_quality:=f.quality_index;
   end if;
   v_delta:=case when v_quality>=4 then 2 when v_quality>=2 then 1 when v_quality=1 then -1 else -2 end;
@@ -217,7 +214,7 @@ begin
     if p_intent_card_id is not null then
       select * into c from public.intent_cards where id=p_intent_card_id and save_id=s.id;
       if not found or exists(select 1 from private.world_npc_intent_card_plays where save_id=s.id and card_id=p_intent_card_id)
-        or exists(select 1 from public.intent_card_plays where save_id=s.id and card_id=p_intent_card_id) then raise sqlstate 'PT409' using message='Intent card is unavailable'; end if;
+        then raise sqlstate 'PT409' using message='Intent card is unavailable'; end if;
     end if;
     insert into private.world_npc_dialogue_turns(id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,intent_card_id,offering_kind,offering_item_id,source_revision,day_number,status,lease_until)
     values(p_turn_id,s.id,w.id,w.npc_id,w.version_id,p_actor,p_message,p_expected_sequence,p_intent_card_id,p_offering_kind,p_offering_item_id,s.revision,s.current_day,'processing',now()+interval '120 seconds') returning * into t;
@@ -378,9 +375,9 @@ language sql stable security definer set search_path='' as $$
   ),
   offerings as (
     select jsonb_build_object(
-      'beverages',coalesce((select jsonb_agg(jsonb_build_object('id',b.id,'kind','beverage','name',b.name,'qualityIndex',b.quality_index) order by b.created_at desc,b.id) from public.beverages b join owned s on s.id=b.save_id where not exists(select 1 from public.hospitality_events h where h.save_id=b.save_id and h.beverage_id=b.id) and not exists(select 1 from private.world_npc_hospitality_events h where h.save_id=b.save_id and h.beverage_id=b.id)),'[]'::jsonb),
-      'foods',coalesce((select jsonb_agg(jsonb_build_object('id',f.id,'kind','food','name',f.name,'qualityIndex',f.quality_index) order by f.created_at desc,f.id) from public.foods f join owned s on s.id=f.save_id where not exists(select 1 from public.hospitality_events h where h.save_id=f.save_id and h.food_id=f.id) and not exists(select 1 from private.world_npc_hospitality_events h where h.save_id=f.save_id and h.food_id=f.id)),'[]'::jsonb),
-      'intentCards',coalesce((select jsonb_agg(jsonb_build_object('id',c.id,'cardKey',c.card_key,'displayName',cc.display_name,'description',cc.description,'tier',c.tier) order by c.created_at,c.id) from public.intent_cards c join owned s on s.id=c.save_id join public.intent_card_catalog cc on cc.card_key=c.card_key and cc.version=c.catalog_version where not exists(select 1 from public.intent_card_plays p where p.save_id=c.save_id and p.card_id=c.id) and not exists(select 1 from private.world_npc_intent_card_plays p where p.save_id=c.save_id and p.card_id=c.id)),'[]'::jsonb)
+      'beverages',coalesce((select jsonb_agg(jsonb_build_object('id',b.id,'kind','beverage','name',b.name,'qualityIndex',b.quality_index) order by b.created_at desc,b.id) from public.beverages b join owned s on s.id=b.save_id where not exists(select 1 from private.world_npc_hospitality_events h where h.save_id=b.save_id and h.beverage_id=b.id)),'[]'::jsonb),
+      'foods',coalesce((select jsonb_agg(jsonb_build_object('id',f.id,'kind','food','name',f.name,'qualityIndex',f.quality_index) order by f.created_at desc,f.id) from public.foods f join owned s on s.id=f.save_id where not exists(select 1 from private.world_npc_hospitality_events h where h.save_id=f.save_id and h.food_id=f.id)),'[]'::jsonb),
+      'intentCards',coalesce((select jsonb_agg(jsonb_build_object('id',c.id,'cardKey',c.card_key,'displayName',cc.display_name,'description',cc.description,'tier',c.tier) order by c.created_at,c.id) from public.intent_cards c join owned s on s.id=c.save_id join public.intent_card_catalog cc on cc.card_key=c.card_key and cc.version=c.catalog_version where not exists(select 1 from private.world_npc_intent_card_plays p where p.save_id=c.save_id and p.card_id=c.id)),'[]'::jsonb)
     ) value
   ),
   recent as (

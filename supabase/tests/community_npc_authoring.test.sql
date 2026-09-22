@@ -75,10 +75,12 @@ set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000041';
 select public.npc_author_save((select npc_id from pg_temp.authoring_ids),3,(select sheet from pg_temp.authoring_sheet));
 select throws_ok(format('select public.npc_author_select_scene(%L::uuid,4,%L::uuid)',(select npc_id from pg_temp.authoring_ids),(select (value#>>'{candidates,0,assetId}')::uuid from pg_temp.stale_scene_done)),'PT409',null,'a scene candidate from an older draft cannot be selected');
-create temporary table pg_temp.sandbox as select public.npc_author_sandbox_start((select npc_id from pg_temp.authoring_ids),4,'What do you know about the old road?') value;
+create temporary table pg_temp.sandbox as select public.npc_author_sandbox_start((select npc_id from pg_temp.authoring_ids),4) value;
+create temporary table pg_temp.sandbox_turn as
+  select public.npc_author_sandbox_send((select (value->>'sandboxId')::uuid from pg_temp.sandbox),'What do you know about the old road?') value;
 reset role;
 set local request.jwt.claim.role='service_role';
-select public.npc_author_sandbox_complete((select (value->>'jobId')::uuid from pg_temp.sandbox),'The old road is quiet, but I still watch it.');
+select public.npc_author_sandbox_complete((select (value->>'jobId')::uuid from pg_temp.sandbox_turn),'The old road is quiet, but I still watch it.');
 reset request.jwt.claim.role;
 
 set local role authenticated;

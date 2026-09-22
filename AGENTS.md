@@ -4,6 +4,10 @@ By Rook and Crook is in rapid prototyping. There is no production system. Treat 
 
 Always prefer using locally-defined agent definitions
 
+## Codebase navigation
+
+For codebase navigation, activate the current repository with Serena and read its initial instructions. Prefer Serena’s symbol and reference tools for cross-file investigation. Continue using repository-standard editing and verification tools for changes.
+
 ## Ticket workflow
 
 For every ticket, start with the agent-organizer to break down a ticket and delegate work to a team of sub-agents with bounded, non-overlapping responsibilities. Give each sub-agent enough ticket and repository context to complete its assignment, and use their findings to prevent long-running implementation context from becoming stale or incomplete.

@@ -26,15 +26,20 @@ Single-use card play is an explicit pilot default. A reusable deck, hand/draw/di
 
 ## Persistence and authorization
 
-Migration `202609070003_patron_serving_slice.sql` adds gold to saves and creates:
-
-- `patron_catalog`: static versioned pilot content and prices.
-- `patron_states`: relationship and story progress for a patron within one save. Rows are first inserted by a successful serving command; GET only projects initial defaults.
-- `serving_events`: immutable receipt, beverage/card consumption reference, gold and relationship deltas, story event, day, and committed revision. Unique `(save_id, beverage_id)` and `(save_id, card_id)` prevent reuse; composite foreign keys prevent cross-save references.
+The current V2 resident-package lineage stores authored NPC state in immutable
+`npc_version_resident_packages`, pins each save's materialized residents through
+`world_resident_package_pins`, and records hospitality in the private world
+event ledger. Beverage, food, and intent-card references remain unique within
+that ledger so a single item cannot be consumed twice.
 
 `get_bar_snapshot()` is a single SQL statement under player RLS. It returns the owned balance/revision, patrons, unserved beverages, unplayed cards, and the latest 20 serving receipts. The brewery retains production history, including bottles later served and cards later played. No historical rows are deleted as consumption.
 
-`serve_beverage(...)` derives identity from `auth.uid()`, locks the owned save, checks typed receipt inputs before revision/availability checks, then calculates effects from saved quality and catalog/card values. Patron state, gold, revision, item consumption, and the receipt share one transaction. Player roles have select-only access; trusted service-role fixtures are never imported by the app runtime.
+`npc_serve_hospitality(...)` derives identity from `auth.uid()`, locks the owned
+save, validates the resident package and selected inventory, and commits the
+relationship effect, gold, revision, item consumption, and receipt in one
+transaction. Player roles have select-only access to the underlying private
+world state; trusted service-role fixtures are never imported by the app
+runtime.
 
 Lira/Torvin defaults appear for existing taverns without reseeding gardens or resetting accounts. The migration was applied to the running local database with `supabase migration up --local`.
 

@@ -114,11 +114,13 @@ References: [function calling](https://developers.openai.com/api/docs/guides/fun
 
 ## Implementation and verification map
 
-- Content: `supabase/content/npcs.json`, `scripts/npc-content.ts`.
+- First-party content: one editable, canonical JSON catalog per identity in `supabase/content/first-party-npcs/*.json`. Each active release uses `npc-sheet-v2` and declares only server-issued capability option IDs.
+- Publication: `npm run npc:catalog:generate` deterministically writes the executable catalog migration; `npm run npc:catalog:check` verifies that the generated migration still exactly represents the JSON sources.
+- Resident packages: the server derives an immutable version-resident package from the selected release, its validated personality schema and initial profile, and its capability options. The shared materializer pins that package before creating a resident; dialogue and overnight rules read the pin rather than a mutable pilot registry.
 - Contracts/orchestration: `src/lib/game/dialogue.ts`, `src/lib/server/dialogue/`.
 - Persistence/rules: the base dialogue migrations plus additive `202609080013_intent_hospitality_v2.sql`, `202609080014_dialogue_interaction_v2.sql` and the idempotency correction in `202609080015_intent_hospitality_corrections.sql`.
 - Interface: `/bar`, `/api/dialogue`, `/api/dialogue/[turnId]`.
-- Deterministic verification: `supabase/tests/npc_dialogue.test.sql`, `tests/integration/dialogue-rpc.test.ts`, `tests/unit/dialogue.test.ts`, `tests/e2e/dialogue-journey.test.ts`.
+- Deterministic verification: `supabase/tests/resident_evolution_dialogue_projection.test.sql`, `supabase/tests/npc_resident_packages.test.sql`, `supabase/tests/npc_materializer_cutover.test.sql`, `tests/integration/dialogue-rpc.test.ts`, `tests/unit/dialogue.test.ts`, `tests/e2e/dialogue-journey.test.ts`.
 - Live evaluation and review rubric: [evaluation cases](evaluations/npc-dialogue.md).
 - Operations and authoring: [development runbook](development.md).
 

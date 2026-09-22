@@ -61,6 +61,8 @@
 
   onMount(() => {
     const reposition = () => void positionMenu();
+    const resizeObserver = new ResizeObserver(reposition);
+    if (menu) resizeObserver.observe(menu);
     let frame = 0;
     const followAnchor = () => { void positionMenu(); frame = requestAnimationFrame(followAnchor); };
     frame = requestAnimationFrame(followAnchor);
@@ -68,7 +70,7 @@
     window.addEventListener('scroll', reposition, true);
     document.addEventListener('pointerdown', outside, true);
     void focusPane();
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', reposition); window.removeEventListener('scroll', reposition, true); document.removeEventListener('pointerdown', outside, true); };
+    return () => { resizeObserver.disconnect(); cancelAnimationFrame(frame); window.removeEventListener('resize', reposition); window.removeEventListener('scroll', reposition, true); document.removeEventListener('pointerdown', outside, true); };
   });
 
   function signature(kind: GardenCommandKind, payload: GardenCommandPayload | null) { return `${kind}:${JSON.stringify(payload)}`; }
@@ -80,26 +82,30 @@
     if (!node || !viewport || !selected) return;
     const a = node.getBoundingClientRect(); const v = viewport.getBoundingClientRect();
     if (a.right < v.left || a.left > v.right || a.bottom < v.top || a.top > v.bottom) { dismiss(); return; }
+    const boundary = {
+      left: 0, top: 64,
+      right: window.innerWidth, bottom: window.innerHeight
+    };
     const width = menu?.offsetWidth ?? 245; const height = menu?.offsetHeight ?? 220;
     const parentWidth = menu?.querySelector<HTMLElement>('[data-garden-menu-parent]')?.offsetWidth ?? 154;
     const cascadeWidth = pane === 'root' ? width : width + parentWidth + 10;
     const compactViewport = window.matchMedia('(max-width: 620px)').matches;
-    const mobile = compactViewport || cascadeWidth + 16 > v.width;
+    const mobile = compactViewport || cascadeWidth + 16 > boundary.right - boundary.left;
     let left = a.right + 10; let top = a.top - 8; let flipped = false;
     if (!mobile && pane !== 'root') {
       const placeLeft = v.right - a.right < a.left - v.left;
       if (placeLeft) {
-        left = Math.max(v.left + 8, Math.min(a.left - width - 10, v.right - width - parentWidth - 18));
+        left = Math.max(boundary.left + 8, Math.min(a.left - width - 10, boundary.right - width - parentWidth - 18));
         flipped = true;
       } else {
-        left = Math.max(v.left + parentWidth + 18, Math.min(a.right + 10, v.right - width - 8));
+        left = Math.max(boundary.left + parentWidth + 18, Math.min(a.right + 10, boundary.right - width - 8));
       }
     } else {
-      if (mobile || left + width > v.right - 8) left = Math.max(v.left + 8, a.left - width - 10);
-      if (mobile || left < v.left + 8) { left = Math.max(v.left + 8, Math.min(a.left, v.right - width - 8)); top = Math.min(v.bottom - height - 8, a.bottom + 8); }
+      if (mobile || left + width > boundary.right - 8) left = Math.max(boundary.left + 8, a.left - width - 10);
+      if (mobile || left < boundary.left + 8) { left = Math.max(boundary.left + 8, Math.min(a.left, boundary.right - width - 8)); top = Math.min(boundary.bottom - height - 8, a.bottom + 8); }
       flipped = !mobile && left < a.left;
     }
-    top = Math.max(v.top + 8, Math.min(top, v.bottom - height - 8));
+    top = Math.max(boundary.top + 8, Math.min(top, boundary.bottom - height - 8));
     position = { left, top, mobile, flipped };
   }
   function outside(event: PointerEvent) {
@@ -210,8 +216,8 @@
 {/if}
 
 <style>
-  .garden-action-menu { position: fixed; z-index: 60; width: min(17.5rem, calc(100vw - 1rem)); overflow: visible; color: #ecd79f; font-family: Cinzel,serif; }
-  .menu-card { position: relative; z-index: 1; max-height: min(75vh, 30rem); overflow-y: auto; padding: .6rem; border: 1px solid #b1863c; border-radius: 4px; background: linear-gradient(135deg,#241708f7,#100a05fa); box-shadow: 0 12px 30px #000b, inset 0 0 0 1px #523516; }
+  .garden-action-menu { position: fixed; z-index: 60; width: min(17.5rem, calc(100vw - 1rem)); max-height: calc(100vh - 1rem); overflow: visible; color: #ecd79f; font-family: Cinzel,serif; }
+  .menu-card { box-sizing: border-box; position: relative; z-index: 1; max-height: min(75vh, calc(100vh - 1rem), 30rem); overflow-y: auto; padding: .6rem; border: 1px solid #b1863c; border-radius: 4px; background: linear-gradient(135deg,#241708f7,#100a05fa); box-shadow: 0 12px 30px #000b, inset 0 0 0 1px #523516; }
   .parent-pane { position:absolute; right:calc(100% + 10px); top:0; z-index:0; display:grid; gap:.3rem; width:8.5rem; padding:.55rem; border:1px solid #956c2b; border-radius:4px; background:#160d06f5; box-shadow:0 8px 20px #0009; } .parent-pane .eyebrow { margin:0 0 .2rem; } .parent-pane button { min-height:29px; border:1px solid #5e421d; color:#d9bf80; background:#211407; font:inherit; font-size:.65rem; text-align:left; cursor:pointer; } .parent-pane button:hover,.parent-pane button:focus-visible { background:#624518; outline:1px solid #f9e1a0; } .flipped .parent-pane { right:auto; left:calc(100% + 10px); }
   header { display:flex; align-items:center; min-height: 24px; gap:.4rem; border-bottom:1px solid #5c401d; } .eyebrow { margin-right:auto; color:#cda54e; font-size:.62rem; letter-spacing:.1em; } .dismiss,.back,.plain { border:0; color:#dcc384; background:transparent; cursor:pointer; } .dismiss { font-size:1.2rem; } .back { font-size:.7rem; }
   h2 { margin:.55rem 0; color:#f3d991; font-size:.92rem; } .menu-actions { display:grid; gap:.35rem; } .menu-actions > button,.garden-action-menu form > button { display:flex; justify-content:space-between; width:100%; min-height:38px; padding:.45rem .55rem; border:1px solid #765324; color:#ead39b; background:#201407; font:inherit; font-size:.72rem; cursor:pointer; text-align:left; } .menu-actions button:hover,.menu-actions button:focus-visible,.garden-action-menu form > button:hover,.garden-action-menu form > button:focus-visible { background:#5b3f16; outline:1px solid #ffe9a8; outline-offset:1px; } .harvest-action :global(button) { width:100%; } form,label { display:grid; gap:.45rem; } label { color:#c9ad70; font-size:.7rem; } .check { display:flex; align-items:center; } select,input { min-height:34px; border:1px solid #765324; color:#f0dca8; background:#100a05; } output { float:right; color:#f4dc96; } input[type='range'] { width:100%; accent-color:#c6963d; } .help { margin:.35rem 0 .6rem; color:#b29c72; font-family:Georgia,serif; font-size:.76rem; line-height:1.35; } .batch-row { display:flex; align-items:center; justify-content:space-between; gap:.4rem; margin-top:.55rem; } .batch-row form { flex:1; } .batch-row .plain { padding:.4rem; font-family:inherit; font-size:.67rem; text-decoration:underline; } dl { display:grid; gap:.3rem; margin:.45rem 0 .7rem; } dl div { display:flex; justify-content:space-between; gap:.5rem; font-size:.65rem; } dt { color:#a89161; } dd { max-width:58%; margin:0; overflow-wrap:anywhere; text-align:right; } .feedback,.error { margin:.55rem 0 0; padding:.4rem; border:1px solid #5d6939; color:#d4e0ad; font-family:Georgia,serif; font-size:.72rem; } .error { border-color:#9d4d3b; color:#ffd0ba; } .mobile { width:min(19rem, calc(100vw - 1rem)); } .mobile .parent-pane { display:none; }

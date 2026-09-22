@@ -7,6 +7,7 @@ import { getSupabaseConfig } from '$lib/server/config';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import {
   authorizedPortraitPreview,
+  DEFAULT_PORTRAIT_IMAGE_MODEL,
   ensurePrivatePortraitBuckets,
   purgePrivatePortrait,
   portraitProviderAvailability as availability,
@@ -18,6 +19,7 @@ import {
   claimPortraitGenerationAttempt, runPortraitGenerationAttempt,
   type PortraitAttemptOutcome, type PortraitBatchOutcome, type PortraitWorkerClient
 } from '$lib/server/community-npc-portraits/service';
+import { promptRegistryService } from '$lib/server/prompt-registry/service';
 
 /** Legacy bridge input retained while callers migrate from inline execution. */
 export type DispatchPortraitJob = { jobId: string; npcId: string; sheet: NpcSheet; controls: Partial<PortraitControls>; alternatives?: number; visualInputHash: string };
@@ -66,7 +68,7 @@ export async function syncPortraitProviderStatus(config: Record<string, string |
   if (!client) return { available: false, reason: 'service_unavailable' } as const;
   const result = await (client as unknown as RpcClient).rpc('npc_author_set_portrait_provider_status', {
     p_available: state.available, p_provider: state.available ? state.provider : (config.NPC_IMAGE_PROVIDER ?? 'openai'),
-    p_model: state.available ? state.model : (config.NPC_IMAGE_MODEL ?? 'gpt-image-2'),
+    p_model: state.available ? state.model : (config.NPC_IMAGE_MODEL ?? DEFAULT_PORTRAIT_IMAGE_MODEL),
     p_failure_code: state.available ? null : state.reason, p_expires_in_seconds: 60
   });
   if (result.error) return { available: false, reason: 'service_unavailable' } as const;
@@ -111,7 +113,7 @@ export async function drainPortraitGenerationQueue(limit = 8): Promise<PortraitA
     const attempt = await claimPortraitGenerationAttempt(client as unknown as PortraitWorkerClient);
     if (!attempt) break;
     outcomes.push(await runPortraitGenerationAttempt(client as unknown as PortraitWorkerClient, attempt, {
-      config, storage: client.storage as unknown as PrivatePortraitStorage
+      config, storage: client.storage as unknown as PrivatePortraitStorage, promptRegistry: promptRegistryService(client)
     }));
   }
   return outcomes;

@@ -1,86 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalNpcSheet, milestoneIntention, normalizeNpcName, validateNpcSheet, type NpcSheet } from '../../src/lib/game/npc-sheet';
-import { applyNpcSection, npcContentHash } from '../../src/lib/server/npc-content';
+import { createNpcSheet } from '../../src/lib/game/community-npc-ui';
+import { canonicalNpcSheet, milestoneIntention, normalizeNpcName, validateNpcSheet } from '../../src/lib/game/npc-sheet';
 
-function sheet(): NpcSheet {
-  return {
-    schemaVersion: 'npc-sheet-v1', rating: 'standard',
-    identity: {
-      name: 'Mara Reed', title: 'Roadside Scout',
-      shortDescription: 'A patient local scout who watches the old road.',
-      voice: 'Plain-spoken, observant, and careful with any promise she makes.'
-    },
-    appearance: {
-      physicalAppearance: 'A wiry human traveler with wind-burned cheeks and steady grey eyes.',
-      attire: 'A weathered green cloak over practical road leathers and worn boots.',
-      notableFeatures: 'A small brass compass hangs at her belt beside a field notebook.',
-      mood: 'Alert in crowds, at ease outdoors, and quietly amused by tavern boasting.'
-    },
-    personality: {
-      values: ['Reliable evidence'], likes: ['Quiet roads'], dislikes: ['Careless accusations'], boundaries: ['Will not endanger civilians']
-    },
-    lore: {
-      entities: [{ id: 'old-road', namespace: 'millhaven', name: 'Old Road', description: 'The wooded trade road east of Millhaven.' }],
-      npcReferences: [],
-      relationships: [{ subject: { kind: 'entity', entityId: 'old-road' }, description: 'Knows its hidden paths.', trustThreshold: 0 }],
-      facts: [{ id: 'first-patrol', category: 'history', text: 'Mara learned the road while carrying messages as a child.', trustThreshold: 25, entityRefs: ['old-road'], npcRefs: [] }]
-    },
-    skills: { scouting: 4, combat: 3, diplomacy: 2, trade: 1 },
-    campaign: {
-      durableGoal: 'Keep travel between Millhaven and its neighbors safe and dependable.',
-      milestones: [
-        {
-          id: 'map-road', title: 'Map the Old Road', outcome: 'Identify every unsafe stretch of the old road.',
-          motivation: 'Travelers need a dependable map before anyone can secure the route.', constraints: ['Protect uninvolved travelers'],
-          allowedTargets: ['old-road'], difficulty: 2,
-          successNews: 'Mara returns with a reliable map of the old road and its hazards.',
-          nonSuccessNews: 'Mara loses the trail, and the dangerous stretches remain unmapped.', retiredTargets: [], permanentLoss: null,
-          startingPlan: [{ action: 'prepare', approach: 'scouting' }, { action: 'attempt', approach: 'scouting' }]
-        },
-        {
-          id: 'secure-road', title: 'Secure the Route', outcome: 'Establish a lasting patrol along the old road.',
-          motivation: 'A map only matters if someone uses it to keep travelers safe.', constraints: ['Work with local people'],
-          allowedTargets: ['old-road'], difficulty: 3,
-          successNews: 'A lasting patrol now keeps watch along the old road.',
-          nonSuccessNews: 'The proposed patrol dissolves before it can secure the route.', retiredTargets: [], permanentLoss: null, startingPlan: null
-        }
-      ]
-    }
-  };
-}
+const sheet = () => structuredClone(createNpcSheet('Mara Reed'));
+const codes = (value: unknown) => validateNpcSheet(value).map((entry) => entry.code);
 
-describe('NpcSheet', () => {
-  it('accepts the shared campaign contract and derives the first intention', () => {
-    const value = sheet();
+describe('npc-sheet-v2', () => {
+  it('accepts the complete V2 contract and produces deterministic canonical content', () => {
+    const value = sheet(); const reordered = Object.fromEntries(Object.entries(value).reverse()) as typeof value;
     expect(validateNpcSheet(value)).toEqual([]);
-    expect(milestoneIntention(value, 0)).toMatchObject({ goal: value.campaign.milestones[0].outcome, targets: ['old-road'] });
-    expect(milestoneIntention(value, 1)).toBeNull();
-  });
-
-  it('enforces skill budget, campaign bounds, plan order, and references', () => {
-    const value = sheet();
-    value.skills.trade = 2;
-    value.campaign.milestones[0].startingPlan = [{ action: 'attempt', approach: 'scouting' }, { action: 'wait', approach: 'scouting' }];
-    value.lore.npcReferences = ['not-a-uuid'];
-    value.lore.facts.push({ ...value.lore.facts[0] });
-    value.lore.relationships[0].subject = { kind: 'entity', entityId: 'missing-place' };
-    expect(validateNpcSheet(value).map((entry) => entry.code)).toEqual(expect.arrayContaining(['skill_budget', 'plan_terminal_order', 'plan_terminal_missing', 'npc_reference', 'fact', 'relationship']));
-  });
-
-  it('normalizes names and hashes canonical content deterministically', () => {
-    const value = sheet();
-    const reordered = Object.fromEntries(Object.entries(value).reverse()) as unknown as NpcSheet;
+    expect(canonicalNpcSheet(value)).toBe(canonicalNpcSheet(reordered));
+    expect(canonicalNpcSheet(value)).toContain('"schemaVersion":"npc-sheet-v2"');
     expect(normalizeNpcName('  MÁRA   Reed ')).toBe('mára reed');
-    expect(canonicalNpcSheet(value)).toContain('"schemaVersion":"npc-sheet-v1"');
-    expect(npcContentHash(value)).toHaveLength(64);
-    expect(npcContentHash(value)).toBe(npcContentHash(structuredClone(value)));
-    expect(canonicalNpcSheet(reordered)).toBe(canonicalNpcSheet(value));
+    expect(milestoneIntention(value, 0)?.targets).toEqual(['old-road']);
   });
 
-  it('applies field assistance as a proposal without mutating the draft', () => {
-    const original = sheet();
-    const next = applyNpcSection(original, 'identity', { ...original.identity, title: 'Master Scout' });
-    expect(next.identity.title).toBe('Master Scout');
-    expect(original.identity.title).toBe('Roadside Scout');
+  it('enforces appearance silhouette and normalized palette values', () => {
+    const value = sheet(); value.appearance.silhouette = 'short'; value.appearance.palette = ['Forest-Green', 'forest-green', 'bad_value'];
+    expect(codes(value)).toEqual(expect.arrayContaining(['text_length', 'palette']));
+  });
+
+  it('enforces dimension grammar, normalization collisions, reserved prefixes, and every scalar bound', () => {
+    const value = sheet();
+    value.personality.dimensions = [
+      { ...value.personality.dimensions[0], key: 'world_state', label: '', negativeAnchor: '', positiveAnchor: '', initialValue: -101, volatility: .24, ordinaryChangeThreshold: 4, definingRuptureThreshold: 3 },
+      { ...value.personality.dimensions[1], key: 'world-state', initialValue: 101, volatility: Number.POSITIVE_INFINITY, ordinaryChangeThreshold: 201, definingRuptureThreshold: 201 }
+    ];
+    expect(codes(value)).toEqual(expect.arrayContaining(['dimension_key', 'dimension_text', 'dimension_value', 'dimension_volatility', 'dimension_threshold']));
+  });
+
+  it('requires 1–8 dimensions and valid declared collection caps', () => {
+    const value = sheet(); value.personality.dimensions = []; value.personality.collections[0].maximumEntries = 11;
+    expect(codes(value)).toEqual(expect.arrayContaining(['dimension_count', 'collection']));
+    value.personality.dimensions = Array.from({ length: 9 }, (_, index) => ({ ...sheet().personality.dimensions[0], key: `trait_${index}` }));
+    expect(codes(value)).toContain('dimension_count');
+  });
+
+  it('rejects undeclared, inactive, duplicate, reserved, and over-cap typed entries', () => {
+    const value = sheet();
+    value.personality.initialEntries = [
+      { ...value.personality.initialEntries[0], id: 'system_value', active: false as true },
+      { ...value.personality.initialEntries[0], id: 'system-value' },
+      { id: 'belief_runtime_only', kind: 'belief' as never, text: 'Not authorable.', core: false, active: true },
+      { ...value.personality.initialEntries[0], id: 'another_value' },
+      { ...value.personality.initialEntries[0], id: 'third_value' }
+    ];
+    value.personality.collections = [{ kind: 'value', maximumEntries: 1 }];
+    expect(codes(value)).toEqual(expect.arrayContaining(['entry_id', 'entry', 'required_entry_kind', 'collection_cap']));
+  });
+
+  it('requires value, boundary, preference, aversion, and voice trait entries', () => {
+    const value = sheet(); value.personality.initialEntries = value.personality.initialEntries.filter((entry) => entry.kind !== 'voice_trait');
+    expect(codes(value)).toContain('required_entry_kind');
   });
 });

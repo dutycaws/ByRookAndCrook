@@ -150,7 +150,7 @@ export interface BrewSession {
   startedAt: string;
   durationSeconds: number;
   countdownSeconds: number;
-  stirRulesVersion: 'rpm-v1' | 'guide-v2';
+  stirRulesVersion: 'guide-v2';
 }
 
 export interface Beverage {
@@ -384,7 +384,7 @@ export interface StartBrewReceipt {
   startedAt: string;
   durationSeconds: number;
   countdownSeconds: number;
-  stirRulesVersion: 'rpm-v1' | 'guide-v2';
+  stirRulesVersion: 'guide-v2';
   committedRevision: number;
   dayNumber: number;
 }
@@ -418,6 +418,7 @@ export interface CompleteBrewReceipt {
 export interface StartBakeCommand {
   saveId: string;
   ingredientBatchId: string;
+  recipeKey?: string;
   actionId: string;
   expectedRevision: number;
 }
@@ -498,6 +499,12 @@ export interface AdvanceDayReceipt {
   actionId: string;
   newDay: number;
   committedRevision: number;
+  /** Present only for day closes created after the evolving-world queue was added. */
+  worldSettlement?: {
+    settlementId: string;
+    status: 'queued';
+    dayNumber: number;
+  };
 }
 
 export function qualityLabel(index: number): string {
@@ -528,12 +535,10 @@ export function parseSnapshot(value: Json | undefined): GameSnapshot | null {
 
   const activeBrew = candidate.brewery.activeSession;
   if (activeBrew) {
-    const stirRulesVersion = activeBrew.stirRulesVersion ?? 'rpm-v1';
-    const countdownSeconds = activeBrew.countdownSeconds ?? 0;
-    const validTiming = (stirRulesVersion === 'guide-v2'
-      && activeBrew.durationSeconds === 15 && countdownSeconds === 2)
-      || (stirRulesVersion === 'rpm-v1'
-        && activeBrew.durationSeconds === 30 && countdownSeconds === 0);
+    const stirRulesVersion = activeBrew.stirRulesVersion;
+    const countdownSeconds = activeBrew.countdownSeconds;
+    const validTiming = stirRulesVersion === 'guide-v2'
+      && activeBrew.durationSeconds === 15 && countdownSeconds === 2;
     if (!validTiming) throw new Error('Invalid active brew timing');
     activeBrew.stirRulesVersion = stirRulesVersion;
     activeBrew.countdownSeconds = countdownSeconds;
@@ -659,12 +664,10 @@ function parseCommandReceipt<T extends { actionId: string; committedRevision: nu
 
 export function parseStartBrewReceipt(value: Json): StartBrewReceipt {
   const raw = parseCommandReceipt<StartBrewReceipt>(value);
-  const stirRulesVersion = raw.stirRulesVersion ?? 'rpm-v1';
-  const countdownSeconds = raw.countdownSeconds ?? 0;
-  const validTiming = (stirRulesVersion === 'guide-v2'
-    && raw.durationSeconds === 15 && countdownSeconds === 2)
-    || (stirRulesVersion === 'rpm-v1'
-      && raw.durationSeconds === 30 && countdownSeconds === 0);
+  const stirRulesVersion = raw.stirRulesVersion;
+  const countdownSeconds = raw.countdownSeconds;
+  const validTiming = stirRulesVersion === 'guide-v2'
+    && raw.durationSeconds === 15 && countdownSeconds === 2;
   if (!raw.sessionId || !raw.ingredientBatchId || !validTiming) {
     throw new Error('Invalid start brew receipt');
   }
@@ -715,6 +718,14 @@ export function parseAdvanceDayReceipt(value: Json): AdvanceDayReceipt {
   const receipt = parseCommandReceipt<AdvanceDayReceipt>(value);
   if (!Number.isInteger(receipt.newDay) || receipt.newDay < 2) {
     throw new Error('Invalid day transition receipt');
+  }
+  if (receipt.worldSettlement !== undefined) {
+    const settlement = receipt.worldSettlement;
+    if (!settlement || typeof settlement !== 'object' || Array.isArray(settlement)
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(settlement.settlementId)
+      || settlement.status !== 'queued' || !Number.isInteger(settlement.dayNumber) || settlement.dayNumber < 1) {
+      throw new Error('Invalid day transition receipt');
+    }
   }
   return receipt;
 }
