@@ -12,7 +12,8 @@ export const schemas = {
     subject: enumeration(['quest','personal','hospitality']), evidence: string, intention: { anyOf:[intentionSchema,{type:'null'}] } }),
   speak: object({ text: string }),
   review: object({ ok: { type:'boolean' }, issues: array(string) }),
-  remember: object({ memories: array(object({ kind: enumeration(['keeper_claim','npc_statement','promise','interaction']), text:string, quote:string, speaker:enumeration(['keeper','npc']) })) })
+  remember: object({ memories: array(object({ kind: enumeration(['keeper_claim','npc_statement','promise','interaction']), text:string, quote:string, speaker:enumeration(['keeper','npc']),
+    priorCommitmentId:{anyOf:[string,{type:'null'}]}, commitmentStatus:{anyOf:[enumeration(['unresolved','withdrawn','disputed','superseded']),{type:'null'}]} })) })
 };
 export type Stage = keyof typeof schemas;
 

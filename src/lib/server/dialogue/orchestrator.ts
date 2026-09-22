@@ -367,7 +367,9 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       if(!review.ok) throw new DialogueError('The reply could not be verified. Cancel this message and rephrase it.',503,'CONSISTENCY');
     }
     if(remember||decision.intention||decision.reaction) {
-      await generate('remember','remember',{keeper:input.message,npc:speech.text,npcName:base.name,decision});
+      const eligibleCommitments=speechWindow.context.flatMap(entry=>entry.category==='memories' && entry.data && typeof entry.data==='object'
+        ? ((entry.data as any).items ?? []).filter((item:any)=>item?.speaker==='npc' && item?.commitment_status==='unresolved').map((item:any)=>({id:item.id,quote:item.quote})) : []);
+      await generate('remember','remember',{keeper:input.message,npc:speech.text,npcName:base.name,decision,eligibleCommitments});
     }
     if(signal.aborted) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
     const committed=await client.rpc('npc_dialogue_complete',{p_actor:actor,p_turn_id:input.turnId,p_fence:fence}).abortSignal(signal);
