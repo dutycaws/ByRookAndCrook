@@ -2448,6 +2448,31 @@ export type Database = {
         }
         Returns: undefined
       }
+      world_npc_memory_schedule_closures: {
+        Args: { p_limit?: number }
+        Returns: number
+      }
+      world_npc_memory_summary_load: {
+        Args: { p_batch_ordinal: number; p_fence: string; p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_summary_mark_dispatched: {
+        Args: {
+          p_batch_ordinal: number
+          p_fence: string
+          p_job_id: string
+          p_provider_request_id?: string
+        }
+        Returns: undefined
+      }
+      world_npc_memory_summary_prepare_dispatch: {
+        Args: { p_batch_ordinal: number; p_fence: string; p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_summary_recover_dispatch: {
+        Args: { p_batch_ordinal: number; p_fence: string; p_job_id: string }
+        Returns: Json
+      }
       world_promote_supporting_actor: {
         Args: { p_entity_id: string; p_reason?: string; p_save_id: string }
         Returns: Json
