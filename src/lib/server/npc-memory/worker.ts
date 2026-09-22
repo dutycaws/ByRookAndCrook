@@ -9,7 +9,7 @@ function object(value: unknown): value is Record<string, unknown> { return !!val
 function claim(value: unknown): NpcMemoryClaim | null {
   if (!object(value)) return null;
   if (!['id', 'fence', 'saveId', 'instanceId', 'sourceId'].every((key) => typeof value[key] === 'string' && uuid.test(value[key] as string))
-    || !['dialogue_turn', 'quest_event'].includes(String(value.sourceKind)) || !Number.isSafeInteger(value.sourceVersion) || (value.sourceVersion as number) < 1
+    || !['dialogue_turn', 'quest_event', 'hospitality', 'resident_evolution'].includes(String(value.sourceKind)) || !Number.isSafeInteger(value.sourceVersion) || (value.sourceVersion as number) < 1
     || typeof value.sourceHash !== 'string' || !hash.test(value.sourceHash as string)) return null;
   return value as unknown as NpcMemoryClaim;
 }

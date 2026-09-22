@@ -7,7 +7,7 @@ export type NpcMemoryClaim = Readonly<{
   fence: string;
   saveId: string;
   instanceId: string;
-  sourceKind: 'dialogue_turn' | 'quest_event';
+  sourceKind: 'dialogue_turn' | 'quest_event' | 'hospitality' | 'resident_evolution';
   sourceId: string;
   sourceVersion: number;
   sourceHash: string;
@@ -22,7 +22,7 @@ export type NpcMemorySource = Readonly<{
 
 export type NpcMemoryArtifact = Readonly<{
   artifactKind: NpcMemoryArtifactKind;
-  sourceKind?: 'dialogue_turn' | 'quest_event' | 'memory_set';
+  sourceKind?: 'dialogue_turn' | 'quest_event' | 'hospitality' | 'resident_evolution' | 'memory_set';
   model?: string;
   contractHash?: string;
   disclosureClass?: 'player_visible' | 'npc_known' | 'npc_private' | 'system';

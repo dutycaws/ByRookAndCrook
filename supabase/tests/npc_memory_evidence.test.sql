@@ -61,7 +61,7 @@ select is((select public.npc_memory_retrieve_for_actor('18100000-0000-4000-8000-
   'selected dialogue evidence exposes its authoritative source id, version, hash, and kind');
 reset role;
 insert into private.world_npc_memories(turn_id,instance_id,kind,text,quote,speaker,importance,entity_refs,save_id,record_root_id,source_kind,source_id,source_version,source_hash,occurred_day,occurred_sequence)
-select '18100000-0000-4000-8000-000000000010',instance_id,'interaction','The quest dossier names an eastern route.','eastern route','keeper',2,'{}',save_id,
+select null,instance_id,'interaction','The quest dossier names an eastern route.','eastern route','keeper',2,'{}',save_id,
        '18100000-0000-4000-8000-000000000021','quest_event','18100000-0000-4000-8000-000000000099',7,repeat('b',64),1,0
 from pg_temp.memory_fixture;
 set local role service_role;
