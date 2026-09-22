@@ -10,6 +10,8 @@ const proposal = {
   version: 'quest-transition-v1', kind: 'next_authored_milestone', terminalEventId,
   milestoneId: 'milestone-2', plan: [{ action: 'prepare', approach: 'scouting' }, { action: 'attempt', approach: 'scouting' }]
 };
+const actorId='55555555-5555-4555-8555-555555555555';
+const emptyEvidence=(cutoff=1)=>({retrievalVersion:'npc-memory-evidence-v4',cutoffLedgerSequence:cutoff,semantic:{available:false,availability:'disabled',profile:null},items:[],bundles:[],sourceFallback:[],sourceManifest:[],coverage:{complete:true,sourceFallback:{total:0,included:0,truncated:false,complete:true},watermarks:[]}});
 
 function claim(checkpoints: unknown[] = []) {
   return {
@@ -50,6 +52,8 @@ function client(overrides: Record<string, unknown> = {}) {
       if (typeof result === 'function') return (result as any)(args);
       if (result) return result as any;
       if (name === 'world_quest_transition_heartbeat') return { data: { leaseUntil: later() }, error: null };
+      if (name === 'world_quest_transition_memory_scope') return { data: { actorId, instanceId, cutoffLedgerSequence: 1 }, error: null };
+      if (name === 'npc_memory_evidence_retrieve_for_actor') return { data: emptyEvidence(), error: null };
       if (name === 'world_quest_transition_commit') return { data: { status: 'completed', transitionId, terminalEventId, kind: 'next_authored_milestone' }, error: null };
       return { data: {}, error: null };
     }
@@ -67,6 +71,7 @@ function provider(values: Record<string, unknown>) {
       if (value instanceof Error) throw value;
       return { value, model: 'fixture-model', usage: { input: 3, output: 2 }, durationMs: 1, promptVersion: 'quest-transition-v1' };
     }
+    ,async countMemoryContext() { return {model:'fixture-model',counterId:'fixture-counter',inputTokens:3,durationMs:1}; }
   } as any;
 }
 
@@ -126,7 +131,7 @@ describe('quest transition worker', () => {
     expect(dossiers).toHaveLength(4);
     expect(new Set(dossiers.map((dossier: any) => dossier.fingerprint)).size).toBe(1);
     expect(dossiers[0]).toMatchObject({ version: 'quest-transition-memory-dossier-v1', manifest: { transitionId, terminalEventId, sourceFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }, coverage: { terminalEvent: true, eventHistory: 1 }, bytes: { frozenContext: expect.any(Number), dossier: expect.any(Number) } });
-    expect(dossiers[0].evidence).toBe((model.payloads[0] as any).frozenContext);
+    expect(dossiers[0].evidence).toMatchObject({ ...((model.payloads[0] as any).frozenContext), memoryContext: expect.objectContaining({ evidence: expect.objectContaining({retrievalVersion:'npc-memory-evidence-v4'}), budget:expect.objectContaining({inputTokens:3}) }) });
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ memoryContext: expect.objectContaining({ utf8Bytes: dossiers[0].bytes.dossier, reuse: 'fresh' }) })]));
     expect(JSON.stringify(events)).not.toContain('Steady and cautious');
   });

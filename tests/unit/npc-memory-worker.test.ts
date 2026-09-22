@@ -179,17 +179,17 @@ describe('npc memory worker', () => {
   });
 
   it('freezes a byte-accurate, source-hashed context artifact', () => {
-    const artifact = assembleNpcMemoryContext({ policyVersion: 'memory-v1', projectionVersion: 'speech-v1', tokenizer: { id: 'verified-test', count: (text) => [...text].length }, maxBytes: 1024, maxTokens: 1024, sources: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn' }], requiredSourceIds: [sourceId], payload: { text: 'e\u0301 👩‍🌾' } });
+    const artifact = assembleNpcMemoryContext({ policyVersion: 'memory-v1', projectionVersion: 'speech-v1', tokenizer: { id: 'verified-test', count: (text) => [...text].length }, maxBytes: 1024, maxTokens: 1024, sources: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn', ledgerSequence: 1 }], requiredSourceIds: [sourceId], payload: { text: 'e\u0301 👩‍🌾' } });
     expect(artifact.utf8Bytes).toBe(utf8Bytes(artifact.canonicalJson));
     expect(artifact.hash).toBe(sha256Hex(artifact.canonicalJson));
-    expect(artifact.canonicalJson).toBe(canonicalJson({ payload: { text: 'e\u0301 👩‍🌾' }, sourceManifest: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn' }], coverage: { required: [sourceId], included: [sourceId], missing: [], complete: true } }));
+    expect(artifact.canonicalJson).toBe(canonicalJson({ payload: { text: 'e\u0301 👩‍🌾' }, sourceManifest: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn', ledgerSequence: 1 }], coverage: { required: [sourceId], included: [sourceId], missing: [], complete: true } }));
     expect(Object.isFrozen(artifact.payload)).toBe(true);
   });
 
   it('uses one verified precomputed context count without calling a legacy tokenizer', () => {
     const legacyCount = vi.fn(() => { throw new Error('legacy tokenizer must not run'); });
     const input = { policyVersion: 'memory-v1', projectionVersion: 'speech-v1', maxBytes: 1024, maxTokens: 1024,
-      sources: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn' }], requiredSourceIds: [sourceId],
+      sources: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn', ledgerSequence: 1 }], requiredSourceIds: [sourceId],
       payload: { text: 'مرحبا 👩‍🌾' }, tokenCount: 37, tokenizerId: 'openai-responses-input-tokens-v1',
       counterId: 'openai-responses-input-tokens-v1', model: 'gpt-5.6-luna', revision: 0 };
     const artifact = assembleNpcMemoryContext({...input, tokenizer:{id:'legacy',count:legacyCount}} as any);

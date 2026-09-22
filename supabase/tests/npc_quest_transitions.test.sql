@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(45);
+select plan(44);
 
 select has_function('public','world_quest_transition_claim',array['uuid'],'service transition claim exists');
 select has_function('public','world_quest_transition_claim_next',array[]::text[],'service transition queue claim exists');

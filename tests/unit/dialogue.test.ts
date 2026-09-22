@@ -13,6 +13,7 @@ function rpcResult(data: unknown) {
     abortSignal: async () => ({ data, error: null })
   };
 }
+const emptyEvidence=(cutoff=0)=>({retrievalVersion:'npc-memory-evidence-v4',cutoffLedgerSequence:cutoff,semantic:{available:false,availability:'disabled',profile:null},items:[],bundles:[],sourceFallback:[],sourceManifest:[],coverage:{complete:true,sourceFallback:{total:0,included:0,truncated:false,complete:true},watermarks:[]}});
 
 function cognitionClient(base: Record<string, unknown>) {
   base.instanceId ??= npcId;
@@ -25,7 +26,7 @@ function cognitionClient(base: Record<string, unknown>) {
     rpc(name:string,args?:Record<string, unknown>) {
       if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
       if(name==='npc_dialogue_context') return rpcResult(args?.p_category==='base' ? base : evidence[String(args?.p_category)] ?? []);
-      if(name==='npc_memory_retrieve_for_actor') return rpcResult({cutoffSequence:args?.p_cutoff_sequence ?? null,items:[],sourceFallback:[],watermarks:[],sourceManifest:[],sourceManifestCoverage:{missingItemIds:[],complete:true}});
+      if(name==='npc_memory_evidence_retrieve_for_actor') return rpcResult(emptyEvidence(Number(args?.p_cutoff_ledger_sequence ?? 0)));
       if(name==='npc_dialogue_checkpoint') return rpcResult(null);
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed',reply:'Recorded.'});
       throw new Error(`Unexpected RPC ${name}`);

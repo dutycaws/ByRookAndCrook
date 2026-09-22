@@ -5,6 +5,7 @@ export type NpcMemorySourceManifest = Readonly<{
   version: number;
   hash: string;
   kind: string;
+  ledgerSequence: number;
 }>;
 export type NpcMemoryCoverage = Readonly<{
   required: readonly string[];
@@ -64,7 +65,7 @@ export function sha256Hex(value: string): string { return createHash('sha256').u
 
 type ContextPayloadInput = Pick<ContextAssemblyBase, 'sources'|'requiredSourceIds'|'payload'>;
 export function canonicalNpcMemoryContextPayload(input: ContextPayloadInput): string {
-  const sourceManifest=[...input.sources].map(source=>({...source})).sort((a,b)=>a.id.localeCompare(b.id)||a.version-b.version||a.hash.localeCompare(b.hash));
+  const sourceManifest=[...input.sources].map(source=>({...source})).sort((a,b)=>a.ledgerSequence-b.ledgerSequence||a.id.localeCompare(b.id)||a.version-b.version||a.hash.localeCompare(b.hash));
   const required=[...new Set(input.requiredSourceIds??[])].sort(); const included=[...new Set(sourceManifest.map(source=>source.id))].sort();
   const missing=required.filter(id=>!included.includes(id));
   return canonical({payload:input.payload,sourceManifest,coverage:{required,included,missing,complete:missing.length===0}});
@@ -99,7 +100,8 @@ export function assembleNpcMemoryContext(input: SynchronousContextAssembly | Ver
   if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1 || !Number.isSafeInteger(input.maxTokens) || input.maxTokens < 1) {
     throw new ContextAssemblyConfigurationError('NPC memory context budgets must be positive integers.');
   }
-  const sourceManifest = [...input.sources].map((source) => ({ ...source })).sort((a, b) => a.id.localeCompare(b.id) || a.version - b.version || a.hash.localeCompare(b.hash));
+  if (input.sources.some(source=>!Number.isSafeInteger(source.ledgerSequence) || source.ledgerSequence<0)) throw new ContextAssemblyConfigurationError('NPC memory source ledger provenance is invalid.');
+  const sourceManifest = [...input.sources].map((source) => ({ ...source })).sort((a, b) => a.ledgerSequence-b.ledgerSequence || a.id.localeCompare(b.id) || a.version - b.version || a.hash.localeCompare(b.hash));
   const required = [...new Set(input.requiredSourceIds ?? [])].sort();
   const included = [...new Set(sourceManifest.map((source) => source.id))].sort();
   const missing = required.filter((id) => !included.includes(id));

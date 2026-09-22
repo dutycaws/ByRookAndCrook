@@ -19,8 +19,11 @@ import { createSettlementProvider } from './provider';
 import { env } from '$env/dynamic/private';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { createHash } from 'node:crypto';
+import { retrieveNpcMemoryEvidence, type NpcMemoryEvidenceClient } from '$lib/server/npc-memory/retrieval';
+import { createNpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/provider';
+import type { NpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/contracts';
 
-type QuestTransitionCheckpoint = { stage: 'proposer' | 'critic' | 'repair' | 'final_critic'; payload: Record<string, unknown> };
+type QuestTransitionCheckpoint = { stage: 'memory_context' | 'proposer' | 'critic' | 'repair' | 'final_critic'; payload: Record<string, unknown> };
 type QuestTransitionClaim = {
   transitionId: string;
   terminalEventId: string;
@@ -32,7 +35,11 @@ type QuestTransitionClaim = {
   frozenContext: Record<string, unknown>;
   checkpoints: QuestTransitionCheckpoint[];
 };
-type QuestTransitionRuntime = SettlementRuntime;
+type QuestTransitionRuntime = SettlementRuntime & {
+  embeddingProvider?: NpcMemoryEmbeddingProvider;
+  /** A server-owned token counter/preflight.  No provider call is made without it. */
+  countMemoryContext?: (canonicalContext: string, signal: AbortSignal) => Promise<{ model:string; counterId:string; inputTokens:number; durationMs:number }>;
+};
 type QuestTransitionMemoryDossier = Readonly<{
   version: 'quest-transition-memory-dossier-v1';
   fingerprint: string;
@@ -97,8 +104,8 @@ function parseClaim(value: unknown): QuestTransitionClaim | { status: 'idle' } |
   if (!Number.isFinite(leaseUntilMs) || leaseUntilMs <= Date.now()) return null;
   const checkpoints: QuestTransitionCheckpoint[] = [];
   for (const raw of value.checkpoints) {
-    if (!object(raw) || !['proposer', 'critic', 'repair', 'final_critic'].includes(String(raw.stage)) || !object(raw.payload)) return null;
-    try { if (JSON.stringify(raw.payload).length > 16_384) return null; } catch { return null; }
+    if (!object(raw) || !['memory_context', 'proposer', 'critic', 'repair', 'final_critic'].includes(String(raw.stage)) || !object(raw.payload)) return null;
+    try { if (JSON.stringify(raw.payload).length > (raw.stage==='memory_context' ? 65_536 : 16_384)) return null; } catch { return null; }
     const stage = raw.stage as QuestTransitionCheckpoint['stage'];
     if (checkpoints.some((checkpoint) => checkpoint.stage === stage)) return null;
     checkpoints.push({ stage, payload: raw.payload });
@@ -162,9 +169,9 @@ function utf8Bytes(value: unknown): number { return new TextEncoder().encode(can
 function sourceVersions(value: unknown, path = '$', results: Array<{ path: string; id: string; version?: string; hash?: string }> = []): Array<{ path: string; id: string; version?: string; hash?: string }> {
   if (Array.isArray(value)) { value.forEach((item, index) => sourceVersions(item, `${path}[${index}]`, results)); return results; }
   if (!object(value)) return results;
-  const id = typeof value.id === 'string' ? value.id : undefined;
-  const version = typeof value.versionId === 'string' ? value.versionId : typeof value.version === 'string' ? value.version : undefined;
-  const hash = typeof value.packageHash === 'string' ? value.packageHash : typeof value.contentHash === 'string' ? value.contentHash : undefined;
+  const id = typeof value.id === 'string' ? value.id : typeof value.sourceId==='string' ? value.sourceId : undefined;
+  const version = typeof value.versionId === 'string' ? value.versionId : typeof value.version === 'string' ? value.version : Number.isSafeInteger(value.sourceVersion) ? String(value.sourceVersion) : undefined;
+  const hash = typeof value.packageHash === 'string' ? value.packageHash : typeof value.contentHash === 'string' ? value.contentHash : typeof value.sourceHash==='string' ? value.sourceHash : undefined;
   if (id && (version || hash || path === '$.terminalEvent')) results.push({ path, id, ...(version ? { version } : {}), ...(hash ? { hash } : {}) });
   Object.keys(value).sort().forEach((key) => sourceVersions(value[key], `${path}.${key}`, results));
   return results;
@@ -179,8 +186,10 @@ function freeze<T>(value: T): T {
  * model stage an explicit, replayable evidence dossier without re-querying a
  * mutable memory index on a later settlement attempt.
  */
-function memoryDossier(claim: QuestTransitionClaim): QuestTransitionMemoryDossier {
-  const evidence = claim.frozenContext;
+function memoryDossier(claim: QuestTransitionClaim, memoryContext?: Record<string, unknown>): QuestTransitionMemoryDossier {
+  // The historical terminal snapshot remains authoritative context; v4
+  // evidence is a separately frozen, source-manifested attachment.
+  const evidence = memoryContext ? {...claim.frozenContext,memoryContext} : claim.frozenContext;
   const versions = sourceVersions(evidence);
   const sourceFingerprint = createHash('sha256').update(canonical(evidence)).digest('hex');
   const manifest = { transitionId: claim.transitionId, terminalEventId: claim.terminalEventId, sourceFingerprint, sourceVersions: versions };
@@ -196,6 +205,51 @@ function memoryDossier(claim: QuestTransitionClaim): QuestTransitionMemoryDossie
   const bytes = { frozenContext: utf8Bytes(evidence), dossier: utf8Bytes(metadata) };
   const fingerprint = createHash('sha256').update(canonical({ ...metadata, bytes })).digest('hex');
   return freeze({ version: metadata.version, fingerprint, manifest: freeze(manifest), coverage: freeze(coverage), bytes: freeze(bytes), evidence });
+}
+
+const MEMORY_CONTEXT_BYTES=64*1024;
+const MEMORY_CONTEXT_TOKENS=16_000;
+function validMemoryContext(value: unknown): value is Record<string, unknown> {
+  if (!object(value) || !object(value.evidence) || typeof value.querySemantic!=='string' || !Number.isSafeInteger(value.cutoffLedgerSequence)
+    || typeof value.manifestHash!=='string' || !/^[0-9a-f]{64}$/i.test(value.manifestHash) || typeof value.contextFingerprint!=='string' || !/^[0-9a-f]{64}$/i.test(value.contextFingerprint) || !object(value.budget)) return false;
+  const budget=value.budget as Record<string,unknown>;
+  const evidence=value.evidence as Record<string,unknown>;
+  const manifest=value.sourceManifest;
+  if (!Array.isArray(manifest) || !Number.isSafeInteger(evidence.cutoffLedgerSequence) || evidence.cutoffLedgerSequence!==value.cutoffLedgerSequence
+    || createHash('sha256').update(canonical(manifest)).digest('hex')!==value.manifestHash || createHash('sha256').update(canonical(evidence)).digest('hex')!==value.contextFingerprint || utf8Bytes(evidence)!==budget.utf8Bytes) return false;
+  return Number.isSafeInteger(budget.utf8Bytes) && (budget.utf8Bytes as number)>=0 && (budget.utf8Bytes as number)<=MEMORY_CONTEXT_BYTES
+    && Number.isSafeInteger(budget.inputTokens) && (budget.inputTokens as number)>=0 && (budget.inputTokens as number)<=MEMORY_CONTEXT_TOKENS
+    && typeof budget.model==='string' && typeof budget.counterId==='string';
+}
+async function captureMemoryContext(client: SettlementWorkerClient, claim: QuestTransitionClaim, runtime: QuestTransitionRuntime, signal: AbortSignal): Promise<Record<string,unknown> | null> {
+  const replay=checkpoint(claim,'memory_context');
+  if (replay) return validMemoryContext(replay) ? replay : null;
+  const scope=await rpc(client,'world_quest_transition_memory_scope',{p_transition_id:claim.transitionId,p_fence:claim.fence});
+  if (!object(scope) || !uuid.test(String(scope.actorId)) || !uuid.test(String(scope.instanceId)) || !Number.isSafeInteger(scope.cutoffLedgerSequence)) {
+    throw new TransitionValidationError('Transition memory scope is unavailable.');
+  }
+  const evidenceClient: NpcMemoryEvidenceClient={rpc:async(name,args)=>{
+    const result=await client.rpc(name,args);
+    return result as any;
+  }};
+  const config=privateRuntimeEnvironment(env);
+  const embedding=runtime.embeddingProvider ?? (config.OPENAI_API_KEY&&config.NPC_EMBEDDING_MODEL&&config.NPC_EMBEDDING_DIMENSIONS ? createNpcMemoryEmbeddingProvider(config) : undefined);
+  const result=await retrieveNpcMemoryEvidence(evidenceClient,{actorId:scope.actorId as string,instanceId:scope.instanceId as string,view:'transition',cutoffLedgerSequence:scope.cutoffLedgerSequence as number,
+    query:`Quest transition ${claim.terminalEventId}`,knownRefs:[claim.terminalEventId],budget:{limit:16,candidateLimit:48,fallbackLimit:16},signal},embedding);
+  const raw=result.evidence as Record<string,unknown>;
+  if (!object(raw.coverage) || raw.coverage.complete!==true) throw new TransitionValidationError('Transition evidence coverage is incomplete.');
+  const canonicalEvidence=canonical(raw);
+  const bytes=utf8Bytes(canonicalEvidence);
+  if (bytes>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition evidence exceeds its byte budget.');
+  const counter=runtime.countMemoryContext ?? (runtime.provider as { countMemoryContext?: QuestTransitionRuntime['countMemoryContext'] } | undefined)?.countMemoryContext;
+  if (!counter) throw new TransitionValidationError('Transition evidence token counter is unavailable.');
+  const counted=await counter(canonicalEvidence,signal);
+  if (!string(counted.model,120)||!string(counted.counterId,120)||!Number.isSafeInteger(counted.inputTokens)||counted.inputTokens<0||counted.inputTokens>MEMORY_CONTEXT_TOKENS||!Number.isSafeInteger(counted.durationMs)||counted.durationMs<0) throw new TransitionValidationError('Transition evidence token count is invalid.');
+  const manifest=Array.isArray(raw.sourceManifest)?raw.sourceManifest:[];
+  const payload={evidence:raw,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence,sourceManifest:manifest,manifestHash:createHash('sha256').update(canonical(manifest)).digest('hex'),contextFingerprint:createHash('sha256').update(canonical(raw)).digest('hex'),budget:{utf8Bytes:bytes,inputTokens:counted.inputTokens,model:counted.model,counterId:counted.counterId,durationMs:counted.durationMs}};
+  if (utf8Bytes(payload)>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition memory artifact exceeds its byte budget.');
+  await rpc(client,'world_quest_transition_checkpoint',{p_transition_id:claim.transitionId,p_fence:claim.fence,p_stage:'memory_context',p_payload:payload});
+  return payload;
 }
 function dossierMeasurements(dossier: QuestTransitionMemoryDossier, reuse: 'fresh' | 'replayed'): { selectedRecordCount: number; sourceRecordCount: number; utf8Bytes: number; coverageGapCount: number; reuse: 'fresh' | 'replayed' } {
   return {
@@ -253,11 +307,16 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
   const provider = runtime.provider ?? createSettlementProvider(privateRuntimeEnvironment(env));
   const observability = runtime.observability;
   const correlationId = `quest-transition:${claim.transitionId}`;
-  const dossier = memoryDossier(claim);
-  const freshMemoryContext = dossierMeasurements(dossier, 'fresh');
-  const replayedMemoryContext = dossierMeasurements(dossier, 'replayed');
   let calls = 0;
   try {
+    // Capture before any model work. Reclaims replay memory_context exactly and
+    // therefore never touch retrieval, profile lookup, or embedding again.
+    if (!await guard.beat()) return {status:'lease_lost'};
+    const captured=await captureMemoryContext(client,claim,runtime,controller.signal);
+    if (captured===null) throw new TransitionValidationError('Transition memory context is malformed.');
+    const dossier = memoryDossier(claim,Object.keys(captured).length ? captured : undefined);
+    const freshMemoryContext = dossierMeasurements(dossier, checkpoint(claim,'memory_context') ? 'replayed' : 'fresh');
+    const replayedMemoryContext = dossierMeasurements(dossier, 'replayed');
     const registry = runtime.promptRegistry;
     if (!registry) throw new Error('Prompt registry is required for quest transition execution');
     const release = await registry.resolveForWork('quest_transition', claim.transitionId);

@@ -8,9 +8,14 @@ import { matchesSchema, schemas, type Stage } from './schemas';
 import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
 import type { PromptRegistryService } from '$lib/server/prompt-registry/service';
+import { retrieveNpcMemoryEvidence, type NpcMemoryEvidenceClient } from '$lib/server/npc-memory/retrieval';
+import { createNpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/provider';
+import type { NpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/contracts';
+import { env } from '$env/dynamic/private';
+import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 
 export class DialogueError extends Error { constructor(message:string,public status=500,public code='DIALOGUE_FAILED'){super(message);} }
-export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink; promptRegistry?: PromptRegistryService };
+export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink; promptRegistry?: PromptRegistryService; embeddingProvider?: NpcMemoryEmbeddingProvider };
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRIVATE_COGNITION_KEYS=new Set(['evolvingProfile','profileRevision','beliefs','currentSocial','social','pressure','roll','rolls','critic','privateIntent','privateCognition']);
 
@@ -39,12 +44,12 @@ function privateCognition(window: ContextWindow) {
 }
 
 type MemoryRetrieval = {
-  cutoffSequence: number | null;
+  cutoffLedgerSequence: number;
   items: unknown[];
   sourceFallback: unknown[];
   watermarks: unknown[];
-  sourceManifest: Array<{ id: string; version: number; hash: string; kind: string }>;
-  sourceManifestCoverage: { missingItemIds: string[]; complete: boolean };
+  sourceManifest: Array<{ sourceId: string; sourceVersion: number; sourceHash: string; sourceKind: string; ledgerSequence: number }>;
+  coverage: { complete: boolean; sourceFallback: { complete:boolean } };
 };
 type FrozenDialogueArtifact = NpcMemoryContextArtifact & Readonly<{
   revision: number;
@@ -56,19 +61,19 @@ const CONSEQUENTIAL_CONTEXT_TOKENS=16_000;
 const FROZEN_CONTEXT_STAGE='frozen_context';
 const frozenContextRevisionStage=(revision:number)=>`${FROZEN_CONTEXT_STAGE}:${revision}`;
 
-/** The 081 RPC already applies save/instance scope, disclosure policy, and cutoff. */
+/** v4 retrieval is the only dialogue evidence boundary: scoped, disclosure-safe, and immutable at its cutoff. */
 function memoryRetrieval(value: unknown): MemoryRetrieval {
   const raw=value && typeof value==='object' ? value as Record<string, unknown> : {};
-  const manifestCoverage=raw.sourceManifestCoverage;
+  const coverage=raw.coverage as Record<string,unknown> | undefined;
+  const fallbackCoverage=coverage?.sourceFallback as Record<string,unknown> | undefined;
   return {
-    cutoffSequence:typeof raw.cutoffSequence==='number' ? raw.cutoffSequence : null,
+    cutoffLedgerSequence:typeof raw.cutoffLedgerSequence==='number' ? raw.cutoffLedgerSequence : -1,
     items:Array.isArray(raw.items) ? raw.items : [],
     sourceFallback:Array.isArray(raw.sourceFallback) ? raw.sourceFallback : [],
-    watermarks:Array.isArray(raw.watermarks) ? raw.watermarks : []
-    ,sourceManifest:Array.isArray(raw.sourceManifest) ? raw.sourceManifest.filter((entry): entry is {id:string;version:number;hash:string;kind:string}=>!!entry&&typeof entry==='object'&&typeof (entry as any).id==='string'&&Number.isSafeInteger((entry as any).version)&&typeof (entry as any).hash==='string'&&typeof (entry as any).kind==='string') : [],
-    sourceManifestCoverage:manifestCoverage && typeof manifestCoverage==='object' && typeof (manifestCoverage as any).complete==='boolean'
-      ? {missingItemIds:Array.isArray((manifestCoverage as any).missingItemIds) ? (manifestCoverage as any).missingItemIds.filter((id:unknown): id is string=>typeof id==='string') : [],complete:(manifestCoverage as any).complete}
-      : {missingItemIds:[],complete:false}
+    watermarks:Array.isArray(coverage?.watermarks) ? coverage.watermarks : [],
+    sourceManifest:Array.isArray(raw.sourceManifest) ? raw.sourceManifest.filter((entry): entry is {sourceId:string;sourceVersion:number;sourceHash:string;sourceKind:string;ledgerSequence:number}=>!!entry&&typeof entry==='object'&&typeof (entry as any).sourceId==='string'&&Number.isSafeInteger((entry as any).sourceVersion)&&typeof (entry as any).sourceHash==='string'&&typeof (entry as any).sourceKind==='string'&&Number.isSafeInteger((entry as any).ledgerSequence)) : [],
+    coverage:coverage && typeof coverage.complete==='boolean' && fallbackCoverage && typeof fallbackCoverage.complete==='boolean'
+      ? {complete:coverage.complete,sourceFallback:{complete:fallbackCoverage.complete}} : {complete:false,sourceFallback:{complete:false}}
   };
 }
 
@@ -77,10 +82,10 @@ function memorySourceIds(retrieval: MemoryRetrieval): string[] {
   for (const item of retrieval.items) {
     if (!item || typeof item!=='object') continue;
     const record=item as Record<string, unknown>;
-    for (const key of ['id','record_root_id','source_id']) if (typeof record[key]==='string') ids.add(record[key]);
+    for (const key of ['id','recordRootId','sourceId']) if (typeof record[key]==='string') ids.add(record[key]);
   }
   for (const turn of retrieval.sourceFallback) {
-    if (turn && typeof turn==='object' && typeof (turn as Record<string, unknown>).turnId==='string') ids.add((turn as Record<string, string>).turnId);
+    if (turn && typeof turn==='object' && typeof (turn as Record<string, unknown>).sourceId==='string') ids.add((turn as Record<string, string>).sourceId);
   }
   return [...ids];
 }
@@ -97,7 +102,7 @@ function frozenArtifact(value: unknown, expected?: { cutoffSequence: number; con
     || typeof artifact.model!=='string' || !artifact.model || !Number.isSafeInteger(artifact.counterDurationMs) || artifact.counterDurationMs! < 0
     || !Number.isSafeInteger(artifact.cutoffSequence) || artifact.cutoffSequence! < 0 || artifact.view!=='speech'
     || !provenance || typeof provenance.contentVersion!=='string' || !provenance.contentVersion || !(provenance.profileRevision===null || (Number.isSafeInteger(provenance.profileRevision) && provenance.profileRevision>=0))
-    || !Array.isArray(artifact.sourceManifest) || !artifact.coverage?.complete) return null;
+    || !Array.isArray(artifact.sourceManifest) || !artifact.sourceManifest.every(source=>source && typeof source.id==='string' && Number.isSafeInteger(source.version) && typeof source.hash==='string' && typeof source.kind==='string' && Number.isSafeInteger(source.ledgerSequence) && source.ledgerSequence>=0) || !artifact.coverage?.complete) return null;
   if (expected && (artifact.cutoffSequence!==expected.cutoffSequence || provenance.contentVersion!==expected.contentVersion)) return null;
   const canonical=canonicalNpcMemoryContextPayload({sources:artifact.sourceManifest,requiredSourceIds:artifact.coverage.required,payload:artifact.payload as Record<string,unknown>});
   if (canonical!==artifact.canonicalJson || artifactUtf8Bytes(canonical)!==artifact.utf8Bytes || sha256Hex(canonical)!==artifact.hash) return null;
@@ -255,16 +260,26 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     const base=replayArtifact ? replayArtifact.payload.projections.private.base : checkpoints.base?.value ?? await retrieve('base') as any;
     if(!checkpoints.base) await checkpoint('base',{value:base,contentVersion:turn.content_version});
     const memoryQuery=initialMemoryQuery(input.message,base.recent);
+    const configuredEmbeddingProvider=options.embeddingProvider ?? (() => {
+      const config=privateRuntimeEnvironment(env);
+      return config.OPENAI_API_KEY && config.NPC_EMBEDDING_MODEL && config.NPC_EMBEDDING_DIMENSIONS ? createNpcMemoryEmbeddingProvider(config) : undefined;
+    })();
+    const evidenceClient: NpcMemoryEvidenceClient={
+      rpc: async (name,args,requestSignal) => {
+        const request=(client as any).rpc(name,args).abortSignal(requestSignal ?? signal);
+        return await request as any;
+      }
+    };
     async function retrieveMemory(query:string) {
       if (typeof base.instanceId!=='string') throw new DialogueError('The resident memory scope is unavailable. Please retry.',503,'CONTEXT_UNAVAILABLE');
-      const r=await client.rpc('npc_memory_retrieve_for_actor',{
-        p_actor:actor,p_instance_id:base.instanceId,p_query:query.slice(0,400),p_limit:12,
-        // The turn's expected sequence is captured before generation.  It is
-        // the immutable knowledge boundary for this turn, including retries.
-        p_cutoff_sequence:input.expectedConversationSequence,p_view:'speech'
-      }).abortSignal(signal);
-      if(r.error) throw databaseError(r.error);
-      return memoryRetrieval(r.data);
+      try {
+        const result=await retrieveNpcMemoryEvidence(evidenceClient,{actorId:actor,instanceId:base.instanceId,view:'speech',
+          cutoffLedgerSequence:input.expectedConversationSequence,query,knownRefs:[],budget:{limit:12,candidateLimit:24,fallbackLimit:16},signal},configuredEmbeddingProvider);
+        return memoryRetrieval(result.evidence);
+      } catch (error) {
+        if (error && typeof error==='object' && 'code' in error) throw databaseError({message:error instanceof Error?error.message:'Memory evidence is unavailable.',code:String((error as any).code)});
+        throw new DialogueError('The resident memory evidence is unavailable. Please retry.',503,'CONTEXT_UNAVAILABLE');
+      }
     }
     let artifact=replayArtifact;
     contextWasReplayed=!!artifact;
@@ -272,12 +287,15 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     if (artifact) for (const item of structuredClone(artifact.payload.projections.private.context)) { context.push(item); fetched.add(evidenceKey(item)); }
     let consequential=!!base.hospitality||!!base.playerIntent; let remember=false;
     function sourceManifestFor(evidence: any[]) {
-      const sources=new Map<string,{id:string;version:number;hash:string;kind:string}>();
+      const sources=new Map<string,{id:string;version:number;hash:string;kind:string;ledgerSequence:number}>();
       for(const item of evidence) {
         if(item?.category!=='memories') continue;
         const memory=memoryRetrieval(item.data);
-        if(!memory.sourceManifestCoverage.complete) throw new ContextBudgetError();
-        for(const source of memory.sourceManifest) sources.set(`${source.id}:${source.version}:${source.hash}:${source.kind}`,source);
+        if(!memory.coverage.complete) throw new ContextBudgetError();
+        for(const source of memory.sourceManifest) {
+          const normalized={id:source.sourceId,version:source.sourceVersion,hash:source.sourceHash,kind:source.sourceKind,ledgerSequence:source.ledgerSequence};
+          sources.set(`${normalized.id}:${normalized.version}:${normalized.hash}:${normalized.kind}:${normalized.ledgerSequence}`,normalized);
+        }
       }
       return [...sources.values()];
     }
@@ -307,8 +325,8 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     }
     if(!artifact) {
       const data=await retrieveMemory(memoryQuery);
-      if(!data.sourceManifestCoverage.complete) throw new ContextBudgetError();
-      const evidence={category:'memories',query:memoryQuery,sourceIds:memorySourceIds(data),contentVersion:'npc-memory-v1',data};
+      if(!data.coverage.complete) throw new ContextBudgetError();
+      const evidence={category:'memories',query:memoryQuery,sourceIds:memorySourceIds(data),contentVersion:'npc-memory-evidence-v4',data};
       context.push(evidence); fetched.add(evidenceKey(evidence));
       await checkpoint('memory',{value:evidence,cutoffSequence:input.expectedConversationSequence,view:'speech'});
       artifact=await freezeContext(0);
@@ -320,20 +338,22 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       consequential ||= selected.kind!=='informational'; remember ||= selected.remember;
       const evidenceName=`context${i}`;
       const evidence:any[]=checkpoints[evidenceName]?.value ?? [];
-      if(!checkpoints[evidenceName]) {
+      // A retry is bound to its persisted artifact.  It may finish unrecorded
+      // cognition, but it must never ask the mutable retrieval boundary again.
+      if(!checkpoints[evidenceName] && !contextWasReplayed) {
         for(const request of selected.requests.slice(0,3)) {
           const key=evidenceKey(request); if(fetched.has(key)) continue; fetched.add(key);
           const data=request.category==='memories'
             ? await retrieveMemory(request.query)
             : await retrieve(request.category,request.query);
-          if(request.category==='memories' && !memoryRetrieval(data).sourceManifestCoverage.complete) throw new ContextBudgetError();
+          if(request.category==='memories' && !memoryRetrieval(data).coverage.complete) throw new ContextBudgetError();
           const sourceIds:string[]=[];
           if (request.category==='memories') sourceIds.push(...memorySourceIds(memoryRetrieval(data)));
           else {
             const collect=(v:any)=>{if(!v||typeof v!=='object')return;if(typeof v.id==='string')sourceIds.push(v.id);for(const child of Object.values(v))collect(child);};
             collect(data);
           }
-          evidence.push({category:request.category,query:request.query.slice(0,request.category==='memories'?400:200),sourceIds,contentVersion:request.category==='memories'?'npc-memory-v1':turn.content_version,data});
+          evidence.push({category:request.category,query:request.query.slice(0,request.category==='memories'?400:200),sourceIds,contentVersion:request.category==='memories'?'npc-memory-evidence-v4':turn.content_version,data});
         }
         const evidenceCheckpoint={value:evidence,sourceArtifact:{revision:activeArtifact.revision,hash:activeArtifact.hash}};
         await checkpoint(evidenceName,evidenceCheckpoint);
@@ -368,7 +388,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     }
     if(remember||decision.intention||decision.reaction) {
       const eligibleCommitments=speechWindow.context.flatMap(entry=>entry.category==='memories' && entry.data && typeof entry.data==='object'
-        ? ((entry.data as any).items ?? []).filter((item:any)=>item?.speaker==='npc' && item?.commitment_status==='unresolved').map((item:any)=>({id:item.id,quote:item.quote})) : []);
+        ? ((entry.data as any).items ?? []).filter((item:any)=>item?.speaker==='npc' && item?.status==='unresolved').map((item:any)=>({id:item.id,quote:item.quote})) : []);
       await generate('remember','remember',{keeper:input.message,npc:speech.text,npcName:base.name,decision,eligibleCommitments});
     }
     if(signal.aborted) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');

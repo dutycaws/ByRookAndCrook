@@ -24,7 +24,7 @@ const memoryDossier = () => ({
 const proposal = () => ({ version: 'quest-transition-v1', kind: 'successor', terminalEventId: 'terminal-event-1', title: 'North road', objective: 'Trace the lost caravan.', motivation: 'The evidence points north.', constraints: ['Keep the village informed.'], targetRefs: ['millhaven'], difficulty: 2, plan: [{ action: 'prepare', approach: 'scouting' }, { action: 'attempt', approach: 'scouting' }] });
 function completed(value: unknown) { return new Response(JSON.stringify({ status: 'completed', usage: { input_tokens: 5, output_tokens: 3 }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(value) }] }] }), { status: 200 }); }
 function generate(stage: Parameters<ReturnType<typeof createSettlementProvider>['generate']>[0], payload: unknown) {
-  const provider = createSettlementProvider({ OPENAI_API_KEY: 'test-key' });
+  const provider = createSettlementProvider({ OPENAI_API_KEY: 'test-key',NPC_MODEL_INPUT_CAPACITY:'80000' });
   return provider.generate(stage, payload, new AbortController().signal, fixturePromptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
 }
 
@@ -41,28 +41,28 @@ describe('quest transition provider stages', () => {
 
   it('validates frozen proposer output and uses a strict proposal schema', async () => {
     const requests: any[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (_url, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return completed({ proposalJson: JSON.stringify(proposal()) }); }));
+    vi.stubGlobal('fetch', vi.fn(async (url, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return String(url).endsWith('/input_tokens') ? new Response(JSON.stringify({input_tokens:5}),{status:200}) : completed({ proposalJson: JSON.stringify(proposal()) }); }));
     await expect(generate('quest_transition_proposer', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier() })).resolves.toMatchObject({ value: { kind: 'successor' }, model: 'gpt-5.6-terra', promptVersion: 'quest-transition-v1' });
     expect(requests[0].text.format).toMatchObject({ name: 'world_quest_transition_proposer', strict: true, schema: { additionalProperties: false, required: ['proposalJson'], properties: { proposalJson: { maxLength: 6000 } } } });
     expect(requests[0].input[0].content).toContain('frozen transition context');
   });
 
   it('uses bounded critic instructions and rejects repairs or malformed payloads before fetch', async () => {
-    const fetch = vi.fn(async () => completed({ decision: 'repair', instructions: [{ code: 'plan_shape', path: 'plan' }] }));
+    const fetch = vi.fn(async (url) => String(url).endsWith('/input_tokens') ? new Response(JSON.stringify({input_tokens:5}),{status:200}) : completed({ decision: 'repair', instructions: [{ code: 'plan_shape', path: 'plan' }] }));
     vi.stubGlobal('fetch', fetch);
     await expect(generate('quest_transition_critic', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() })).resolves.toMatchObject({ value: { decision: 'repair' }, model: 'gpt-5.6-luna' });
     await expect(generate('quest_transition_final_critic', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() })).rejects.toMatchObject({ code: 'provider_malformed' });
     await expect(generate('quest_transition_repair', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal(), instructions: [{ code: 'not-real', path: 'plan' }] })).rejects.toMatchObject({ code: 'provider_malformed' });
     await expect(generate('quest_transition_proposer', { context: { ...context(), frozenTargetRefs: ['unknown'], extra: true }, frozenContext: frozenContext(), memoryDossier: memoryDossier() })).rejects.toMatchObject({ code: 'provider_malformed' });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(4);
   });
 
   it('accepts only the thirteen-key bounded snapshot and continuity repair codes', async () => {
-    const fetch = vi.fn(async () => completed({ decision: 'repair', instructions: [{ code: 'causal_continuity', path: 'causalContinuity' }] }));
+    const fetch = vi.fn(async (url) => String(url).endsWith('/input_tokens') ? new Response(JSON.stringify({input_tokens:5}),{status:200}) : completed({ decision: 'repair', instructions: [{ code: 'causal_continuity', path: 'causalContinuity' }] }));
     vi.stubGlobal('fetch', fetch);
     await expect(generate('quest_transition_critic', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() })).resolves.toMatchObject({ value: { decision: 'repair' } });
     await expect(generate('quest_transition_proposer', { context: context(), frozenContext: { ...frozenContext(), hospitality: [] }, memoryDossier: memoryDossier() })).rejects.toMatchObject({ code: 'provider_malformed' });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('rejects dossiers with missing metadata or unrecognized top-level fields before fetch', async () => {
