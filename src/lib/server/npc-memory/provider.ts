@@ -1,12 +1,31 @@
-import type { NpcMemorySummaryV2Provider, NpcMemorySummaryV2Prepared } from './contracts';
+import type { NpcMemoryEmbeddingPrepared, NpcMemoryEmbeddingProvider, NpcMemorySummaryV2Provider, NpcMemorySummaryV2Prepared } from './contracts';
 
 export class NpcMemorySummaryProviderError extends Error {
   constructor(public readonly code: 'provider_unavailable' | 'provider_failed' | 'provider_timeout' | 'provider_malformed', message: string) { super(message); }
 }
+export class NpcMemoryEmbeddingProviderError extends Error { constructor(public readonly code: 'provider_unavailable' | 'provider_failed' | 'provider_timeout' | 'provider_malformed', message: string) { super(message); } }
 const OUTPUT_RESERVE = 4_096;
 const TRANSPORT_LIMIT = 384 * 1024;
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+export function createNpcMemoryEmbeddingProvider(config: Record<string, string | undefined>): NpcMemoryEmbeddingProvider {
+  const key=config.OPENAI_API_KEY, model=config.NPC_EMBEDDING_MODEL, dimensions=Number(config.NPC_EMBEDDING_DIMENSIONS); const fail=(code: NpcMemoryEmbeddingProviderError['code']): never=>{throw new NpcMemoryEmbeddingProviderError(code,'Embedding provider failed.');};
+  const configured=(requested: string, requestedDimensions: number)=>{if (!key || !model || requested!==model || !Number.isSafeInteger(dimensions) || dimensions<1 || requestedDimensions!==dimensions) fail('provider_unavailable');};
+  return { preflight({ inputText, model: requested, dimensions: requestedDimensions }) {
+    configured(requested, requestedDimensions); const body={model:requested,input:inputText,dimensions:requestedDimensions,encoding_format:'float' as const};
+    if (!inputText.trim() || !requested.trim() || requested.length>120 || requestedDimensions>4096 || bytes(body)>TRANSPORT_LIMIT) fail('provider_malformed'); return freeze({body}) as NpcMemoryEmbeddingPrepared;
+  }, async embed(prepared, signal) {
+    const {body}=prepared; const {input: inputText,model: requested,dimensions: requestedDimensions}=body;
+    configured(requested, requestedDimensions); if (!Object.isFrozen(prepared)||!Object.isFrozen(body)||Object.keys(body).length!==4||body.encoding_format!=='float'||!inputText.trim()||!requested.trim()||requested.length>120||requestedDimensions<1||requestedDimensions>4096||bytes(body)>TRANSPORT_LIMIT) fail('provider_malformed');
+    const activeModel=model as string; let response: Response | undefined;
+    try { response=await fetch('https://api.openai.com/v1/embeddings',{method:'POST',headers:{Authorization:`Bearer ${key}`, 'Content-Type':'application/json'},body:JSON.stringify(body),signal}); } catch { fail(signal.aborted?'provider_timeout':'provider_failed'); }
+    if (!response) fail('provider_failed'); const activeResponse=response as Response;
+    if (!activeResponse.ok) fail(activeResponse.status===401||activeResponse.status===403?'provider_unavailable':'provider_failed'); let json: unknown; try { json=await activeResponse.json(); } catch { fail('provider_malformed'); }
+    if (!isObject(json)||Object.keys(json).length!==4||!['object','model','data','usage'].every((k)=>k in json)||json.object!=='list'||json.model!==activeModel||!Array.isArray(json.data)||json.data.length!==1||!isObject(json.data[0])||!isObject(json.usage)) fail('provider_malformed');
+    const providerJson=json as Record<string, unknown>, item=providerJson.data as Record<string, unknown>[], usage=providerJson.usage as Record<string, unknown>; if(Object.keys(item[0]).length!==3||!['object','index','embedding'].every((k)=>k in item[0])||Object.keys(usage).length!==2||!['prompt_tokens','total_tokens'].every((k)=>k in usage)||item[0].object!=='embedding'||item[0].index!==0||!Array.isArray(item[0].embedding)||(item[0].embedding as unknown[]).length!==dimensions||!Number.isSafeInteger(usage.prompt_tokens)||!Number.isSafeInteger(usage.total_tokens)||(usage.prompt_tokens as number)<0||(usage.total_tokens as number)<(usage.prompt_tokens as number)) fail('provider_malformed'); const vector=item[0].embedding as unknown[]; if(!vector.every((x)=>typeof x==='number'&&Number.isFinite(x))||vector.every((x)=>x===0)) fail('provider_malformed');
+    const id=activeResponse.headers.get('x-request-id'); if(!id||!/^[A-Za-z0-9._:-]{1,200}$/.test(id)) fail('provider_malformed'); return {vector:`[${(vector as number[]).join(',')}]`,model:activeModel,dimensions,providerRequestId:id as string,promptTokens:usage.prompt_tokens as number,totalTokens:usage.total_tokens as number};
+  }};
+}
 const freeze = <T>(value: T): T => { if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const child of Object.values(value as object)) freeze(child); } return value; };
 function resultSchema(maxSummaryChars: number, maxCitations: number) {
   const leaf = { type: 'object', additionalProperties: false, required: ['ordinal', 'sourceKind', 'sourceId', 'sourceVersion', 'sourceHash', 'ledgerSequence'], properties: { ordinal: { type: 'integer', minimum: 0 }, sourceKind: { type: 'string', minLength: 1 }, sourceId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' }, sourceVersion: { type: 'integer', minimum: 1 }, sourceHash: { type: 'string', pattern: '^[0-9a-f]{64}$' }, ledgerSequence: { type: 'integer', minimum: 0 } } };

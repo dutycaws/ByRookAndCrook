@@ -1,5 +1,5 @@
 import { canonicalJson, sha256Hex } from './context';
-import type { NpcMemoryArtifact, NpcMemoryClaim, NpcMemoryOutcome, NpcMemoryProcessorKind, NpcMemorySource, NpcMemorySummaryV2Provider, NpcMemoryWorkerClient } from './contracts';
+import type { NpcMemoryArtifact, NpcMemoryClaim, NpcMemoryEmbeddingProvider, NpcMemoryOutcome, NpcMemoryProcessorKind, NpcMemorySource, NpcMemorySummaryV2Provider, NpcMemoryWorkerClient } from './contracts';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const hash = /^[0-9a-f]{64}$/i;
@@ -32,7 +32,8 @@ export type NpcMemoryWorkerRuntime = Readonly<{
   processorVersion?: string;
   loadSource(claim: NpcMemoryClaim): Promise<NpcMemorySource>;
   /** Optional by policy: unavailable embedding infrastructure never fails gameplay work. */
-  embed?(text: string, claim: NpcMemoryClaim): Promise<{ vector: string; dimensions: number; model: string }>;
+  embeddingProvider?: NpcMemoryEmbeddingProvider;
+  embeddingSignal?: AbortSignal;
   summaryV2?: NpcMemorySummaryV2Provider;
   /** The explicitly capacity-verified model name; never inferred by the provider. */
   summaryV2Model?: string;
@@ -41,6 +42,26 @@ export type NpcMemoryWorkerRuntime = Readonly<{
   resolvePinnedPrompt?(releaseId: string): Promise<{ releaseId: string; revisionId: string; key: string; contractId: string; contractHash: string; body: string }>;
   recordTelemetry?(event: Readonly<{ jobId: string; batchOrdinal?: number; planHash?: string; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; errorCode?: string }>): Promise<void> | void;
 }>;
+
+function embeddingPlan(value: unknown, job: NpcMemoryClaim, version: string): Record<string, unknown> | null {
+  if (!exact(value,['jobId','fence','profile','source','input','inputText','inputHash']) || value.jobId!==job.id || value.fence!==job.fence || !object(value.profile) || !object(value.source) || !object(value.input) || typeof value.inputText!=='string' || typeof value.inputHash!=='string') return null;
+  const p=value.profile,s=value.source,input=value.input; if (!exact(p,['id','processorVersion','model','dimensions']) || !exact(s,['kind','id','version','hash','ledgerSequence','disclosureClass']) || !exact(input,['version','sourceKind','sourceId','sourceVersion','sourceHash','ledgerSequence','envelope']) || input.version!=='npc-memory-embedding-input-v1'||input.sourceKind!==s.kind||input.sourceId!==s.id||input.sourceVersion!==s.version||input.sourceHash!==s.hash||input.ledgerSequence!==s.ledgerSequence||!object(input.envelope)||Object.keys(input.envelope).length===0 || p.processorVersion!==version || !uuid.test(String(p.id)) || typeof p.model!=='string' || !p.model.trim() || p.model.length>120 || !integer(p.dimensions,1) || (p.dimensions as number)>4096 || s.id!==job.sourceId || !uuid.test(String(s.id)) || s.kind!==job.sourceKind || s.version!==job.sourceVersion || !integer(s.version,1) || s.hash!==job.sourceHash || !hash.test(String(s.hash)) || !integer(s.ledgerSequence,0) || !['player_visible','npc_known','npc_private'].includes(String(s.disclosureClass)) || !hash.test(String(value.inputHash)) || canonicalJson(input)!==value.inputText || sha256Hex(value.inputText)!==value.inputHash) return null;
+  return value;
+}
+async function runEmbeddingV3(client: NpcMemoryWorkerClient, job: NpcMemoryClaim, runtime: NpcMemoryWorkerRuntime): Promise<NpcMemoryOutcome> {
+  let profileId: unknown=null, inputHash: unknown=null;
+  const fail=async(code: string)=>{ try { await rpc(client,'world_npc_memory_embedding_accept',{p_job_id:job.id,p_fence:job.fence,p_profile_id:profileId,p_input_hash:inputHash,p_model:null,p_dimensions:null,p_embedding:null,p_provider_request_id:null,p_provider_usage:{},p_error_code:code}); } catch (e) { if(stale(e)) return {status:'lease_lost'} as NpcMemoryOutcome; } return {status:'failed',errorCode:code} as NpcMemoryOutcome; };
+  try { const p=embeddingPlan(await rpc(client,'world_npc_memory_embedding_plan',{p_job_id:job.id,p_fence:job.fence}),job,runtime.processorVersion!); if(!p) return {status:'failed',errorCode:'worker_failed'}; profileId=(p.profile as Record<string,unknown>).id; inputHash=p.inputHash;
+    const recovery=await rpc(client,'world_npc_memory_embedding_recover_dispatch',{p_job_id:job.id,p_fence:job.fence}); if(!object(recovery)) return fail('worker_failed'); const failOnly=(exact(recovery,['directive','reason','receiptState'])&&recovery.directive==='fail_only'&&recovery.reason==='current_fence_receipt_exists'&&recovery.receiptState==='terminalize_required')||(exact(recovery,['directive','reason','priorFence','receiptState'])&&recovery.directive==='fail_only'&&recovery.reason==='prior_fence_receipt_exists'&&uuid.test(String(recovery.priorFence))&&recovery.receiptState==='terminalize_required'); if(failOnly) return fail('worker_failed'); if(!exact(recovery,['directive','reason'])||recovery.directive!=='prepare_required'||recovery.reason!=='no_receipt') return fail('worker_failed'); if(!runtime.embeddingProvider||!runtime.embeddingSignal) return fail('provider_unavailable');
+    const profile=p.profile as Record<string,unknown>; const prepared=runtime.embeddingProvider.preflight({inputText:p.inputText as string,model:profile.model as string,dimensions:profile.dimensions as number});
+    const expectedBody={model:profile.model,input:p.inputText,dimensions:profile.dimensions,encoding_format:'float'}; if(canonicalJson(prepared.body)!==canonicalJson(expectedBody)) return fail('worker_failed');
+    const expectedRequestHash=sha256Hex(canonicalJson(expectedBody)); const receipt=await rpc(client,'world_npc_memory_embedding_prepare_dispatch',{p_job_id:job.id,p_fence:job.fence});
+    const expectedIdentity=sha256Hex(canonicalJson({jobId:job.id,fence:job.fence,profileId:profile.id,processorVersion:runtime.processorVersion,model:profile.model,dimensions:profile.dimensions,sourceKind:job.sourceKind,sourceId:job.sourceId,sourceVersion:job.sourceVersion,sourceHash:job.sourceHash,inputHash:p.inputHash})); if(!exact(receipt,['directive','idempotencyKey','identityHash','requestHash','state','profileId','model','dimensions','inputHash','inputText','encodingFormat'])||receipt.directive!=='dispatch_authorized'||typeof receipt.idempotencyKey!=='string'||receipt.idempotencyKey.length<1||receipt.idempotencyKey.length>200||!hash.test(String(receipt.identityHash))||receipt.requestHash!==expectedRequestHash||receipt.state!=='prepared'||receipt.profileId!==profile.id||receipt.model!==profile.model||receipt.dimensions!==profile.dimensions||receipt.inputText!==p.inputText||receipt.inputHash!==p.inputHash||receipt.encodingFormat!=='float') return fail('worker_failed');
+    const marked=await rpc(client,'world_npc_memory_embedding_mark_dispatched',{p_job_id:job.id,p_fence:job.fence}); if(!exact(marked,['directive','idempotencyKey'])||marked.directive!=='dispatch_once'||marked.idempotencyKey!==receipt.idempotencyKey) return fail('worker_failed');
+    const result=await runtime.embeddingProvider.embed(prepared,runtime.embeddingSignal); const validVector=/^\[(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?)(?:,-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]?\d+)?)*\]$/i.test(result.vector), components=validVector?result.vector.slice(1,-1).split(',').map(Number):[]; if(result.model!==profile.model||result.dimensions!==profile.dimensions||components.length!==profile.dimensions||components.some((n)=>!Number.isFinite(n)||!Number.isFinite(Math.fround(n)))||components.every((n)=>n===0)||!integer(result.promptTokens,0)||!integer(result.totalTokens,0)||result.totalTokens<result.promptTokens||!result.providerRequestId||!/^[A-Za-z0-9._:-]{1,200}$/.test(result.providerRequestId)||result.vector.length>384*1024) return fail('provider_malformed');
+    const accepted=await rpc(client,'world_npc_memory_embedding_accept',{p_job_id:job.id,p_fence:job.fence,p_profile_id:profile.id,p_input_hash:p.inputHash,p_model:result.model,p_dimensions:result.dimensions,p_embedding:result.vector,p_provider_request_id:result.providerRequestId,p_provider_usage:{promptTokens:result.promptTokens,totalTokens:result.totalTokens},p_error_code:null}); if(!exact(accepted,['status','contentHash'])||!['completed','reused'].includes(String(accepted.status))||!hash.test(String(accepted.contentHash))) throw new Error('Embedding acceptance malformed'); return {status:'completed',artifacts:1,fallback:false};
+  } catch(e) { if(stale(e)) return {status:'lease_lost'}; const code=e instanceof Error&&'code' in e?String((e as {code:unknown}).code):'worker_failed'; return fail(['provider_timeout','provider_unavailable','provider_malformed'].includes(code)?code:'worker_failed'); }
+}
 
 const V2_HASH = 'f279a108f11e212c77e4876521e9ee47092171b6d2a820d83a245d57a3c64e03';
 type SafeTelemetry = { jobId: string; batchOrdinal?: number; planHash?: string; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; errorCode?: string };
@@ -135,16 +156,13 @@ export async function runNpcMemoryClaim(client: NpcMemoryWorkerClient, rawClaim:
   const job = claim(rawClaim); if (!job) return { status: 'failed', errorCode: 'claim_malformed' };
   const processor = runtime.processorKind ?? 'extract';
   if (!processors.has(processor) || !runtime.processorVersion) return { status: 'failed', errorCode: 'worker_misconfigured' };
+  if (processor === 'embedding') return runEmbeddingV3(client, job, runtime);
   if (processor === 'summary' && runtime.processorVersion === 'npc-memory-summary-v2' && job.sourceKind === 'memory_set') return runSummaryV2(client, job, runtime);
   try {
     const source = await runtime.loadSource(job);
     let artifacts: NpcMemoryArtifact[] = [];
     let fallback = false;
     if (processor === 'summary') { artifacts = [artifact(job.sourceKind === 'quest_event' ? 'quest_summary' : 'episode_summary', source)]; fallback = true; }
-    if (processor === 'embedding' && runtime.embed) {
-      const content = fallbackSummary(source); const embedded = await runtime.embed(String(content.summary), job);
-      artifacts = [{ artifactKind: 'embedding', disclosureClass: source.disclosureClass ?? 'npc_known', model: embedded.model, content, contentHash: sha256Hex(canonicalJson(content)), embedding: embedded.vector, embeddingDimensions: embedded.dimensions }];
-    }
     // Extract work reuses committed dialogue remember output through loadSource;
     // no second model extraction or authoritative write occurs here.
     await rpc(client, 'world_npc_memory_complete', { p_job_id: job.id, p_fence: job.fence, p_artifacts: artifacts, p_error_code: null });

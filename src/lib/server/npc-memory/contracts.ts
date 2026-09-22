@@ -47,3 +47,8 @@ export type NpcMemorySummaryV2Provider = {
   generate(input: { prepared: NpcMemorySummaryV2Prepared; signal: AbortSignal }): Promise<{ result: Record<string, unknown>; model: string; providerRequestId?: string; inputTokens: number; outputTokens: number; durationMs: number }>;
 };
 export type NpcMemorySummaryV2Prepared = Readonly<{ body: Record<string, unknown>; model: string; inputTokens: number; maxSummaryChars: number; maxCitations: number }>;
+export type NpcMemoryEmbeddingPrepared = Readonly<{ body: Readonly<{ model: string; input: string; dimensions: number; encoding_format: 'float' }> }>;
+export type NpcMemoryEmbeddingProvider = {
+  preflight(input: { inputText: string; model: string; dimensions: number }): NpcMemoryEmbeddingPrepared;
+  embed(prepared: NpcMemoryEmbeddingPrepared, signal: AbortSignal): Promise<{ vector: string; model: string; dimensions: number; providerRequestId: string; promptTokens: number; totalTokens: number }>;
+};

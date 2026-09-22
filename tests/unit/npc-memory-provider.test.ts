@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createNpcMemorySummaryV2Provider, NpcMemorySummaryProviderError } from '$lib/server/npc-memory/provider';
+import { createNpcMemoryEmbeddingProvider, createNpcMemorySummaryV2Provider, NpcMemorySummaryProviderError } from '$lib/server/npc-memory/provider';
 
 const signal = new AbortController().signal;
 const config = { OPENAI_API_KEY: 'test', NPC_CONTEXT_MODEL: 'fixture-model', NPC_MODEL_INPUT_CAPACITY: '90000' };
@@ -65,5 +65,24 @@ describe('npc memory v2 provider', () => {
     const controller = new AbortController(); controller.abort();
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('aborted'); }));
     await expect(provider.preflight({ ...input, signal: controller.signal })).rejects.toMatchObject({ code: 'provider_timeout' });
+  });
+});
+
+describe('npc memory embedding provider', () => {
+  const embeddingConfig = { OPENAI_API_KEY: 'key', NPC_EMBEDDING_MODEL: 'embed-fixture', NPC_EMBEDDING_DIMENSIONS: '3' };
+  it('preflights a deeply frozen exact float body and sends it once with the caller signal', async () => {
+    const fetchMock = vi.fn(async () => response({ object: 'list', model: 'embed-fixture', data: [{ object: 'embedding', index: 0, embedding: [1, 0, 2] }], usage: { prompt_tokens: 2, total_tokens: 2 } })); vi.stubGlobal('fetch', fetchMock);
+    const provider = createNpcMemoryEmbeddingProvider(embeddingConfig); const prepared = provider.preflight({ inputText: 'évidence', model: 'embed-fixture', dimensions: 3 });
+    expect(Object.isFrozen(prepared)).toBe(true); expect(Object.isFrozen(prepared.body)).toBe(true); expect(prepared.body).toEqual({ model: 'embed-fixture', input: 'évidence', dimensions: 3, encoding_format: 'float' });
+    await expect(provider.embed(prepared, signal)).resolves.toMatchObject({ vector: '[1,0,2]', providerRequestId: 'req_1', promptTokens: 2, totalTokens: 2 });
+    const call=(fetchMock.mock.calls as unknown as [string, RequestInit][])[0]!; expect(fetchMock).toHaveBeenCalledTimes(1); expect(call[0]).toBe('https://api.openai.com/v1/embeddings'); expect(JSON.parse(String(call[1].body))).toEqual(prepared.body); expect(call[1].signal).toBe(signal);
+  });
+  it('fails closed for config, UTF-8 transport, abort, and malformed provider evidence', async () => {
+    expect(() => createNpcMemoryEmbeddingProvider({}).preflight({ inputText: 'x', model: 'embed-fixture', dimensions: 3 })).toThrow();
+    expect(() => createNpcMemoryEmbeddingProvider(embeddingConfig).preflight({ inputText: 'é'.repeat(200000), model: 'embed-fixture', dimensions: 3 })).toThrow();
+    const provider=createNpcMemoryEmbeddingProvider(embeddingConfig); const prepared=provider.preflight({ inputText:'x',model:'embed-fixture',dimensions:3 });
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response('bad',{status:500}))); await expect(provider.embed(prepared,signal)).rejects.toMatchObject({code:'provider_failed'});
+    vi.stubGlobal('fetch',vi.fn(async()=>response({object:'list',model:'wrong',data:[],usage:{}}))); await expect(provider.embed(prepared,signal)).rejects.toMatchObject({code:'provider_malformed'});
+    const controller=new AbortController(); controller.abort(); vi.stubGlobal('fetch',vi.fn(async()=>{throw new Error('abort');})); await expect(provider.embed(prepared,controller.signal)).rejects.toMatchObject({code:'provider_timeout'});
   });
 });
