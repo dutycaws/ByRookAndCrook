@@ -18,7 +18,10 @@ export class PromptRegistryService {
     if (result.error || !result.data) throw new Error(result.error?.message ?? 'Prompt release unavailable');
     const raw = result.data as RawRelease;
     if (!raw.releaseId || !raw.prompts || typeof raw.prompts !== 'object') throw new Error('Prompt release response is malformed');
-    if (Object.keys(raw.prompts).length !== PROMPT_KEYS.length || PROMPT_KEYS.some((key) => !(key in raw.prompts))) throw new Error('Prompt release is incomplete');
+    // Older immutable releases legitimately predate newly introduced keys.
+    // The server has already validated the release-era manifest; clients only
+    // require that every returned entry is known and structurally valid.
+    if (Object.keys(raw.prompts).length === 0 || Object.keys(raw.prompts).some((key) => !PROMPT_KEYS.includes(key as PromptKey))) throw new Error('Prompt release is incomplete');
     const prompts = Object.fromEntries(Object.entries(raw.prompts).map(([key, value]) => {
       if (!(key in PROMPT_MANIFEST)) throw new Error(`Prompt ${key} is not registered`);
       if (!value || !value.revisionId || !value.contentHash || !value.contractId || !value.contractHash || typeof value.body !== 'string') throw new Error(`Prompt ${key} is malformed`);
@@ -33,7 +36,7 @@ export class PromptRegistryService {
 
   /** Resolves the release persisted beside durable work; it never consults the
    * mutable active pointer.  Call this before every provider dispatch. */
-  async resolveForWork(kind: 'dialogue' | 'settlement' | 'quest_transition' | 'authoring' | 'portrait' | 'runtime_art', workId: string): Promise<PromptReleaseSnapshot> {
+  async resolveForWork(kind: 'dialogue' | 'settlement' | 'quest_transition' | 'authoring' | 'portrait' | 'runtime_art' | 'npc_memory_summary', workId: string): Promise<PromptReleaseSnapshot> {
     const result = await this.client.rpc('prompt_registry_service_work_release', { p_work_kind: kind, p_work_id: workId });
     if (result.error || typeof result.data !== 'string') throw new Error(result.error?.message ?? 'Prompt release was not pinned for this work');
     return this.resolve(result.data);

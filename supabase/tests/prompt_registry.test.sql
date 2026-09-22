@@ -10,10 +10,10 @@ insert into private.npc_capabilities(user_id,capability,granted_by) values
  ('62000000-0000-4000-8000-000000000001','admin','62000000-0000-4000-8000-000000000001'),
  ('62000000-0000-4000-8000-000000000002','prompt_manager','62000000-0000-4000-8000-000000000001') on conflict do nothing;
 
-select is((select count(*) from private.prompt_registry_manifest),30::bigint,'all closed prompt keys are registered');
-select is((select count(*) from private.prompt_revisions where revision_number=1),30::bigint,'release 1 has exact immutable revisions');
+select is((select count(*) from private.prompt_registry_manifest),31::bigint,'all closed prompt keys are registered');
+select is((select count(*) from private.prompt_revisions where revision_number=1),31::bigint,'all immutable baseline revisions are present');
 select is((select count(*) from private.prompt_registry_active_release),1::bigint,'one active release is seeded');
-select is((select count(*) from private.prompt_release_entries where release_id=(select release_id from private.prompt_registry_active_release)),30::bigint,'active release is complete');
+select is((select count(*) from private.prompt_release_entries where release_id=(select release_id from private.prompt_registry_active_release)),31::bigint,'active release is complete');
 select ok((
   select revision.body
   from private.prompt_registry_active_release active
@@ -43,7 +43,7 @@ select throws_ok(format($sql$select public.prompt_registry_create_candidate('dia
 select set_config('test.candidate',(public.prompt_registry_create_candidate('dialogue.speak','Candidate response prompt.','dialogue-speak-v1',current_setting('test.speak_contract'),current_setting('test.speak_revision')::uuid,'Focused wording change')->>'revisionId'),true);
 select throws_ok(format($sql$select public.prompt_registry_activate(%L::uuid,'Candidate release',jsonb_build_object('dialogue.speak',%L::text),'[]'::jsonb,'Exercise warnings')$sql$,current_setting('test.active_release'),current_setting('test.candidate')),'PT400',null,'safety warning requires acknowledgement');
 select set_config('test.candidate_release',(public.prompt_registry_activate(current_setting('test.active_release')::uuid,'Candidate release',jsonb_build_object('dialogue.speak',current_setting('test.candidate')),'["safety_language_changed"]'::jsonb,'Exercise atomic release')->>'releaseId'),true);
-select is(jsonb_array_length(public.prompt_registry_summary()->'prompts'),30,'activation keeps a complete release');
+select is(jsonb_array_length(public.prompt_registry_summary()->'prompts'),31,'activation keeps a complete release');
 select throws_ok(format($sql$select public.prompt_registry_activate(%L::uuid,'Stale release','{"dialogue.speak":"%s"}'::jsonb,'["safety_language_changed"]'::jsonb,'Must conflict')$sql$,current_setting('test.active_release'),current_setting('test.candidate')),'PT409',null,'active release conflict protects concurrent activation');
 select set_config('test.restored_release',(public.prompt_registry_restore(current_setting('test.candidate_release')::uuid,current_setting('test.active_release')::uuid,'Restored baseline','[]'::jsonb,'Restore known baseline')->>'releaseId'),true);
 select is((select count(*) from jsonb_array_elements(public.prompt_registry_recent_runs())),0::bigint,'safe run list starts empty');
@@ -64,10 +64,17 @@ values('fixture:expired:dialogue',0,'dialogue','dialogue.speak','dialogue.speak'
 set local role service_role;
 set local request.jwt.claim.role='service_role';
 select set_config('test.resolved',(public.prompt_registry_service_resolve(current_setting('test.restored_release')::uuid))::text,true);
-select is((select count(*) from jsonb_object_keys(current_setting('test.resolved')::jsonb->'prompts')),30::bigint,'service resolver returns complete immutable snapshot');
+select is((select count(*) from jsonb_object_keys(current_setting('test.resolved')::jsonb->'prompts')),31::bigint,'service resolver returns complete immutable snapshot');
 select lives_ok(format($sql$select public.prompt_registry_service_record_run('fixture:dialogue:turn',1,'dialogue','dialogue.speak','dialogue.speak',%L::uuid,%L::uuid,'completed','fixture',10,1,1,null)$sql$,current_setting('test.restored_release'),current_setting('test.speak_revision')),'service records allow-listed safe event');
 reset role;
 reset request.jwt.claim.role;
+select set_config('test.release_one',(select id::text from private.prompt_releases where release_number=1),true);
+select set_config('test.summary_release',(select release_id::text from private.prompt_registry_active_release where singleton),true);
+set local role service_role; set local request.jwt.claim.role='service_role';
+select lives_ok($$select public.prompt_registry_service_resolve(current_setting('test.release_one')::uuid)$$,'old dialogue-era release remains resolvable');
+select ok(not ((public.prompt_registry_service_resolve(current_setting('test.release_one')::uuid)->'prompts') ? 'npc_memory.summary'),'old dialogue-era release cannot serve the summary key');
+select ok((public.prompt_registry_service_resolve(current_setting('test.summary_release')::uuid)->'prompts') ? 'npc_memory.summary','new baseline release resolves the summary key');
+reset role; reset request.jwt.claim.role;
 select is((select count(*) from private.prompt_execution_ledger),1::bigint,'service insertion prunes expired events');
 
 create temporary table prompt_pin_fixture(prompt_release_id uuid);

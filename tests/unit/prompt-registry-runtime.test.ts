@@ -21,6 +21,17 @@ describe('release-pinned provider adapters', () => {
     expect(calls).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'prompt_registry_service_work_release', args: { p_work_kind: 'dialogue', p_work_id: '22222222-2222-4222-8222-222222222222' } })]));
   });
 
+  it('resolves a summary job only through its durable prompt-release pin', async () => {
+    const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+    const registry = new PromptRegistryService({ rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'prompt_registry_service_work_release') return Promise.resolve({ data: oldRelease.releaseId, error: null });
+      return Promise.resolve({ data: { releaseId: oldRelease.releaseId, releaseNumber: 1, label: 'old', prompts: oldRelease.prompts }, error: null });
+    } });
+    await expect(registry.resolveForWork('npc_memory_summary', '33333333-3333-4333-8333-333333333333')).resolves.toMatchObject({ releaseId: oldRelease.releaseId });
+    expect(calls).toContainEqual({ name: 'prompt_registry_service_work_release', args: { p_work_kind: 'npc_memory_summary', p_work_id: '33333333-3333-4333-8333-333333333333' } });
+  });
+
   it('sends the pinned dialogue and settlement bodies, and refuses an absent prompt', async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {

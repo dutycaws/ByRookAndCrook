@@ -1,7 +1,7 @@
 import { PROMPT_MANIFEST, PROMPT_WORKFLOW_EDGES } from './manifest';
 import { PROMPT_KEYS, type PromptKey, type PromptWorkflow } from './contracts';
 
-const workflows = ['dialogue', 'authoring', 'resident_settlement', 'canon_settlement', 'social_settlement', 'procedural_settlement', 'quest_transition', 'portrait_generation', 'runtime_art'] as const;
+const workflows = ['dialogue', 'authoring', 'resident_settlement', 'canon_settlement', 'social_settlement', 'procedural_settlement', 'quest_transition', 'portrait_generation', 'runtime_art', 'npc_memory_summary'] as const;
 export const PROMPT_WORKFLOWS = workflows;
 
 export type SafePromptExecutionRun = Readonly<{
@@ -56,6 +56,7 @@ export function promptWorkflowProjection() {
     if (node.startsWith('authoring.')) return 'authoring';
     if (node.startsWith('portrait.')) return 'portrait_generation';
     if (node.startsWith('runtime_art.')) return 'runtime_art';
+    if (node.startsWith('npc_memory.')) return 'npc_memory_summary';
     if (node.startsWith('settlement.')) return 'resident_settlement';
     return null;
   };

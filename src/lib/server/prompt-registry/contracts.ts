@@ -11,7 +11,8 @@ export const PROMPT_KEYS = [
   'social.proposer', 'social.critic', 'social.repair', 'social.final_critic',
   'procedural.proposer', 'procedural.critic', 'procedural.repair', 'procedural.final_critic',
   'quest_transition.proposer', 'quest_transition.critic', 'quest_transition.repair', 'quest_transition.final_critic',
-  'image.community_portrait', 'image.runtime_art'
+  'image.community_portrait', 'image.runtime_art',
+  'npc_memory.summary'
 ] as const;
 
 export type PromptKey = (typeof PROMPT_KEYS)[number];
@@ -19,10 +20,10 @@ export type PromptKey = (typeof PROMPT_KEYS)[number];
 export type PromptCallType = 'text_system' | 'image_template';
 export type PromptModelLane = 'context' | 'character' | 'authoring' | 'world' | 'image_portrait' | 'image_runtime';
 export type DynamicDataClassification = 'public' | 'private_server_only' | 'mixed_server_only';
-export type PromptWorkflow = 'dialogue' | 'authoring' | 'resident_settlement' | 'canon_settlement' | 'social_settlement' | 'procedural_settlement' | 'quest_transition' | 'portrait_generation' | 'runtime_art';
+export type PromptWorkflow = 'dialogue' | 'authoring' | 'resident_settlement' | 'canon_settlement' | 'social_settlement' | 'procedural_settlement' | 'quest_transition' | 'portrait_generation' | 'runtime_art' | 'npc_memory_summary';
 
 /** Non-model nodes are code-owned and let the UI show validation/commit boundaries. */
-export type PromptGraphNode = PromptKey | 'dialogue.validate' | 'dialogue.commit' | 'dialogue.fallback' | 'authoring.reserve' | 'authoring.commit' | 'settlement.validate' | 'settlement.commit' | 'settlement.fallback' | 'quest_transition.validate' | 'quest_transition.commit' | 'quest_transition.fallback' | 'portrait.reserve' | 'portrait.validate' | 'portrait.storage' | 'portrait.commit' | 'runtime_art.reserve' | 'runtime_art.validate' | 'runtime_art.storage' | 'runtime_art.commit';
+export type PromptGraphNode = PromptKey | 'dialogue.validate' | 'dialogue.commit' | 'dialogue.fallback' | 'authoring.reserve' | 'authoring.commit' | 'settlement.validate' | 'settlement.commit' | 'settlement.fallback' | 'quest_transition.validate' | 'quest_transition.commit' | 'quest_transition.fallback' | 'portrait.reserve' | 'portrait.validate' | 'portrait.storage' | 'portrait.commit' | 'runtime_art.reserve' | 'runtime_art.validate' | 'runtime_art.storage' | 'runtime_art.commit' | 'npc_memory.reserve' | 'npc_memory.load' | 'npc_memory.validate' | 'npc_memory.commit' | 'npc_memory.fallback';
 export type PromptWorkflowEdge = Readonly<{ from: PromptGraphNode; to: PromptGraphNode; kind: 'always' | 'conditional' | 'retry' }>;
 export type PromptContract = Readonly<{
   id: string;
