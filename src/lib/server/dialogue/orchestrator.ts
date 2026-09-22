@@ -3,7 +3,7 @@ import type { Database, Json } from '$lib/database.types';
 import { hasExecutableSteps, type Decision, type DialogueInput } from '$lib/game/dialogue';
 import { ProviderContextBudgetError, type DialogueProvider } from './provider';
 import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, utf8Bytes, type ContextWindow } from './context';
-import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, sha256Hex, utf8Bytes as artifactUtf8Bytes, ContextAssemblyConfigurationError, InsufficientNpcMemoryContextError, type NpcMemoryContextArtifact } from '$lib/server/npc-memory/context';
+import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, sha256Hex, utf8Bytes as artifactUtf8Bytes, ContextAssemblyConfigurationError, InsufficientNpcMemoryContextError, type NpcMemoryContextArtifact } from '$lib/server/npc-memory/context';
 import { matchesSchema, schemas, type Stage } from './schemas';
 import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
@@ -56,8 +56,6 @@ type FrozenDialogueArtifact = NpcMemoryContextArtifact & Readonly<{
   model: string;
   payload: Readonly<{ projections: { private: ContextWindow; public: ContextWindow }; baseProvenance: { contentVersion: string; profileRevision: number | null } }>;
 }>;
-const ROUTINE_CONTEXT_TOKENS=8_000;
-const CONSEQUENTIAL_CONTEXT_TOKENS=16_000;
 const FROZEN_CONTEXT_STAGE='frozen_context';
 const frozenContextRevisionStage=(revision:number)=>`${FROZEN_CONTEXT_STAGE}:${revision}`;
 
@@ -93,15 +91,17 @@ function memorySourceIds(retrieval: MemoryRetrieval): string[] {
 function frozenArtifact(value: unknown, expected?: { cutoffSequence: number; contentVersion: string }): FrozenDialogueArtifact | null {
   if (!value || typeof value!=='object') return null;
   const artifact=value as Partial<FrozenDialogueArtifact>;
+  const tier=artifact.tier==='routine' ? dialogueContextTier(false) : artifact.tier==='consequential' ? dialogueContextTier(true) : null;
   const provenance=(artifact.payload as any)?.baseProvenance;
   if (!Number.isSafeInteger(artifact.revision) || artifact.revision! < 0 || typeof artifact.canonicalJson!=='string'
     || typeof artifact.hash!=='string' || !Number.isSafeInteger(artifact.tokens) || !Number.isSafeInteger(artifact.utf8Bytes)
     || artifact.tokens! < 0 || artifact.utf8Bytes! < 0 || !artifact.payload || typeof artifact.payload!=='object' || !(artifact.payload as any).projections?.private || !(artifact.payload as any).projections?.public
-    || !['npc-context-routine-v1','npc-context-consequential-v1'].includes(artifact.policyVersion ?? '') || artifact.projectionVersion!=='npc-dialogue-projections-v1'
+    || !tier || (tier.tier==='routine' ? artifact.policyVersion!=='npc-context-routine-v1' : artifact.policyVersion!=='npc-context-consequential-v1') || artifact.projectionVersion!=='npc-dialogue-projections-v1'
     || typeof artifact.tokenizer!=='string' || !artifact.tokenizer || typeof artifact.counterId!=='string' || !artifact.counterId || artifact.tokenizer!==artifact.counterId
     || typeof artifact.model!=='string' || !artifact.model || !Number.isSafeInteger(artifact.counterDurationMs) || artifact.counterDurationMs! < 0
     || !Number.isSafeInteger(artifact.cutoffSequence) || artifact.cutoffSequence! < 0 || artifact.view!=='speech'
     || !provenance || typeof provenance.contentVersion!=='string' || !provenance.contentVersion || !(provenance.profileRevision===null || (Number.isSafeInteger(provenance.profileRevision) && provenance.profileRevision>=0))
+    || artifact.tokens!>tier.maxTokens || artifact.utf8Bytes!>tier.maxBytes
     || !Array.isArray(artifact.sourceManifest) || !artifact.sourceManifest.every(source=>source && typeof source.id==='string' && Number.isSafeInteger(source.version) && typeof source.hash==='string' && typeof source.kind==='string' && Number.isSafeInteger(source.ledgerSequence) && source.ledgerSequence>=0) || !artifact.coverage?.complete) return null;
   if (expected && (artifact.cutoffSequence!==expected.cutoffSequence || provenance.contentVersion!==expected.contentVersion)) return null;
   const canonical=canonicalNpcMemoryContextPayload({sources:artifact.sourceManifest,requiredSourceIds:artifact.coverage.required,payload:artifact.payload as Record<string,unknown>});
@@ -305,17 +305,17 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       if (requiredMemory.some(item=>!privateWindow.context.some(candidate=>evidenceKey(candidate)===evidenceKey(item)))) throw new ContextBudgetError();
       const publicWindow=publicDialogueWindow(privateWindow);
       const sources=sourceManifestFor(privateWindow.context);
-      const payload={projections:{private:privateWindow,public:publicWindow},targetTokens:consequential?16_000:8_000,
+      const tier=dialogueContextTier(consequential);
+      const payload={projections:{private:privateWindow,public:publicWindow},targetTokens:tier.maxTokens,
         baseProvenance:{contentVersion:String(turn.content_version ?? ''),profileRevision:Number.isSafeInteger(base.profileRevision)?base.profileRevision as number:null}};
       const policyVersion=consequential?'npc-context-consequential-v1':'npc-context-routine-v1';
       const projectionVersion='npc-dialogue-projections-v1';
-      const maxTokens=CONSEQUENTIAL_CONTEXT_TOKENS;
       if(!provider.countContext) throw new ProviderContextBudgetError('The dialogue provider cannot verify frozen-context tokens.');
       const canonical=canonicalNpcMemoryContextPayload({sources,requiredSourceIds:sources.map(source=>source.id),payload});
       let counted: Awaited<ReturnType<NonNullable<DialogueProvider['countContext']>>>;
       try { counted=await provider.countContext(canonical,signal); }
       catch (cause) { throw new ProviderContextBudgetError(cause instanceof Error ? cause.message : 'Frozen-context counting is unavailable.'); }
-      const next=assembleNpcMemoryContext({policyVersion,projectionVersion,maxBytes:64*1024,maxTokens,sources,requiredSourceIds:sources.map(source=>source.id),payload,
+      const next=assembleNpcMemoryContext({policyVersion,projectionVersion,maxBytes:tier.maxBytes,maxTokens:tier.maxTokens,tier:tier.tier,sources,requiredSourceIds:sources.map(source=>source.id),payload,
         tokenCount:counted.inputTokens,tokenizerId:counted.counterId,counterId:counted.counterId,counterDurationMs:counted.durationMs,model:counted.model,cutoffSequence:input.expectedConversationSequence,view:'speech',revision}) as FrozenDialogueArtifact;
       await checkpoint(frozenContextRevisionStage(revision),{value:next});
       checkpoints[frozenContextRevisionStage(revision)]={value:next};

@@ -23,6 +23,9 @@ export type NpcMemoryContextArtifact = Readonly<{
   cutoffSequence?: number;
   view?: string;
   revision?: number;
+  tier?: 'routine' | 'consequential' | 'ordinary' | 'rich';
+  overallMaxBytes?: number;
+  overallMaxTokens?: number;
   sourceManifest: readonly NpcMemorySourceManifest[];
   coverage: NpcMemoryCoverage;
   payload: Readonly<Record<string, unknown>>;
@@ -80,7 +83,23 @@ type ContextAssemblyBase = {
   requiredSourceIds?: readonly string[];
   payload: Record<string, unknown>;
   model?: string; counterId?: string; counterDurationMs?: number; cutoffSequence?: number; view?: string; revision?: number;
+  tier?: 'routine' | 'consequential' | 'ordinary' | 'rich'; overallMaxBytes?: number; overallMaxTokens?: number;
 };
+export const DIALOGUE_CONTEXT_TIERS = {
+  routine: { tier:'routine' as const, maxBytes:64*1024, maxTokens:8_000 },
+  consequential: { tier:'consequential' as const, maxBytes:64*1024, maxTokens:16_000 }
+} as const;
+export const TRANSITION_CONTEXT_TIERS = {
+  ordinary: { tier:'ordinary' as const, overallMaxBytes:128*1024, overallMaxTokens:32_000, reservedBaseBytes:64*1024, reservedBaseTokens:16_000, maxBytes:64*1024, maxTokens:16_000, limit:16, candidateLimit:48 },
+  rich: { tier:'rich' as const, overallMaxBytes:256*1024, overallMaxTokens:64_000, reservedBaseBytes:64*1024, reservedBaseTokens:16_000, maxBytes:192*1024, maxTokens:48_000, limit:32, candidateLimit:128 }
+} as const;
+export function dialogueContextTier(consequential: boolean) { return consequential ? DIALOGUE_CONTEXT_TIERS.consequential : DIALOGUE_CONTEXT_TIERS.routine; }
+export function transitionContextTier(frozen: unknown) {
+  const value=frozen && typeof frozen==='object' ? frozen as Record<string,unknown> : {};
+  const envelope=value.capabilityEnvelope && typeof value.capabilityEnvelope==='object' ? value.capabilityEnvelope as Record<string,unknown> : {};
+  const rich=value.nextAuthoredMilestone==null && (envelope.allowGeneratedSuccessor===true || envelope.allowDeparture===true || (Array.isArray(envelope.allowedWorldEffects) && envelope.allowedWorldEffects.some(effect=>effect==='create_quest'||effect==='departure')));
+  return rich ? TRANSITION_CONTEXT_TIERS.rich : TRANSITION_CONTEXT_TIERS.ordinary;
+}
 type SynchronousContextAssembly = ContextAssemblyBase & { tokenizer: { id: string; count(text: string): number }; tokenCount?: never; tokenizerId?: never };
 type VerifiedContextAssembly = ContextAssemblyBase & { tokenCount: number; tokenizerId: string; counterId: string; model: string; tokenizer?: never };
 export function assembleNpcMemoryContext(input: SynchronousContextAssembly | VerifiedContextAssembly): NpcMemoryContextArtifact {
@@ -112,5 +131,5 @@ export function assembleNpcMemoryContext(input: SynchronousContextAssembly | Ver
   if (input.counterDurationMs !== undefined && (!Number.isSafeInteger(input.counterDurationMs) || input.counterDurationMs < 0)) throw new ContextAssemblyConfigurationError('Verified NPC memory counter duration is invalid.');
   if (missing.length) throw new InsufficientNpcMemoryContextError(`Required NPC memory evidence is unavailable: ${missing.join(', ')}.`);
   if (bytes > input.maxBytes || tokens > input.maxTokens) throw new InsufficientNpcMemoryContextError('Authorized NPC memory evidence exceeds the frozen-context budget.');
-  return freeze({ policyVersion: input.policyVersion, projectionVersion: input.projectionVersion, tokenizer: tokenizerId, ...(input.model?{model:input.model}:{}), ...(input.counterId?{counterId:input.counterId}:{}), ...(input.counterDurationMs!==undefined?{counterDurationMs:input.counterDurationMs}:{}), ...(input.cutoffSequence!=null?{cutoffSequence:input.cutoffSequence}:{}), ...(input.view?{view:input.view}:{}), ...(input.revision!==undefined?{revision:input.revision}:{}), sourceManifest: freeze(sourceManifest), coverage: freeze({ required, included, missing, complete: true }), payload: freeze({ ...input.payload }), canonicalJson: serialized, utf8Bytes: bytes, tokens, hash: sha256Hex(serialized) });
+  return freeze({ policyVersion: input.policyVersion, projectionVersion: input.projectionVersion, tokenizer: tokenizerId, ...(input.model?{model:input.model}:{}), ...(input.counterId?{counterId:input.counterId}:{}), ...(input.counterDurationMs!==undefined?{counterDurationMs:input.counterDurationMs}:{}), ...(input.cutoffSequence!=null?{cutoffSequence:input.cutoffSequence}:{}), ...(input.view?{view:input.view}:{}), ...(input.revision!==undefined?{revision:input.revision}:{}), ...(input.tier?{tier:input.tier}:{}), ...(input.overallMaxBytes!==undefined?{overallMaxBytes:input.overallMaxBytes}:{}), ...(input.overallMaxTokens!==undefined?{overallMaxTokens:input.overallMaxTokens}:{}), sourceManifest: freeze(sourceManifest), coverage: freeze({ required, included, missing, complete: true }), payload: freeze({ ...input.payload }), canonicalJson: serialized, utf8Bytes: bytes, tokens, hash: sha256Hex(serialized) });
 }

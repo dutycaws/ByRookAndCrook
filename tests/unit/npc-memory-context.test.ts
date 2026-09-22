@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runDialogue, type DialogueRuntimeOptions } from '../../src/lib/server/dialogue/orchestrator';
 import type { DialogueProvider } from '../../src/lib/server/dialogue/provider';
 import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
-import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, utf8Bytes } from '$lib/server/npc-memory/context';
+import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, utf8Bytes } from '$lib/server/npc-memory/context';
 
 const npcId='11111111-1111-4111-8111-111111111111';
 const instanceId='33333333-3333-4333-8333-333333333333';
@@ -94,7 +94,7 @@ describe('NPC memory dialogue context',()=>{
   it('replays the exact revision-zero artifact without retrieval or another artifact count',async()=>{
     const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
     const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
-    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:16_000,sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:8_000,tier:'routine',sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
     const calls:string[]=[]; const stages:string[]=[];
     const client={rpc(name:string,args?:Record<string,unknown>) {
       calls.push(name);
@@ -122,7 +122,7 @@ describe('NPC memory dialogue context',()=>{
   it('recovers a pre-freeze evidence checkpoint by creating revision one exactly once',async()=>{
     const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
     const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
-    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:16_000,sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:8_000,tier:'routine',sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
     const stages:string[]=[]; const calls:string[]=[];
     const client={rpc(name:string,args?:Record<string,unknown>) {
       calls.push(name); if(name==='npc_dialogue_checkpoint') stages.push(String(args?.p_stage));
@@ -218,5 +218,12 @@ describe('NPC memory dialogue context',()=>{
       const assemble=()=>assembleNpcMemoryContext({...input,maxBytes:bytes,maxTokens:16_000,tokenCount:tokens});
       if (accepted) expect(assemble).not.toThrow(); else expect(assemble).toThrow();
     }
+  });
+  it('admits dialogue context only within its persisted routine or consequential tier',()=>{
+    const source={id:'tier-source',version:1,hash:'d'.repeat(64),kind:'dialogue_turn',ledgerSequence:1};
+    const base={policyVersion:'tier-v1',projectionVersion:'tier-v1',maxBytes:64*1024,sources:[source],requiredSourceIds:[source.id],payload:{text:'tier'},tokenizerId:'fixture',counterId:'fixture',model:'fixture'};
+    const routine=dialogueContextTier(false); const consequential=dialogueContextTier(true);
+    expect(()=>assembleNpcMemoryContext({...base,maxTokens:routine.maxTokens,tier:routine.tier,tokenCount:8_001})).toThrow();
+    expect(()=>assembleNpcMemoryContext({...base,maxTokens:consequential.maxTokens,tier:consequential.tier,tokenCount:16_000})).not.toThrow();
   });
 });

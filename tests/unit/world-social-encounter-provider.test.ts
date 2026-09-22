@@ -6,7 +6,7 @@ import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
 const promptRelease=fixturePromptRelease;
 function createSettlementProvider(config: Record<string,string|undefined>) {
-  const provider=createSettlementProviderBase(config);
+  const provider=createSettlementProviderBase({ ...config, NPC_MODEL_INPUT_CAPACITY: config.NPC_MODEL_INPUT_CAPACITY ?? '100000' });
   return { ...provider, generate(stage: Parameters<typeof provider.generate>[0], payload: unknown, signal: AbortSignal) {
     return provider.generate(stage,payload,signal,promptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
   } };
@@ -26,7 +26,7 @@ function contextRaw(liraCapabilities=['deceive','share_gossip']) {
   return {version:'social-encounter-v1',templateKey:'road-rumor',participantResidentIds:[lira,torvin],publicCanon:{currentDay:4,entityKinds:{[liraNpc]:'npc',[torvinNpc]:'npc'}},authorizedEvidence:[{id:'evidence-smoke',kind:'world_event',sourceFingerprint:fingerprint,summary:'Smoke rose by the northern pass.'}],participants:[resident(lira,liraNpc,liraCapabilities,[belief]),resident(torvin,torvinNpc,[])]};
 }
 function proposal(mode:'honest'|'fabricate'='honest', informational=false) { return {version:'social-encounter-v1',templateKey:'road-rumor',participantResidentIds:[lira,torvin],privateCommunicativeIntents:informational ? [] : [{speakerResidentId:lira,recipientResidentId:torvin,mode,message:mode==='fabricate' ? 'Lira privately floats a misleading trail rumor.' : 'Lira privately shares the smoke report.'}],privateExchangeSummary:informational ? 'They exchange a quiet greeting and leave matters unchanged.' : 'Lira privately summarizes the smoke report for Torvin.',evidenceIds:['evidence-smoke'],causalExplanation:'The encounter relies only on the frozen smoke report.',relationshipEffects:informational ? [] : [{recipientResidentId:torvin,sourceResidentId:lira,axis:'trust',delta:1}],gossipBeliefAdditions:informational ? [] : [{recipientResidentId:torvin,sourceResidentId:lira,sourceBeliefId:beliefId,sourceEvidenceId:'evidence-smoke',originalClaimFingerprint:fingerprint,content:'Smoke rose by the northern pass.',confidence:56,provenance:[{sourceKind:'direct_evidence',sourceId:'evidence-smoke'},{sourceKind:'gossip',sourceId:beliefId,speakerNpcId:liraNpc}]}],publicSummary:informational ? null : 'Lira and Torvin compared reports by the northern road.'}; }
-function completed(value:unknown) { return new Response(JSON.stringify({status:'completed',usage:{input_tokens:13,output_tokens:5},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]}),{status:200,headers:{'content-type':'application/json'}}); }
+function completed(value:unknown) { return new Response(JSON.stringify({status:'completed',input_tokens:13,usage:{input_tokens:13,output_tokens:5},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]}),{status:200,headers:{'content-type':'application/json'}}); }
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -53,7 +53,7 @@ describe('social encounter provider stages', () => {
 
   it('uses the dedicated closed social critic schema and rejects repair from the final critic', async () => {
     const requests:any[]=[]; let call=0;
-    vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => { requests.push(JSON.parse(String(init.body))); return completed(call++ === 0 ? {decision:'repair',instructions:[{code:'gossip_attribution',path:'gossipBeliefAdditions'}]} : {decision:'repair',instructions:[{code:'private_summary',path:'privateExchangeSummary'}]}); }));
+    vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => { if(String(_url).endsWith('/input_tokens')) return new Response(JSON.stringify({input_tokens:13}),{status:200}); requests.push(JSON.parse(String(init.body))); return completed(call++ === 0 ? {decision:'repair',instructions:[{code:'gossip_attribution',path:'gossipBeliefAdditions'}]} : {decision:'repair',instructions:[{code:'private_summary',path:'privateExchangeSummary'}]}); }));
     const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'}); const payload={context:contextRaw(),proposal:proposal()};
     await expect(provider.generate('social_encounter_critic',payload,new AbortController().signal)).resolves.toMatchObject({value:{decision:'repair',instructions:[{code:'gossip_attribution',path:'gossipBeliefAdditions'}]},model:'gpt-5.6-luna'});
     await expect(provider.generate('social_encounter_final_critic',payload,new AbortController().signal)).rejects.toMatchObject({code:'provider_malformed'});

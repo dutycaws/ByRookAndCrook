@@ -14,7 +14,7 @@ import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
 const promptRelease=fixturePromptRelease;
 function createSettlementProvider(config: Record<string,string|undefined>) {
-  const provider=createSettlementProviderBase(config);
+  const provider=createSettlementProviderBase({ ...config, NPC_MODEL_INPUT_CAPACITY: config.NPC_MODEL_INPUT_CAPACITY ?? '100000' });
   return { ...provider, generate(stage: Parameters<typeof provider.generate>[0], payload: unknown, signal: AbortSignal) {
     return provider.generate(stage,payload,signal,promptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
   } };
@@ -31,7 +31,7 @@ const payload=()=>({worldSnapshot:{
 }});
 
 function completed(value: unknown) {
-  return new Response(JSON.stringify({status:'completed',usage:{input_tokens:13,output_tokens:5},output:[{
+  return new Response(JSON.stringify({status:'completed',input_tokens:13,usage:{input_tokens:13,output_tokens:5},output:[{
     type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]
   }]}),{status:200,headers:{'content-type':'application/json'}});
 }
@@ -68,6 +68,7 @@ describe('world canon event provider stages',()=>{
   it('builds and validates canon proposer and repair requests with exact schemas',async()=>{
     const requests: any[]=[];
     vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => {
+      if (String(_url).endsWith('/input_tokens')) return new Response(JSON.stringify({input_tokens:13}),{status:200});
       requests.push(JSON.parse(String(init.body)));
       return completed({eventJson:JSON.stringify(event())});
     }));
@@ -88,6 +89,7 @@ describe('world canon event provider stages',()=>{
   it('uses strict critic schemas and cheap review model for canon criticism',async()=>{
     const requests: any[]=[];
     vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => {
+      if (String(_url).endsWith('/input_tokens')) return new Response(JSON.stringify({input_tokens:13}),{status:200});
       requests.push(JSON.parse(String(init.body)));
       return completed({outcome:'accept',rationale:'Frozen inputs match.',instructions:[]});
     }));

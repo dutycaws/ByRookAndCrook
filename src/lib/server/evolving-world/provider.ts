@@ -35,6 +35,8 @@ const questTransitionProposalSchema = { type:'object',additionalProperties:false
 const questTransitionCriticSchema = { type:'object',additionalProperties:false,required:['decision','instructions'],properties:{decision:{type:'string',enum:['accept','reject','repair']},instructions:{type:'array',minItems:0,maxItems:4,items:{type:'object',additionalProperties:false,required:['code','path'],properties:{code:{type:'string',enum:QUEST_TRANSITION_CRITIC_CODES},path:{type:'string',enum:QUEST_TRANSITION_CRITIC_PATHS}}}}} };
 const questTransitionFinalCriticSchema = { type:'object',additionalProperties:false,required:['decision','instructions'],properties:{decision:{type:'string',enum:['accept','reject']},instructions:{type:'array',maxItems:0,items:{type:'object',additionalProperties:false,required:['code','path'],properties:{code:{type:'string',enum:QUEST_TRANSITION_CRITIC_CODES},path:{type:'string',enum:QUEST_TRANSITION_CRITIC_PATHS}}}}} };
 const SETTLEMENT_OUTPUT_RESERVE=2200;
+const SETTLEMENT_REQUEST_BYTES=384*1024;
+const SETTLEMENT_INPUT_TOKENS=80_000;
 const digestSchema = { type:'object', additionalProperties:false, required:['summary','journalEntries','discoveredEntityIds'], properties:{summary:{type:'string'},journalEntries:{type:'array',items:{type:'string'}},discoveredEntityIds:{type:'array',items:{type:'string'}}} };
 const canonProposalStages = new Set<ProviderStage>(['canon_proposer','canon_repair']);
 const socialProposalStages = new Set<ProviderStage>(['social_encounter_proposer','social_encounter_repair']);
@@ -190,6 +192,7 @@ export function createSettlementProvider(config: Record<string, string | undefin
     const body={ model, store:false, max_output_tokens:SETTLEMENT_OUTPUT_RESERVE, reasoning:{effort:creativeStages.has(stage) ? 'low' : 'none'},
       input:[{role:'system',content:prompt.body},{role:'user',content:JSON.stringify(payload)}],
       text:{format:{type:'json_schema',name:`world_${stage}`,strict:true,schema:schema(stage)}} };
+    if (new TextEncoder().encode(JSON.stringify(body)).byteLength>SETTLEMENT_REQUEST_BYTES) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its UTF-8 transport budget.');
     const capacity=Number(config.NPC_MODEL_INPUT_CAPACITY);
     if(!Number.isSafeInteger(capacity)||capacity<SETTLEMENT_OUTPUT_RESERVE) throw new SettlementProviderError('provider_unavailable','The settlement model capacity is not configured.');
     let counted: Response;
@@ -201,7 +204,7 @@ export function createSettlementProvider(config: Record<string, string | undefin
     }
     if (!counted.ok) throw new SettlementProviderError(counted.status === 401 || counted.status === 403 ? 'provider_unavailable' : 'provider_failed', `The settlement token preflight failed (${counted.status}).`);
     let tokenBody:any; try { tokenBody=await counted.json(); } catch { throw new SettlementProviderError('provider_malformed','The settlement token preflight was malformed.'); }
-    if(!Number.isSafeInteger(tokenBody?.input_tokens)||tokenBody.input_tokens<0||tokenBody.input_tokens+SETTLEMENT_OUTPUT_RESERVE>capacity) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its model input budget.');
+    if(!Number.isSafeInteger(tokenBody?.input_tokens)||tokenBody.input_tokens<0||tokenBody.input_tokens>SETTLEMENT_INPUT_TOKENS||tokenBody.input_tokens+SETTLEMENT_OUTPUT_RESERVE>capacity) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its model input budget.');
     let response: Response;
     try { response=await fetch('https://api.openai.com/v1/responses',{method:'POST',signal,headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body)}); }
     catch (cause) { if(signal.aborted) throw new SettlementProviderError('provider_timeout','The settlement provider timed out.'); throw new SettlementProviderError('provider_failed',cause instanceof Error?cause.message:'The settlement provider failed.'); }

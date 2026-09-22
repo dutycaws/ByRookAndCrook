@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { retrieveNpcMemoryEvidence, type NpcMemoryEvidenceClient } from '$lib/server/npc-memory/retrieval';
 import { createNpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/provider';
 import type { NpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/contracts';
+import { assembleNpcMemoryContext, canonicalJson, canonicalNpcMemoryContextPayload, sha256Hex, TRANSITION_CONTEXT_TIERS, transitionContextTier, type NpcMemoryContextArtifact } from '$lib/server/npc-memory/context';
 
 type QuestTransitionCheckpoint = { stage: 'memory_context' | 'proposer' | 'critic' | 'repair' | 'final_critic'; payload: Record<string, unknown> };
 type QuestTransitionClaim = {
@@ -91,6 +92,9 @@ function rpc(client: SettlementWorkerClient, name: string, args: Record<string, 
     return result.data;
   });
 }
+function serializedUtf8Bytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
 
 function parseClaim(value: unknown): QuestTransitionClaim | { status: 'idle' } | null {
   if (!object(value)) return null;
@@ -105,7 +109,7 @@ function parseClaim(value: unknown): QuestTransitionClaim | { status: 'idle' } |
   const checkpoints: QuestTransitionCheckpoint[] = [];
   for (const raw of value.checkpoints) {
     if (!object(raw) || !['memory_context', 'proposer', 'critic', 'repair', 'final_critic'].includes(String(raw.stage)) || !object(raw.payload)) return null;
-    try { if (JSON.stringify(raw.payload).length > (raw.stage==='memory_context' ? 65_536 : 16_384)) return null; } catch { return null; }
+    try { if (serializedUtf8Bytes(raw.payload) > (raw.stage==='memory_context' ? 512 * 1024 : 16 * 1024)) return null; } catch { return null; }
     const stage = raw.stage as QuestTransitionCheckpoint['stage'];
     if (checkpoints.some((checkpoint) => checkpoint.stage === stage)) return null;
     checkpoints.push({ stage, payload: raw.payload });
@@ -188,8 +192,25 @@ function freeze<T>(value: T): T {
  */
 function memoryDossier(claim: QuestTransitionClaim, memoryContext?: Record<string, unknown>): QuestTransitionMemoryDossier {
   // The historical terminal snapshot remains authoritative context; v4
-  // evidence is a separately frozen, source-manifested attachment.
-  const evidence = memoryContext ? {...claim.frozenContext,memoryContext} : claim.frozenContext;
+  // evidence is a separately frozen, source-manifested attachment.  The
+  // durable checkpoint deliberately stores raw evidence plus its canonical
+  // representation for replay integrity; only one compact authorized copy is
+  // allowed into a model request.
+  const attachment=memoryContext?.attachment as Partial<NpcMemoryContextArtifact> | undefined;
+  const compactAttachment=attachment ? {
+    tier: memoryContext?.tier,
+    policyVersion: attachment.policyVersion,
+    projectionVersion: attachment.projectionVersion,
+    sourceManifest: attachment.sourceManifest,
+    coverage: attachment.coverage,
+    payload: attachment.payload,
+    hash: attachment.hash,
+    utf8Bytes: attachment.utf8Bytes,
+    tokens: attachment.tokens,
+    cutoffSequence: attachment.cutoffSequence,
+    view: attachment.view
+  } : undefined;
+  const evidence = compactAttachment ? {...claim.frozenContext,memoryContext:compactAttachment} : claim.frozenContext;
   const versions = sourceVersions(evidence);
   const sourceFingerprint = createHash('sha256').update(canonical(evidence)).digest('hex');
   const manifest = { transitionId: claim.transitionId, terminalEventId: claim.terminalEventId, sourceFingerprint, sourceVersions: versions };
@@ -207,23 +228,37 @@ function memoryDossier(claim: QuestTransitionClaim, memoryContext?: Record<strin
   return freeze({ version: metadata.version, fingerprint, manifest: freeze(manifest), coverage: freeze(coverage), bytes: freeze(bytes), evidence });
 }
 
-const MEMORY_CONTEXT_BYTES=64*1024;
-const MEMORY_CONTEXT_TOKENS=16_000;
+const MEMORY_CONTEXT_BYTES=512*1024;
 function validMemoryContext(value: unknown): value is Record<string, unknown> {
   if (!object(value) || !object(value.evidence) || typeof value.querySemantic!=='string' || !Number.isSafeInteger(value.cutoffLedgerSequence)
     || typeof value.manifestHash!=='string' || !/^[0-9a-f]{64}$/i.test(value.manifestHash) || typeof value.contextFingerprint!=='string' || !/^[0-9a-f]{64}$/i.test(value.contextFingerprint) || !object(value.budget)) return false;
   const budget=value.budget as Record<string,unknown>;
   const evidence=value.evidence as Record<string,unknown>;
   const manifest=value.sourceManifest;
-  if (!Array.isArray(manifest) || !Number.isSafeInteger(evidence.cutoffLedgerSequence) || evidence.cutoffLedgerSequence!==value.cutoffLedgerSequence
-    || createHash('sha256').update(canonical(manifest)).digest('hex')!==value.manifestHash || createHash('sha256').update(canonical(evidence)).digest('hex')!==value.contextFingerprint || utf8Bytes(evidence)!==budget.utf8Bytes) return false;
+  const tier=value.tier==='ordinary' ? TRANSITION_CONTEXT_TIERS.ordinary : value.tier==='rich' ? TRANSITION_CONTEXT_TIERS.rich : null;
+  const attachment=value.attachment as Partial<NpcMemoryContextArtifact> | undefined;
+  const normalizedManifest=Array.isArray(manifest) ? manifest.map((source:any)=>({id:source?.sourceId,version:source?.sourceVersion,hash:source?.sourceHash,kind:source?.sourceKind,ledgerSequence:source?.ledgerSequence})) : [];
+  const expectedAttachmentPayload={evidence,querySemantic:value.querySemantic,cutoffLedgerSequence:value.cutoffLedgerSequence};
+  if (!Array.isArray(manifest) || !tier || !attachment || attachment.tier!==tier.tier || attachment.overallMaxBytes!==tier.overallMaxBytes || attachment.overallMaxTokens!==tier.overallMaxTokens
+    || !Number.isSafeInteger(evidence.cutoffLedgerSequence) || evidence.cutoffLedgerSequence!==value.cutoffLedgerSequence
+    || attachment.cutoffSequence!==value.cutoffLedgerSequence || attachment.view!=='transition'
+    || canonicalJson(attachment.payload) !== canonicalJson(expectedAttachmentPayload)
+    || canonicalJson(attachment.sourceManifest) !== canonicalJson(normalizedManifest)
+    || createHash('sha256').update(canonical(manifest)).digest('hex')!==value.manifestHash || createHash('sha256').update(canonical(evidence)).digest('hex')!==value.contextFingerprint
+    || attachment.canonicalJson!==canonicalNpcMemoryContextPayload({sources:attachment.sourceManifest ?? [],requiredSourceIds:(attachment.coverage as any)?.required ?? [],payload:attachment.payload as Record<string,unknown>})
+    || attachment.hash!==sha256Hex(attachment.canonicalJson ?? '') || attachment.utf8Bytes!==budget.utf8Bytes || attachment.tokens!==budget.inputTokens
+    || !Number.isSafeInteger(attachment.utf8Bytes) || (attachment.utf8Bytes as number)<0 || (attachment.utf8Bytes as number)>tier.maxBytes
+    || !Number.isSafeInteger(attachment.tokens) || (attachment.tokens as number)<0 || (attachment.tokens as number)>tier.maxTokens) return false;
   return Number.isSafeInteger(budget.utf8Bytes) && (budget.utf8Bytes as number)>=0 && (budget.utf8Bytes as number)<=MEMORY_CONTEXT_BYTES
-    && Number.isSafeInteger(budget.inputTokens) && (budget.inputTokens as number)>=0 && (budget.inputTokens as number)<=MEMORY_CONTEXT_TOKENS
+    && Number.isSafeInteger(budget.inputTokens) && (budget.inputTokens as number)>=0 && (budget.inputTokens as number)<=tier.maxTokens
     && typeof budget.model==='string' && typeof budget.counterId==='string';
 }
 async function captureMemoryContext(client: SettlementWorkerClient, claim: QuestTransitionClaim, runtime: QuestTransitionRuntime, signal: AbortSignal): Promise<Record<string,unknown> | null> {
   const replay=checkpoint(claim,'memory_context');
-  if (replay) return validMemoryContext(replay) ? replay : null;
+  if (replay) {
+    const expectedTier = transitionContextTier(claim.frozenContext).tier;
+    return validMemoryContext(replay) && replay.tier === expectedTier ? replay : null;
+  }
   const scope=await rpc(client,'world_quest_transition_memory_scope',{p_transition_id:claim.transitionId,p_fence:claim.fence});
   if (!object(scope) || !uuid.test(String(scope.actorId)) || !uuid.test(String(scope.instanceId)) || !Number.isSafeInteger(scope.cutoffLedgerSequence)) {
     throw new TransitionValidationError('Transition memory scope is unavailable.');
@@ -234,22 +269,22 @@ async function captureMemoryContext(client: SettlementWorkerClient, claim: Quest
   }};
   const config=privateRuntimeEnvironment(env);
   const embedding=runtime.embeddingProvider ?? (config.OPENAI_API_KEY&&config.NPC_EMBEDDING_MODEL&&config.NPC_EMBEDDING_DIMENSIONS ? createNpcMemoryEmbeddingProvider(config) : undefined);
+  const tier=transitionContextTier(claim.frozenContext);
   const result=await retrieveNpcMemoryEvidence(evidenceClient,{actorId:scope.actorId as string,instanceId:scope.instanceId as string,view:'transition',cutoffLedgerSequence:scope.cutoffLedgerSequence as number,
-    query:`Quest transition ${claim.terminalEventId}`,knownRefs:[claim.terminalEventId],budget:{limit:16,candidateLimit:48,fallbackLimit:16},signal},embedding);
+    query:`Quest transition ${claim.terminalEventId}`,knownRefs:[claim.terminalEventId],budget:{limit:tier.limit,candidateLimit:tier.candidateLimit,fallbackLimit:16},signal},embedding);
   const raw=result.evidence as Record<string,unknown>;
   if (!object(raw.coverage) || raw.coverage.complete!==true) throw new TransitionValidationError('Transition evidence coverage is incomplete.');
-  const canonicalEvidence=canonical(raw);
-  // The durable budget is for the canonical evidence bytes, not a JSON string
-  // containing that canonical JSON.  Replay recomputes from the object, so
-  // these two paths must use the identical representation.
-  const bytes=new TextEncoder().encode(canonicalEvidence).byteLength;
-  if (bytes>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition evidence exceeds its byte budget.');
+  const manifest=Array.isArray(raw.sourceManifest)?raw.sourceManifest:[];
+  const sources=manifest.map((source:any)=>({id:source.sourceId,version:source.sourceVersion,hash:source.sourceHash,kind:source.sourceKind,ledgerSequence:source.ledgerSequence}));
+  if (!sources.every(source=>typeof source.id==='string'&&Number.isSafeInteger(source.version)&&typeof source.hash==='string'&&typeof source.kind==='string'&&Number.isSafeInteger(source.ledgerSequence))) throw new TransitionValidationError('Transition evidence manifest is invalid.');
+  const attachmentPayload={evidence:raw,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence};
+  const canonicalEvidence=canonicalNpcMemoryContextPayload({sources,requiredSourceIds:sources.map(source=>source.id),payload:attachmentPayload});
   const counter=runtime.countMemoryContext ?? (runtime.provider as { countMemoryContext?: QuestTransitionRuntime['countMemoryContext'] } | undefined)?.countMemoryContext;
   if (!counter) throw new TransitionValidationError('Transition evidence token counter is unavailable.');
   const counted=await counter(canonicalEvidence,signal);
-  if (!string(counted.model,120)||!string(counted.counterId,120)||!Number.isSafeInteger(counted.inputTokens)||counted.inputTokens<0||counted.inputTokens>MEMORY_CONTEXT_TOKENS||!Number.isSafeInteger(counted.durationMs)||counted.durationMs<0) throw new TransitionValidationError('Transition evidence token count is invalid.');
-  const manifest=Array.isArray(raw.sourceManifest)?raw.sourceManifest:[];
-  const payload={evidence:raw,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence,sourceManifest:manifest,manifestHash:createHash('sha256').update(canonical(manifest)).digest('hex'),contextFingerprint:createHash('sha256').update(canonical(raw)).digest('hex'),budget:{utf8Bytes:bytes,inputTokens:counted.inputTokens,model:counted.model,counterId:counted.counterId,durationMs:counted.durationMs}};
+  if (!string(counted.model,120)||!string(counted.counterId,120)||!Number.isSafeInteger(counted.inputTokens)||counted.inputTokens<0||counted.inputTokens>tier.maxTokens||!Number.isSafeInteger(counted.durationMs)||counted.durationMs<0) throw new TransitionValidationError('Transition evidence token count is invalid.');
+  const attachment=assembleNpcMemoryContext({policyVersion:'npc-transition-evidence-v1',projectionVersion:'npc-memory-evidence-v4',maxBytes:tier.maxBytes,maxTokens:tier.maxTokens,tier:tier.tier,overallMaxBytes:tier.overallMaxBytes,overallMaxTokens:tier.overallMaxTokens,sources,requiredSourceIds:sources.map(source=>source.id),payload:attachmentPayload,tokenCount:counted.inputTokens,tokenizerId:counted.counterId,counterId:counted.counterId,counterDurationMs:counted.durationMs,model:counted.model,cutoffSequence:scope.cutoffLedgerSequence as number,view:'transition'});
+  const payload={tier:tier.tier,evidence:raw,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence,sourceManifest:manifest,manifestHash:createHash('sha256').update(canonical(manifest)).digest('hex'),contextFingerprint:createHash('sha256').update(canonical(raw)).digest('hex'),attachment,budget:{utf8Bytes:attachment.utf8Bytes,inputTokens:counted.inputTokens,model:counted.model,counterId:counted.counterId,durationMs:counted.durationMs}};
   if (utf8Bytes(payload)>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition memory artifact exceeds its byte budget.');
   await rpc(client,'world_quest_transition_checkpoint',{p_transition_id:claim.transitionId,p_fence:claim.fence,p_stage:'memory_context',p_payload:payload});
   return payload;

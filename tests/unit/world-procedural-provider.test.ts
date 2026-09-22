@@ -6,7 +6,7 @@ import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
 const promptRelease=fixturePromptRelease;
 function createSettlementProvider(config: Record<string,string|undefined>) {
-  const provider=createSettlementProviderBase(config);
+  const provider=createSettlementProviderBase({ ...config, NPC_MODEL_INPUT_CAPACITY: config.NPC_MODEL_INPUT_CAPACITY ?? '100000' });
   return { ...provider, generate(stage: Parameters<typeof provider.generate>[0], payload: unknown, signal: AbortSignal) {
     return provider.generate(stage,payload,signal,promptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
   } };
@@ -15,7 +15,7 @@ function createSettlementProvider(config: Record<string,string|undefined>) {
 const resident='11111111-1111-4111-8111-111111111111';
 function context() { return {version:'procedural-world-v1',entityKinds:{millhaven:'location'},activeGeneratedEntityCount:12,activeQuestByResident:{},capabilities:{[resident]:{version:'capabilities-v1',allowedActions:['prepare'],allowedApproaches:['scouting'],allowedWorldEffects:['create_entity','record_world_event'],allowedTargetKinds:['location'],socialCapabilities:[],irreversibleEffects:[]}}}; }
 function proposal() { return {version:'procedural-world-v1',commands:[{operation:'entity',effectKind:'create_entity',sourceResidentId:resident,entityKind:'place',entityKey:'Old Mill',archetypeKey:'landmark',proposedName:'Old Mill',payload:{region:'north'}},{operation:'public_event',effectKind:'record_world_event',sourceResidentId:resident,templateKey:'market-day',participantEntityRefs:['millhaven'],title:'Market day returns',summary:'Merchants gather by the old mill.',reuseKey:'old-mill-market'}]}; }
-function completed(value:unknown) { return new Response(JSON.stringify({status:'completed',usage:{input_tokens:11,output_tokens:4},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]}),{status:200,headers:{'content-type':'application/json'}}); }
+function completed(value:unknown) { return new Response(JSON.stringify({status:'completed',input_tokens:11,usage:{input_tokens:11,output_tokens:4},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]}),{status:200,headers:{'content-type':'application/json'}}); }
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -49,7 +49,7 @@ describe('procedural world provider stages', () => {
 
   it('uses closed critic instructions, accepts only terminal final decisions, and validates all envelopes before fetch', async () => {
     const requests:any[]=[]; let call=0;
-    const fetch=vi.fn(async (_url, init:RequestInit) => { requests.push(JSON.parse(String(init.body))); return completed(call++ === 0 ? {decision:'repair',instructions:[{code:'entity_registry',path:'commands.entity'}]} : {decision:'repair',instructions:[{code:'budget',path:'commands'}]}); }); vi.stubGlobal('fetch',fetch);
+    const fetch=vi.fn(async (_url, init:RequestInit) => { if(String(_url).endsWith('/input_tokens')) return new Response(JSON.stringify({input_tokens:11}),{status:200}); requests.push(JSON.parse(String(init.body))); return completed(call++ === 0 ? {decision:'repair',instructions:[{code:'entity_registry',path:'commands.entity'}]} : {decision:'repair',instructions:[{code:'budget',path:'commands'}]}); }); vi.stubGlobal('fetch',fetch);
     const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'}); const review={context:context(),proposal:proposal()};
     await expect(provider.generate('procedural_world_critic',review,new AbortController().signal)).resolves.toMatchObject({value:{decision:'repair',instructions:[{code:'entity_registry',path:'commands.entity'}]},model:'gpt-5.6-luna'});
     await expect(provider.generate('procedural_world_final_critic',review,new AbortController().signal)).rejects.toMatchObject({code:'provider_malformed'});
@@ -57,7 +57,7 @@ describe('procedural world provider stages', () => {
     expect(requests[1].text.format.schema).toMatchObject({properties:{decision:{enum:['accept','reject']},instructions:{maxItems:0}}});
     await expect(provider.generate('procedural_world_repair',{context:context(),proposal:proposal(),instructions:[{code:'not-real',path:'commands'}]},new AbortController().signal)).rejects.toMatchObject({code:'provider_malformed'});
     await expect(provider.generate('procedural_world_critic',{context:context(),proposal:{bad:true}},new AbortController().signal)).rejects.toMatchObject({code:'provider_malformed'});
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(4);
   });
 
   it('parses a valid bounded repair against its frozen context', async () => {

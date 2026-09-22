@@ -70,7 +70,7 @@ describe('release-pinned provider adapters', () => {
     // Deliberate produces a valid schema-free transport assertion after the body
     // reaches Responses; the structure rejection is irrelevant to provenance.
     await dialogue.generate('speak', {}, AbortSignal.timeout(1_000), release.prompts['dialogue.speak']).catch(() => undefined);
-    const settlement = createSettlementProvider({ OPENAI_API_KEY: 'key' });
+    const settlement = createSettlementProvider({ OPENAI_API_KEY: 'key', NPC_MODEL_INPUT_CAPACITY: '100000' });
     await settlement.generate('proposer', { schema: {}, profile: {}, capability: {}, worldSnapshot: {}, authorizedEvidence: [] }, AbortSignal.timeout(1_000), release.prompts['resident.proposer']).catch(() => undefined);
     expect(requestBodies.filter((body) => Array.isArray(body.input)).map((body) => (body.input as Array<{ content: string }>)[0].content)).toEqual(expect.arrayContaining([
       release.prompts['dialogue.speak'].body, release.prompts['resident.proposer'].body

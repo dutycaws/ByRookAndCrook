@@ -94,4 +94,42 @@ describe('quest transition provider stages', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it.each(['quest_transition_critic','quest_transition_repair'] as const)('enforces the 80k full-request token ceiling for %s at -1, equal, and +1',async(stage)=>{
+    const payload=stage==='quest_transition_critic'
+      ? {context:context(),frozenContext:frozenContext(),memoryDossier:memoryDossier(),proposal:proposal()}
+      : {context:context(),frozenContext:frozenContext(),memoryDossier:memoryDossier(),proposal:proposal(),instructions:[{code:'plan_shape',path:'plan'}]};
+    const output=stage==='quest_transition_critic'?{decision:'accept',instructions:[]}:{proposalJson:JSON.stringify(proposal())};
+    for(const [tokens,accepted] of [[79_999,true],[80_000,true],[80_001,false]] as const) {
+      const fetch=vi.fn(async(url)=>String(url).endsWith('/input_tokens')?new Response(JSON.stringify({input_tokens:tokens}),{status:200}):completed(output));
+      vi.stubGlobal('fetch',fetch);
+      const provider=createSettlementProvider({OPENAI_API_KEY:'test-key',NPC_MODEL_INPUT_CAPACITY:'100000'});
+      const run=()=>provider.generate(stage,payload,new AbortController().signal,fixturePromptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
+      if(accepted) await expect(run()).resolves.toBeTruthy(); else await expect(run()).rejects.toMatchObject({code:'provider_malformed'});
+      expect(fetch).toHaveBeenCalledTimes(accepted?2:1); vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['quest_transition_critic','quest_transition_repair'] as const)('enforces the exact 384KiB UTF-8 request ceiling for %s at -1, equal, and +1', async (stage) => {
+    const payload=stage==='quest_transition_critic'
+      ? {context:context(),frozenContext:frozenContext(),memoryDossier:memoryDossier(),proposal:proposal()}
+      : {context:context(),frozenContext:frozenContext(),memoryDossier:memoryDossier(),proposal:proposal(),instructions:[{code:'plan_shape',path:'plan'}]};
+    const output=stage==='quest_transition_critic'?{decision:'accept',instructions:[]}:{proposalJson:JSON.stringify(proposal())};
+    const fetch=vi.fn(async(url)=>String(url).endsWith('/input_tokens')?new Response(JSON.stringify({input_tokens:5}),{status:200}):completed(output));
+    vi.stubGlobal('fetch',fetch);
+    const provider=createSettlementProvider({OPENAI_API_KEY:'test-key',NPC_MODEL_INPUT_CAPACITY:'100000'});
+    const basePrompt=fixturePromptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]];
+    const run=(bytes:number)=>provider.generate(stage,payload,new AbortController().signal,{...basePrompt,body:'x'.repeat(bytes)});
+    // Search for the exact largest one-byte ASCII prompt accepted by the full
+    // serialized Responses body; this covers schema, critic/repair payload, and
+    // transport framing rather than a synthetic partial projection.
+    let low=0, high=384*1024;
+    while(low<high) {
+      const middle=Math.ceil((low+high)/2);
+      try { await run(middle); low=middle; } catch { high=middle-1; }
+    }
+    await expect(run(low-1)).resolves.toBeTruthy();
+    await expect(run(low)).resolves.toBeTruthy();
+    await expect(run(low+1)).rejects.toMatchObject({code:'provider_malformed'});
+  });
 });

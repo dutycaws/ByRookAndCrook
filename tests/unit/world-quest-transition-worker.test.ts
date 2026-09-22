@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runQuestTransitionClaim } from '$lib/server/evolving-world/quest-transition-worker';
+import { canonicalNpcMemoryContextPayload, sha256Hex, utf8Bytes } from '$lib/server/npc-memory/context';
 
 const transitionId = '11111111-1111-4111-8111-111111111111';
 const terminalEventId = '22222222-2222-4222-8222-222222222222';
@@ -132,9 +133,23 @@ describe('quest transition worker', () => {
     expect(new Set(dossiers.map((dossier: any) => dossier.fingerprint)).size).toBe(1);
     expect(new Set(dossiers.map((dossier: any) => dossier.evidence)).size).toBe(1);
     expect(dossiers[0]).toMatchObject({ version: 'quest-transition-memory-dossier-v1', manifest: { transitionId, terminalEventId, sourceFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }, coverage: { terminalEvent: true, eventHistory: 1 }, bytes: { frozenContext: expect.any(Number), dossier: expect.any(Number) } });
-    expect(dossiers[0].evidence).toMatchObject({ ...((model.payloads[0] as any).frozenContext), memoryContext: expect.objectContaining({ evidence: expect.objectContaining({retrievalVersion:'npc-memory-evidence-v4'}), budget:expect.objectContaining({inputTokens:3}) }) });
+    expect(dossiers[0].evidence).toMatchObject({ ...((model.payloads[0] as any).frozenContext), memoryContext: expect.objectContaining({ tier:'ordinary', payload:expect.objectContaining({evidence:expect.objectContaining({retrievalVersion:'npc-memory-evidence-v4'})}), tokens:3 }) });
+    expect((dossiers[0].evidence as any).memoryContext).toMatchObject({tier:'ordinary',hash:expect.stringMatching(/^[0-9a-f]{64}$/)});
+    expect((dossiers[0].evidence as any).memoryContext).not.toHaveProperty('canonicalJson');
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ memoryContext: expect.objectContaining({ utf8Bytes: dossiers[0].bytes.dossier, reuse: 'fresh' }) })]));
     expect(JSON.stringify(events)).not.toContain('Steady and cautious');
+  });
+
+  it('selects the rich transition attachment tier only for successor/departure-capable terminal contexts without a next authored milestone', async () => {
+    const mock=client(); const rich=claim077();
+    (rich.frozenContext as any).nextAuthoredMilestone=null;
+    (rich.frozenContext as any).capabilityEnvelope={...(rich.frozenContext as any).capabilityEnvelope,allowGeneratedSuccessor:true};
+    const model=provider({quest_transition_proposer:proposal,quest_transition_critic:{decision:'accept',instructions:[]}});
+    // The fixture proposal remains authored-milestone shaped, so validation
+    // may reject after capture; tier admission is proven before model output.
+    await runQuestTransitionClaim(mock.api,rich,{provider:model,promptRegistry:registry(),heartbeatMs:99_999});
+    expect((model.payloads[0] as any).memoryDossier.evidence.memoryContext).toMatchObject({tier:'rich',policyVersion:'npc-transition-evidence-v1',tokens:expect.any(Number)});
+    expect(mock.calls.find(call=>call.name==='npc_memory_evidence_retrieve_for_actor')?.args).toMatchObject({p_limit:32,p_candidate_limit:128});
   });
 
   it('reclaims a persisted memory context and model checkpoints without re-opening scope, retrieval, profile, or embedding work', async () => {
@@ -143,11 +158,16 @@ describe('quest transition worker', () => {
     await expect(runQuestTransitionClaim(first.api, claim(), { provider:firstModel, promptRegistry:registry(), heartbeatMs:99_999 })).resolves.toMatchObject({status:'completed'});
     const memoryContext=first.calls.find(call=>call.name==='world_quest_transition_checkpoint' && call.args?.p_stage==='memory_context')?.args?.p_payload;
     expect(memoryContext).toBeTruthy();
+    // JSON UTF-8 bytes—not JavaScript code units—govern the special durable
+    // checkpoint. This is intentionally above the old 64KiB parser cap while
+    // remaining below the 512KiB SQL cap.
+    const oversizedMemoryContext={...(memoryContext as Record<string,unknown>),padding:'界'.repeat(30_000)};
+    expect(new TextEncoder().encode(JSON.stringify(oversizedMemoryContext)).byteLength).toBeGreaterThan(65_536);
     const replay=client(); let recounts=0;
     const replayModel=provider({});
     replayModel.countMemoryContext=async()=>{ recounts++; throw new Error('replay must not recount'); };
     await expect(runQuestTransitionClaim(replay.api,claim([
-      {stage:'memory_context',payload:memoryContext},
+      {stage:'memory_context',payload:oversizedMemoryContext},
       {stage:'proposer',payload:{proposal}},
       {stage:'critic',payload:{decision:{decision:'accept',instructions:[]}}}
     ]),{provider:replayModel,promptRegistry:registry(),heartbeatMs:99_999})).resolves.toMatchObject({status:'completed'});
@@ -156,6 +176,22 @@ describe('quest transition worker', () => {
     expect(replay.calls.map(call=>call.name)).not.toEqual(expect.arrayContaining([
       'world_quest_transition_memory_scope','npc_memory_active_embedding_profile','npc_memory_evidence_retrieve_for_actor'
     ]));
+  });
+
+  it('rejects a self-consistent attachment mutation when it no longer binds the authoritative replay evidence', async () => {
+    const first=client(); const firstModel=provider({quest_transition_proposer:proposal,quest_transition_critic:{decision:'accept',instructions:[]}});
+    await runQuestTransitionClaim(first.api,claim(),{provider:firstModel,promptRegistry:registry(),heartbeatMs:99_999});
+    const memoryContext=structuredClone(first.calls.find(call=>call.name==='world_quest_transition_checkpoint'&&call.args?.p_stage==='memory_context')?.args?.p_payload) as any;
+    const attachment=memoryContext.attachment;
+    attachment.payload={...attachment.payload,evidence:{...attachment.payload.evidence,retrievalVersion:'substituted-evidence-v4'}};
+    attachment.canonicalJson=canonicalNpcMemoryContextPayload({sources:attachment.sourceManifest,requiredSourceIds:attachment.coverage.required,payload:attachment.payload});
+    attachment.hash=sha256Hex(attachment.canonicalJson);
+    attachment.utf8Bytes=utf8Bytes(attachment.canonicalJson);
+    memoryContext.budget.utf8Bytes=attachment.utf8Bytes;
+    const replay=client(); const replayModel=provider({});
+    await expect(runQuestTransitionClaim(replay.api,claim([{stage:'memory_context',payload:memoryContext}]),{provider:replayModel,promptRegistry:registry(),heartbeatMs:99_999})).resolves.toMatchObject({status:'failed',errorCode:'validation_rejected'});
+    expect(replayModel.calls).toEqual([]);
+    expect(replay.calls.map(call=>call.name)).not.toEqual(expect.arrayContaining(['world_quest_transition_memory_scope','npc_memory_evidence_retrieve_for_actor']));
   });
 
   it.each([
