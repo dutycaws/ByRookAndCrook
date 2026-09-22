@@ -39,6 +39,8 @@
     "npc:eval:review": "tsx scripts/evaluate-npc-review.ts --live",
     "world:settlement:drain": "node --import tsx scripts/run-world-settlement-worker-cli.ts --once",
     "simulation:worker": "node --import tsx scripts/run-world-settlement-worker-cli.ts",
+    "npc:memory:drain": "node --import tsx scripts/run-npc-memory-worker-cli.ts --once",
+    "npc:memory:worker": "node --import tsx scripts/run-npc-memory-worker-cli.ts",
     "art:assets:check": "tsx scripts/validate-scene-assets.ts",
     "media:git:check": "tsx scripts/media/git-policy.ts",
     "media:git:check:staged": "tsx scripts/media/git-policy.ts --staged",
