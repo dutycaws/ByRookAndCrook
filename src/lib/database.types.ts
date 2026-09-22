@@ -2473,6 +2473,17 @@ export type Database = {
         Args: { p_batch_ordinal: number; p_fence: string; p_job_id: string }
         Returns: Json
       }
+      world_npc_memory_summary_record_dispatch_result: {
+        Args: {
+          p_batch_ordinal: number
+          p_fence: string
+          p_job_id: string
+          p_model: string
+          p_provider_request_id?: string
+          p_result: Json
+        }
+        Returns: Json
+      }
       world_npc_memory_summary_recover_dispatch: {
         Args: { p_batch_ordinal: number; p_fence: string; p_job_id: string }
         Returns: Json
