@@ -59,7 +59,7 @@ where instance_id=(select instance_id from pg_temp.f2) and source_id='18800000-0
 create temporary table pg_temp.auth_job as select id from private.world_npc_memory_outbox where instance_id=(select instance_id from pg_temp.f2) and source_id='18800000-0000-0000-0000-000000000011';
 grant select on pg_temp.auth_job to authenticated,service_role;
 set local role authenticated; set local request.jwt.claim.role='authenticated';
-select throws_ok($$select public.world_npc_memory_complete((select id from pg_temp.auth_job),'18800000-0000-4000-8000-000000000022','[]'::jsonb,null)$$,'PT403',null,'authenticated completion is denied');
+select throws_ok($$select public.world_npc_memory_complete((select id from pg_temp.auth_job),'18800000-0000-4000-8000-000000000022','[]'::jsonb,null)$$,'42501',null,'authenticated completion is denied before the service-only seam');
 reset role;
 set local role service_role; set local request.jwt.claim.role='service_role';
 select lives_ok($$select public.world_npc_memory_complete((select id from pg_temp.auth_job),'18800000-0000-4000-8000-000000000022','[]'::jsonb,null)$$,'service completion succeeds for the valid job');
@@ -132,7 +132,7 @@ select '18800000-0000-4002-8000-000000000012',f.instance_id,'interaction','Post-
 update private.world_npc_memory_outbox set status='completed',completed_at=clock_timestamp(),lease_until=null where instance_id=(select instance_id from pg_temp.f3) and source_kind='quest_event';
 select private.world_npc_memory_refresh_watermark((select instance_id from pg_temp.f3),'extract','npc-memory-v1');
 select is((private.world_npc_memory_request_quest('18800000-0000-4002-8000-000000000010')).status,'pending','terminal quest A requests its own closure');
-select is(private.world_npc_memory_schedule_closures((select instance_id from pg_temp.f3)),1,'quest A closure schedules independently');
+select is(private.world_npc_memory_schedule_closures((select instance_id from pg_temp.f3)),3,'all same-instance terminal quest closures schedule once');
 select ok(exists(select 1 from private.world_npc_memory_summary_sets s join private.world_npc_memory_summary_leaves l on l.set_id=s.id where s.instance_id=(select instance_id from pg_temp.f3) and s.summary_kind='quest_summary' and s.closure_key like '%18800000-0000-4002-8000-000000000010:%' and l.source_kind='quest_event' and l.source_id='18800000-0000-4002-8000-000000000010'),'quest A terminal evidence is included');
 select ok(not exists(select 1 from private.world_npc_memory_summary_sets s join private.world_npc_memory_summary_leaves l on l.set_id=s.id where s.instance_id=(select instance_id from pg_temp.f3) and s.summary_kind='quest_summary' and s.closure_key like '%18800000-0000-4002-8000-000000000010:%' and l.source_kind='quest_event' and l.source_id='18800000-0000-4002-8000-000000000011'),'quest A set excludes same-instance quest B evidence');
 select ok(exists(select 1 from private.world_npc_memory_summary_sets s join private.world_npc_memory_summary_leaves l on l.set_id=s.id where s.instance_id=(select instance_id from pg_temp.f3) and s.summary_kind='quest_summary' and s.closure_key like '%18800000-0000-4002-8000-000000000010:%' and l.source_id='18800000-0000-4000-8000-000000000030'),'A-linked pre-cutoff commitment source is included');
