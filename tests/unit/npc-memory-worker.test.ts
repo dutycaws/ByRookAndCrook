@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assembleNpcMemoryContext, canonicalJson, sha256Hex, utf8Bytes } from '$lib/server/npc-memory/context';
-import { runNpcMemoryClaim } from '$lib/server/npc-memory/worker';
+import { drainNpcMemoryQueue, runNpcMemoryClaim } from '$lib/server/npc-memory/worker';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const fence = '22222222-2222-4222-8222-222222222222';
@@ -33,6 +33,46 @@ describe('npc memory worker', () => {
 
   it('does not report a winner when a retry has replaced its fence', async () => {
     await expect(runNpcMemoryClaim(client('Memory work fence is stale'), claim(), runtime())).resolves.toEqual({ status: 'lease_lost' });
+  });
+
+  it('uses the public service-worker RPC names and tolerates unavailable embeddings', async () => {
+    const api = client();
+    await expect(runNpcMemoryClaim(api, claim(), { ...runtime(), processorKind: 'embedding' })).resolves.toEqual({ status: 'completed', artifacts: 0, fallback: false });
+    expect(api.rpc).toHaveBeenCalledWith('world_npc_memory_complete', expect.objectContaining({ p_job_id: id, p_fence: fence }));
+  });
+
+  it('records an unavailable source as a durable gap rather than treating it as a stale fence', async () => {
+    const api = client();
+    await expect(runNpcMemoryClaim(api, claim(), { ...runtime(), loadSource: async () => { throw new Error('source_unavailable'); } })).resolves.toEqual({ status: 'failed', errorCode: 'source_unavailable' });
+    expect(api.rpc).toHaveBeenCalledWith('world_npc_memory_complete', expect.objectContaining({ p_job_id: id, p_fence: fence, p_artifacts: [], p_error_code: 'source_unavailable' }));
+  });
+
+  it('drains no more than its bounded claim limit and stops at idle', async () => {
+    const api = { rpc: vi.fn(async (name: string) => {
+      if (name === 'world_npc_memory_claim') return { data: { status: 'idle' }, error: null };
+      throw new Error(`Unexpected RPC ${name}`);
+    }) };
+    await expect(drainNpcMemoryQueue(99, api, runtime())).resolves.toEqual([{ status: 'idle' }]);
+    expect(api.rpc).toHaveBeenCalledTimes(1);
+    expect(api.rpc).toHaveBeenCalledWith('world_npc_memory_claim', { p_processor_kind: 'summary', p_processor_version: 'npc-memory-v1' });
+  });
+
+  it('caps non-idle draining at 32 claims', async () => {
+    const api = { rpc: vi.fn(async (name: string) => {
+      if (name === 'world_npc_memory_claim') return { data: claim(), error: null };
+      if (name === 'world_npc_memory_complete') return { data: null, error: null };
+      throw new Error(`Unexpected RPC ${name}`);
+    }) };
+    const outcomes = await drainNpcMemoryQueue(99, api, runtime());
+    expect(outcomes).toHaveLength(32);
+    expect(outcomes.every((outcome) => outcome.status === 'completed')).toBe(true);
+    expect(api.rpc.mock.calls.filter(([name]) => name === 'world_npc_memory_claim')).toHaveLength(32);
+  });
+
+  it('stops safely when claiming work fails', async () => {
+    const api = { rpc: vi.fn(async () => ({ data: null, error: { message: 'database unavailable' } })) };
+    await expect(drainNpcMemoryQueue(2, api, runtime())).resolves.toEqual([]);
+    expect(api.rpc).toHaveBeenCalledTimes(1);
   });
 
   it('freezes a byte-accurate, source-hashed context artifact', () => {

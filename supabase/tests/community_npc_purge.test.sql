@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(23);
+select plan(25);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000061','purge-player@example.test','authenticated','authenticated'),
@@ -67,6 +67,13 @@ select private.world_npc_memory_enqueue(
   '18100000-3000-4000-8000-000000000001',1,0,
   encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex')
 );
+update private.world_npc_memory_outbox
+set status='processing', fence='18100000-3000-4000-8000-000000000005', lease_until=clock_timestamp()+interval '5 minutes'
+where source_id='18100000-3000-4000-8000-000000000001' and processor_kind='extract';
+create temporary table pg_temp.mature_memory_lease as
+  select id job_id,fence from private.world_npc_memory_outbox
+  where source_id='18100000-3000-4000-8000-000000000001' and processor_kind='extract';
+grant select on pg_temp.mature_memory_lease to service_role;
 insert into private.world_npc_quest_events(instance_id,day,outcome,narration,public_news)
   values((select instance_id from pg_temp.mature_world),1,'prepared','Lira prepared a private route.',true);
 insert into public.foods(save_id,name,quality_index,source_action_id,day_number,recipe_key,rules_version)
@@ -103,6 +110,11 @@ select is((select count(*) from private.world_npc_dialogue_turns where id='18100
 select is((select count(*) from private.world_npc_memories where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'significant dialogue memories are removed with their source exchange');
 select is((select count(*) from private.world_npc_memory_artifacts where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'derived memory artifacts are removed with a purged resident');
 select is((select count(*) from private.world_npc_memory_outbox where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'queued memory work is removed with a purged resident');
+select ok(exists(select 1 from private.world_npc_memory_invalidations invalidation join pg_temp.mature_memory_lease lease on lease.job_id=invalidation.job_id and lease.fence=invalidation.fence),'purge records an active memory fence invalidation before cascade deletion');
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+select throws_ok(format('select public.world_npc_memory_complete(%L,%L,%L::jsonb,null)',(select job_id from pg_temp.mature_memory_lease),(select fence from pg_temp.mature_memory_lease),'[]'),'PT409',null,'a late memory worker completion cannot restore a purged resident');
+reset role;
 select is((select count(*) from private.world_npc_quest_events where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'quest prose and public news are removed');
 select is((select count(*) from private.world_npc_hospitality_events where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'hospitality projections are removed');
 select is((select transcript from private.npc_reports where world_id=(select save_id from pg_temp.mature_world)),'[]'::jsonb,'report copy retains its record but not NPC narrative');

@@ -2435,6 +2435,19 @@ export type Database = {
         Args: { p_job_id: string; p_settlement_id: string }
         Returns: Json
       }
+      world_npc_memory_claim: {
+        Args: { p_processor_kind: string; p_processor_version: string }
+        Returns: Json
+      }
+      world_npc_memory_complete: {
+        Args: {
+          p_artifacts?: Json
+          p_error_code?: string
+          p_fence: string
+          p_job_id: string
+        }
+        Returns: undefined
+      }
       world_promote_supporting_actor: {
         Args: { p_entity_id: string; p_reason?: string; p_save_id: string }
         Returns: Json
