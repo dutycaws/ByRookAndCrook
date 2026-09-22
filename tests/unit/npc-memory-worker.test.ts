@@ -100,4 +100,13 @@ describe('npc memory worker', () => {
     expect(() => assembleNpcMemoryContext({ policyVersion: 'memory-v1', projectionVersion: 'speech-v1', maxBytes: 1024, maxTokens: 1024,
       sources: [], payload: {}, tokenCount: 1, tokenizerId: '', counterId: 'counter', model: 'model' } as any)).toThrow('Verified NPC memory token-count metadata is invalid');
   });
+
+  it('accepts exact UTF-8/token ceilings and rejects the next byte or token', () => {
+    const input={policyVersion:'memory-v1',projectionVersion:'speech-v1',sources:[],payload:{text:'中文 العربية देवनागरी e\u0301 👩🏽‍🚀'},tokenCount:16_000,tokenizerId:'counter',counterId:'counter',model:'fixture',maxBytes:64*1024,maxTokens:16_000};
+    const exact=assembleNpcMemoryContext(input);
+    expect(exact.tokens).toBe(16_000);
+    expect(assembleNpcMemoryContext({...input,maxBytes:exact.utf8Bytes}).utf8Bytes).toBe(exact.utf8Bytes);
+    expect(()=>assembleNpcMemoryContext({...input,maxBytes:exact.utf8Bytes-1})).toThrow('exceeds the frozen-context budget');
+    expect(()=>assembleNpcMemoryContext({...input,tokenCount:16_001})).toThrow('exceeds the frozen-context budget');
+  });
 });

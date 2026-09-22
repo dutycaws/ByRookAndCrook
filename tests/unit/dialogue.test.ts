@@ -25,7 +25,7 @@ function cognitionClient(base: Record<string, unknown>) {
     rpc(name:string,args?:Record<string, unknown>) {
       if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
       if(name==='npc_dialogue_context') return rpcResult(args?.p_category==='base' ? base : evidence[String(args?.p_category)] ?? []);
-      if(name==='npc_memory_retrieve_for_actor') return rpcResult({cutoffSequence:args?.p_cutoff_sequence ?? null,items:[],sourceFallback:[],watermarks:[]});
+      if(name==='npc_memory_retrieve_for_actor') return rpcResult({cutoffSequence:args?.p_cutoff_sequence ?? null,items:[],sourceFallback:[],watermarks:[],sourceManifest:[],sourceManifestCoverage:{missingItemIds:[],complete:true}});
       if(name==='npc_dialogue_checkpoint') return rpcResult(null);
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed',reply:'Recorded.'});
       throw new Error(`Unexpected RPC ${name}`);
@@ -73,7 +73,7 @@ describe('dialogue boundaries',()=>{
   });
   it('emits a sanitized provider-stage failure without retaining keeper prose or provider error text',async()=>{
     const base={name:'Lira',recent:[],questStatus:'active',allowedTargets:['millhaven'],personality:{values:['care']}};
-    const provider: DialogueProvider={ async generate() { const error=Object.assign(new Error('provider exposed sk-secret-value'),{name:'ProviderUnavailable'}); throw error; } };
+    const provider: DialogueProvider={ async countContext(){return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};}, async generate() { const error=Object.assign(new Error('provider exposed sk-secret-value'),{name:'ProviderUnavailable'}); throw error; } };
     const operationalEvents: unknown[]=[];
     await expect(runDialogue(cognitionClient(base),'33333333-3333-4333-8333-333333333333',{
       turnId,npcId,message:'A private keeper message.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
@@ -91,6 +91,7 @@ describe('dialogue boundaries',()=>{
     };
     const payloads: Record<string, any>={};
     const provider: DialogueProvider={
+      async countContext(){return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},
       async generate(stage,payload) {
         payloads[stage]=payload;
         const value=stage==='investigate'

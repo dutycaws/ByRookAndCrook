@@ -18,6 +18,7 @@ export type NpcMemoryContextArtifact = Readonly<{
   tokenizer: string;
   model?: string;
   counterId?: string;
+  counterDurationMs?: number;
   cutoffSequence?: number;
   view?: string;
   revision?: number;
@@ -77,7 +78,7 @@ type ContextAssemblyBase = {
   sources: readonly NpcMemorySourceManifest[];
   requiredSourceIds?: readonly string[];
   payload: Record<string, unknown>;
-  model?: string; counterId?: string; cutoffSequence?: number; view?: string; revision?: number;
+  model?: string; counterId?: string; counterDurationMs?: number; cutoffSequence?: number; view?: string; revision?: number;
 };
 type SynchronousContextAssembly = ContextAssemblyBase & { tokenizer: { id: string; count(text: string): number }; tokenCount?: never; tokenizerId?: never };
 type VerifiedContextAssembly = ContextAssemblyBase & { tokenCount: number; tokenizerId: string; counterId: string; model: string; tokenizer?: never };
@@ -106,7 +107,8 @@ export function assembleNpcMemoryContext(input: SynchronousContextAssembly | Ver
   const bytes = utf8Bytes(serialized);
   const tokens = usesVerifiedCount ? verified.tokenCount! : synchronous.tokenizer!.count(serialized);
   if (!Number.isSafeInteger(tokens) || tokens < 0) throw new ContextAssemblyConfigurationError('The configured tokenizer returned an invalid count.');
+  if (input.counterDurationMs !== undefined && (!Number.isSafeInteger(input.counterDurationMs) || input.counterDurationMs < 0)) throw new ContextAssemblyConfigurationError('Verified NPC memory counter duration is invalid.');
   if (missing.length) throw new InsufficientNpcMemoryContextError(`Required NPC memory evidence is unavailable: ${missing.join(', ')}.`);
   if (bytes > input.maxBytes || tokens > input.maxTokens) throw new InsufficientNpcMemoryContextError('Authorized NPC memory evidence exceeds the frozen-context budget.');
-  return freeze({ policyVersion: input.policyVersion, projectionVersion: input.projectionVersion, tokenizer: tokenizerId, ...(input.model?{model:input.model}:{}), ...(input.counterId?{counterId:input.counterId}:{}), ...(input.cutoffSequence!=null?{cutoffSequence:input.cutoffSequence}:{}), ...(input.view?{view:input.view}:{}), ...(input.revision!==undefined?{revision:input.revision}:{}), sourceManifest: freeze(sourceManifest), coverage: freeze({ required, included, missing, complete: true }), payload: freeze({ ...input.payload }), canonicalJson: serialized, utf8Bytes: bytes, tokens, hash: sha256Hex(serialized) });
+  return freeze({ policyVersion: input.policyVersion, projectionVersion: input.projectionVersion, tokenizer: tokenizerId, ...(input.model?{model:input.model}:{}), ...(input.counterId?{counterId:input.counterId}:{}), ...(input.counterDurationMs!==undefined?{counterDurationMs:input.counterDurationMs}:{}), ...(input.cutoffSequence!=null?{cutoffSequence:input.cutoffSequence}:{}), ...(input.view?{view:input.view}:{}), ...(input.revision!==undefined?{revision:input.revision}:{}), sourceManifest: freeze(sourceManifest), coverage: freeze({ required, included, missing, complete: true }), payload: freeze({ ...input.payload }), canonicalJson: serialized, utf8Bytes: bytes, tokens, hash: sha256Hex(serialized) });
 }

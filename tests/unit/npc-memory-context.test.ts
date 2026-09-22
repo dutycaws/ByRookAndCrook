@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runDialogue, type DialogueRuntimeOptions } from '../../src/lib/server/dialogue/orchestrator';
 import type { DialogueProvider } from '../../src/lib/server/dialogue/provider';
 import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
+import { assembleNpcMemoryContext } from '$lib/server/npc-memory/context';
 
 const npcId='11111111-1111-4111-8111-111111111111';
 const instanceId='33333333-3333-4333-8333-333333333333';
@@ -13,10 +14,11 @@ const rpcResult=(data:unknown)=>({abortSignal:async()=>({data,error:null})});
 describe('NPC memory dialogue context',()=>{
   it('retrieves a speech-safe source-backed memory view at the turn cutoff and freezes it for all later stages',async()=>{
     const calls:Array<{name:string;args?:Record<string,unknown>}>=[];
+    const order:string[]=[]; let contextCounts=0;
     const payloads:Record<string,any>={};
     const events:unknown[]=[];
     const client={rpc(name:string,args?:Record<string,unknown>) {
-      calls.push({name,args});
+      calls.push({name,args}); order.push(`rpc:${name}:${String(args?.p_stage??'')}`);
       if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
       if(name==='npc_dialogue_context') return rpcResult({instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]});
       if(name==='npc_memory_retrieve_for_actor') return rpcResult(memory);
@@ -24,7 +26,8 @@ describe('NPC memory dialogue context',()=>{
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
       throw new Error(`Unexpected RPC ${name}`);
     }} as any;
-    const provider:DialogueProvider={async generate(stage,payload) {
+    const provider:DialogueProvider={async countContext(){contextCounts++;order.push('count');return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(stage,payload) {
+      order.push(`generate:${stage}`);
       payloads[stage]=payload;
       const value=stage==='investigate'
         ? {kind:'informational',needsMore:false,remember:false,requests:[]}
@@ -35,6 +38,9 @@ describe('NPC memory dialogue context',()=>{
     await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'What about your promise?',expectedConversationSequence:7,interactionVersion:'dialogue-v2'},provider,options)).resolves.toMatchObject({status:'completed'});
 
     expect(calls).toContainEqual({name:'npc_memory_retrieve_for_actor',args:{p_actor:'44444444-4444-4444-8444-444444444444',p_instance_id:instanceId,p_query:'What about your promise?',p_limit:12,p_cutoff_sequence:7,p_view:'speech'}});
+    expect(contextCounts).toBe(1);
+    expect(order.indexOf('rpc:npc_dialogue_checkpoint:frozen_context:0')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('rpc:npc_dialogue_checkpoint:frozen_context:0')).toBeLessThan(order.indexOf('generate:investigate'));
     for (const payload of [payloads.investigate,payloads.speak,payloads.review]) {
       expect(payload.context).toEqual(expect.arrayContaining([expect.objectContaining({
         category:'memories',sourceIds:expect.arrayContaining(['memory-1','memory-root-1','turn-1']),data:memory
@@ -43,25 +49,137 @@ describe('NPC memory dialogue context',()=>{
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({memoryContext:expect.objectContaining({selectedRecordCount:1,sourceRecordCount:3,coverageGapCount:0,reuse:'fresh'})})]));
     expect(JSON.stringify(events)).not.toContain('I will fund a guide');
   });
-  it('reuses the checkpointed memory artifact instead of searching a newer index on retry',async()=>{
+  it('fails closed for a legacy raw-memory checkpoint with malformed frozen-envelope metadata',async()=>{
     const calls:string[]=[];
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
+    const valid=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:16_000,sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const malformed={...valid,policyVersion:'npc-context-unknown-v9'};
     const client={rpc(name:string) {
       calls.push(name);
-      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{memory:{value:{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}}},content_version:'npc-v1',rule_version:'rules-v1'});
-      if(name==='npc_dialogue_context') return rpcResult({instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]});
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{memory:{value:{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}},'frozen_context:0':{value:malformed}},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(base);
       if(name==='npc_dialogue_checkpoint') return rpcResult(null);
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
       throw new Error(`Unexpected RPC ${name}`);
     }} as any;
     const payloads:any[]=[];
-    const provider:DialogueProvider={async generate(stage,payload) {
+    let countCalls=0;
+    const provider:DialogueProvider={async countContext(){countCalls++;return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(stage,payload) {
       payloads.push(payload);
       const value=stage==='investigate' ? {kind:'informational',needsMore:false,remember:false,requests:[]}
         : stage==='speak' ? {text:'I remember.'} : {ok:true,issues:[]};
       return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
     }};
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'A changed query must not replace evidence.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).rejects.toMatchObject({code:'CONTEXT_BUDGET'});
+    expect(calls).not.toContain('npc_memory_retrieve_for_actor');
+    expect(calls).not.toContain('npc_dialogue_context');
+    expect(countCalls).toBe(0);
+    expect(payloads).toEqual([]);
+  });
+  it('replays the exact revision-zero artifact without retrieval or another artifact count',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:16_000,sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const calls:string[]=[]; const stages:string[]=[];
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      calls.push(name);
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{'frozen_context:0':{value:artifact}},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(base);
+      if(name==='npc_dialogue_checkpoint') {stages.push(String(args?.p_stage)); return rpcResult(null);}
+      if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    let countCalls=0;
+    const provider:DialogueProvider={async countContext(){countCalls++;throw new Error('must not recount');},async generate(stage) {
+      const value=stage==='investigate'?{kind:'informational',needsMore:false,remember:false,requests:[]}:stage==='speak'?{text:'I remember.'}:{ok:true,issues:[]};
+      return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+    }};
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'A changed query must not replace evidence.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).resolves.toMatchObject({status:'completed'});
+    expect(calls).not.toContain('npc_memory_retrieve_for_actor');
+    expect(calls).not.toContain('npc_dialogue_context');
+    expect(countCalls).toBe(0);
+    expect(artifact.revision).toBe(0);
+    expect(stages).toContain('frozen_context');
+  });
+  it('recovers a pre-freeze evidence checkpoint by creating revision one exactly once',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:16_000,sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const stages:string[]=[]; const calls:string[]=[];
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      calls.push(name); if(name==='npc_dialogue_checkpoint') stages.push(String(args?.p_stage));
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{frozen_context:{value:{revision:0,hash:artifact.hash}},'frozen_context:0':{value:artifact},investigate0:{value:{kind:'social',needsMore:false,remember:false,requests:[]}},context0:{value:[{category:'relationships',query:'Mara',sourceIds:['relationship-1'],contentVersion:'npc-v1',data:{facts:[]}}]}},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(base);
+      if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
+      if(name==='npc_dialogue_checkpoint') return rpcResult(null);
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    let countCalls=0;
+    const provider:DialogueProvider={async countContext(){countCalls++;return {model:'fixture',counterId:'fixture-counter',inputTokens:2,durationMs:1};},async generate(stage) {
+      const value=stage==='deliberate'?{stance:'respond',reaction:0,subject:'quest',evidence:'',intention:null}:stage==='speak'?{text:'I remember.'}:{ok:true,issues:[]};
+      return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+    }};
     await runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'A changed query must not replace evidence.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()});
     expect(calls).not.toContain('npc_memory_retrieve_for_actor');
-    expect(payloads[0].context[0]).toMatchObject({query:'older query',data:memory});
+    expect(countCalls).toBe(1);
+    expect(stages.filter(stage=>stage==='frozen_context:1')).toHaveLength(1);
+    expect(stages).not.toContain('frozen_context:0');
+  });
+  it('counts and checkpoints a new immutable revision when investigation adds memory evidence',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const initial={...memory,sourceManifest:[{id:'turn-1',version:1,hash:'a'.repeat(64),kind:'dialogue_turn'}],sourceManifestCoverage:{missingItemIds:[],complete:true}};
+    const added={...memory,items:[{id:'memory-2',record_root_id:'memory-root-2',source_id:'turn-2',text:'A later source.'}],sourceManifest:[{id:'turn-2',version:1,hash:'b'.repeat(64),kind:'dialogue_turn'}],sourceManifestCoverage:{missingItemIds:[],complete:true}};
+    const stages:Array<{stage:string;value:any}>=[]; let retrievals=0; let counts=0; const speechPayloads:any[]=[];
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(base);
+      if(name==='npc_memory_retrieve_for_actor') return rpcResult(++retrievals===1?initial:added);
+      if(name==='npc_dialogue_checkpoint') { stages.push({stage:String(args?.p_stage),value:args?.p_value}); return rpcResult(null); }
+      if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){counts++;return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(stage,payload) {
+      if(stage==='speak') speechPayloads.push(payload);
+      const value=stage==='investigate'?{kind:'social',needsMore:false,remember:false,requests:[{category:'memories',query:'later'}]}:stage==='deliberate'?{stance:'respond',reaction:0,subject:'quest',evidence:'',intention:null}:stage==='speak'?{text:'I remember.'}:{ok:true,issues:[]};
+      return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+    }};
+    await runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'What changed?',expectedConversationSequence:7,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()});
+    expect(counts).toBe(2);
+    expect(stages.map(entry=>entry.stage)).toEqual(expect.arrayContaining(['frozen_context:0','frozen_context:1','frozen_context']));
+    expect(stages.find(entry=>entry.stage==='frozen_context:0')?.value.value.revision).toBe(0);
+    expect(stages.find(entry=>entry.stage==='frozen_context:1')?.value.value.revision).toBe(1);
+    expect(stages.filter(entry=>entry.stage==='frozen_context').at(-1)?.value.value).toMatchObject({revision:1});
+    expect(JSON.stringify(speechPayloads[0])).toContain('turn-2');
+  });
+  it('does not generate when persisting revision zero fails',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]}; let generations=0;
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(base);
+      if(name==='npc_memory_retrieve_for_actor') return rpcResult({...memory,sourceManifestCoverage:{missingItemIds:[],complete:true}});
+      if(name==='npc_dialogue_checkpoint' && args?.p_stage==='frozen_context:0') return {abortSignal:async()=>({data:null,error:{message:'checkpoint unavailable',code:'PT503'}})};
+      if(name==='npc_dialogue_checkpoint') return rpcResult(null);
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(){generations++;throw new Error('must not generate');}};
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'What changed?',expectedConversationSequence:7,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).rejects.toMatchObject({code:'PT503'});
+    expect(generations).toBe(0);
+  });
+  it.each([
+    ['rejects incomplete source-manifest coverage before generation',{...memory,sourceManifestCoverage:{missingItemIds:['memory-1'],complete:false}},1,0],
+    ['rejects a verified count above the 16k hard limit before generation',{...memory,sourceManifestCoverage:{missingItemIds:[],complete:true}},16_001,1]
+  ])('%s',async(_name,retrieval:any,tokens:number,expectedCounts:number)=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]}; let counts=0; let generations=0;
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(base);
+      if(name==='npc_memory_retrieve_for_actor') return rpcResult(retrieval);
+      if(name==='npc_dialogue_checkpoint') return rpcResult(null);
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){counts++;return {model:'fixture',counterId:'fixture-counter',inputTokens:tokens,durationMs:1};},async generate(){generations++;throw new Error('must not generate');}};
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'What changed?',expectedConversationSequence:7,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).rejects.toMatchObject({code:'CONTEXT_BUDGET'});
+    expect(counts).toBe(expectedCounts); expect(generations).toBe(0);
   });
 });

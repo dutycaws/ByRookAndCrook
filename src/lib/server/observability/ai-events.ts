@@ -27,6 +27,12 @@ export type AiMemoryContextMeasurements = Readonly<{
   reuse: 'fresh' | 'cache_hit' | 'replayed';
   queryDurationMs?: number;
   assemblyDurationMs?: number;
+  artifactHash?: string;
+  artifactRevision?: number;
+  artifactTokens?: number;
+  artifactCounterModel?: string;
+  artifactUtf8Bytes?: number;
+  artifactCountDurationMs?: number;
 }>;
 
 /** Current provider-call checkpoints. These are operational labels, not prompts. */
@@ -126,6 +132,12 @@ function memoryContextMeasurements(value: unknown): AiMemoryContextMeasurements 
   if (candidate.modelTokenCount !== undefined && !finiteInteger(candidate.modelTokenCount, 0, 10_000_000)) return undefined;
   if (candidate.queryDurationMs !== undefined && !finiteInteger(candidate.queryDurationMs, 0, 24 * 60 * 60 * 1_000)) return undefined;
   if (candidate.assemblyDurationMs !== undefined && !finiteInteger(candidate.assemblyDurationMs, 0, 24 * 60 * 60 * 1_000)) return undefined;
+  if (candidate.artifactHash !== undefined && (typeof candidate.artifactHash !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.artifactHash))) return undefined;
+  if (candidate.artifactRevision !== undefined && !finiteInteger(candidate.artifactRevision, 0, 1_000_000)) return undefined;
+  if (candidate.artifactTokens !== undefined && !finiteInteger(candidate.artifactTokens, 0, 10_000_000)) return undefined;
+  if (candidate.artifactCounterModel !== undefined && (typeof candidate.artifactCounterModel !== 'string' || !modelName.test(candidate.artifactCounterModel))) return undefined;
+  if (candidate.artifactUtf8Bytes !== undefined && !finiteInteger(candidate.artifactUtf8Bytes, 0, 10_000_000)) return undefined;
+  if (candidate.artifactCountDurationMs !== undefined && !finiteInteger(candidate.artifactCountDurationMs, 0, 24 * 60 * 60 * 1_000)) return undefined;
   const measured: AiMemoryContextMeasurements = {
     selectedRecordCount: candidate.selectedRecordCount,
     sourceRecordCount: candidate.sourceRecordCount,
@@ -137,6 +149,12 @@ function memoryContextMeasurements(value: unknown): AiMemoryContextMeasurements 
   if (candidate.modelTokenCount !== undefined) (measured as { modelTokenCount?: number }).modelTokenCount = candidate.modelTokenCount;
   if (candidate.queryDurationMs !== undefined) (measured as { queryDurationMs?: number }).queryDurationMs = candidate.queryDurationMs;
   if (candidate.assemblyDurationMs !== undefined) (measured as { assemblyDurationMs?: number }).assemblyDurationMs = candidate.assemblyDurationMs;
+  if (candidate.artifactHash !== undefined) (measured as { artifactHash?: string }).artifactHash = candidate.artifactHash;
+  if (candidate.artifactRevision !== undefined) (measured as { artifactRevision?: number }).artifactRevision = candidate.artifactRevision;
+  if (candidate.artifactTokens !== undefined) (measured as { artifactTokens?: number }).artifactTokens = candidate.artifactTokens;
+  if (candidate.artifactCounterModel !== undefined) (measured as { artifactCounterModel?: string }).artifactCounterModel = candidate.artifactCounterModel;
+  if (candidate.artifactUtf8Bytes !== undefined) (measured as { artifactUtf8Bytes?: number }).artifactUtf8Bytes = candidate.artifactUtf8Bytes;
+  if (candidate.artifactCountDurationMs !== undefined) (measured as { artifactCountDurationMs?: number }).artifactCountDurationMs = candidate.artifactCountDurationMs;
   return measured;
 }
 
