@@ -71,7 +71,7 @@ select throws_ok(format('select public.world_npc_memory_complete(%L,%L,%L::jsonb
  (select claim->>'id' from pg_temp.embedding_claim),(select claim->>'fence' from pg_temp.embedding_claim),
  (select payload::text from pg_temp.generic_embedding_payload)
  ),
- 'PT400','Embedding artifact must reference a profile','generic completion rejects an otherwise valid unprofiled embedding artifact');
+ 'PT409','Embedding work requires receipt-gated completion','generic completion cannot bypass receipt-gated embedding acceptance');
 reset role;
 
 set local role authenticated; set local request.jwt.claim.role='authenticated'; set local request.jwt.claim.sub='19800000-0000-4000-8000-000000000001';
