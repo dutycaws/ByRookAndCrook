@@ -90,7 +90,8 @@ select (private.world_npc_memory_register_summary_set(
   )),
   jsonb_build_array(jsonb_build_object(
     'batchOrdinal',0,'firstLeafOrdinal',0,'lastLeafOrdinal',0,'leafCount',1
-  ))
+  )),
+  'npc-memory-v1'
 )).*;
 
 set local role service_role;
@@ -191,7 +192,8 @@ select (private.world_npc_memory_register_summary_set(
   )),
   jsonb_build_array(jsonb_build_object(
     'batchOrdinal',0,'firstLeafOrdinal',0,'lastLeafOrdinal',0,'leafCount',1
-  ))
+  )),
+  'npc-memory-v1'
 )).*;
 set local role service_role;
 set local request.jwt.claim.role='service_role';

@@ -2448,6 +2448,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      world_npc_memory_enqueue_v2_summaries: {
+        Args: { p_limit?: number }
+        Returns: number
+      }
       world_npc_memory_schedule_closures: {
         Args: { p_limit?: number }
         Returns: number

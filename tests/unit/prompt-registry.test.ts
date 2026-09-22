@@ -21,9 +21,11 @@ describe('prompt registry core', () => {
   it('has one code-owned entry for each closed prompt key and deterministic release-1 hashes', () => {
     expect(Object.keys(PROMPT_MANIFEST).sort()).toEqual([...PROMPT_KEYS].sort());
     const release = initialPromptReleaseSnapshot('2026-09-16T00:00:00.000Z', 'fixture');
-    expect(Object.keys(release.prompts)).toHaveLength(31);
+    expect(Object.keys(release.prompts)).toHaveLength(32);
     expect(release.prompts['dialogue.speak'].bodyHash).toBe(sha256Hex(PROMPT_MANIFEST['dialogue.speak'].initialBody));
     expect(release.prompts['image.community_portrait'].contractHash).toBe(PROMPT_MANIFEST['image.community_portrait'].contract.hash);
+    expect(release.prompts['npc_memory.summary'].body).toBe(PROMPT_MANIFEST['npc_memory.summary'].initialBody);
+    expect(release.prompts['npc_memory.summary.v2'].contractHash).toBe('f279a108f11e212c77e4876521e9ee47092171b6d2a820d83a245d57a3c64e03');
     expect(release.prompts['dialogue.speak'].releaseId).toBe(release.releaseId);
     expect(release.prompts['dialogue.speak'].contentHash).toBe(release.prompts['dialogue.speak'].bodyHash);
     expect(release.prompts['dialogue.speak'].promptType).toBe('text_system');

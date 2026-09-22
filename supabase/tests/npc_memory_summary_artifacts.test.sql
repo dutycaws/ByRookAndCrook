@@ -23,6 +23,14 @@ select private.world_npc_memory_refresh_watermark((select instance_id from pg_te
 select is((private.world_npc_memory_request_episode((select instance_id from pg_temp.fixture),1,64)).status,'pending','65-source closure is pending');
 select is(private.world_npc_memory_schedule_closures((select instance_id from pg_temp.fixture)),1,'65-source closure registers exactly once');
 create temporary table pg_temp.summary_set as select * from private.world_npc_memory_summary_sets where instance_id=(select instance_id from pg_temp.fixture) and disclosure_class='npc_known';
+insert into private.world_npc_memory_outbox(
+  save_id,instance_id,source_kind,source_id,source_version,source_sequence,source_hash,
+  processor_kind,processor_version,summary_protocol,summary_prompt_key
+)
+select save_id,instance_id,'memory_set',id,set_version,cutoff_ledger_sequence,set_hash,
+  'summary','npc-memory-v1','v1','npc_memory.summary'
+from pg_temp.summary_set
+on conflict(source_kind,source_id,source_version,processor_kind,processor_version) do nothing;
 select is((select count(*) from pg_temp.summary_set),1::bigint,'one npc-known summary set exists');
 select is((select count(*) from private.world_npc_memory_summary_leaves where set_id=(select id from pg_temp.summary_set)),65::bigint,'set preserves all 65 leaves');
 select is((select array_agg(jsonb_build_array(first_leaf_ordinal,last_leaf_ordinal) order by batch_ordinal) from private.world_npc_memory_summary_batches where set_id=(select id from pg_temp.summary_set)),array['[0,63]'::jsonb,'[64,64]'::jsonb],'batches are exactly 0..63 and 64');
@@ -73,7 +81,7 @@ update private.prompt_registry_active_release set release_id=current_setting('te
 
 -- Completion is a separate, immutable proof from loading.  The database owns
 -- all identity fields and hashes this canonical, complete manifest itself.
-create temporary table pg_temp.completion_set as select (private.world_npc_memory_register_summary_set('episode_summary','completion-proof',64,'npc_known',(select jsonb_agg(jsonb_build_object('ordinal',ordinal,'sourceKind',source_kind,'sourceId',source_id,'sourceVersion',source_version) order by ordinal) from private.world_npc_memory_summary_leaves where set_id=(select id from pg_temp.summary_set)),(select jsonb_agg(jsonb_build_object('batchOrdinal',batch_ordinal,'firstLeafOrdinal',first_leaf_ordinal,'lastLeafOrdinal',last_leaf_ordinal,'leafCount',leaf_count) order by batch_ordinal) from private.world_npc_memory_summary_batches where set_id=(select id from pg_temp.summary_set)))).*;
+create temporary table pg_temp.completion_set as select (private.world_npc_memory_register_summary_set('episode_summary','completion-proof',64,'npc_known',(select jsonb_agg(jsonb_build_object('ordinal',ordinal,'sourceKind',source_kind,'sourceId',source_id,'sourceVersion',source_version) order by ordinal) from private.world_npc_memory_summary_leaves where set_id=(select id from pg_temp.summary_set)),(select jsonb_agg(jsonb_build_object('batchOrdinal',batch_ordinal,'firstLeafOrdinal',first_leaf_ordinal,'lastLeafOrdinal',last_leaf_ordinal,'leafCount',leaf_count) order by batch_ordinal) from private.world_npc_memory_summary_batches where set_id=(select id from pg_temp.summary_set)),'npc-memory-v1')).*;
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.completion_claim as select public.world_npc_memory_claim('summary','npc-memory-v1') claim;
 reset role; reset request.jwt.claim.role;
@@ -106,6 +114,12 @@ select is((select status from private.world_npc_memory_closure_requests where in
 select is((select status from private.world_npc_memory_closure_requests where instance_id=(select instance_id from pg_temp.fixture) and closure_key='fairness-pending'),'registered','later pending request is not starved');
 select ok((select max(attempts)<=1 from private.world_npc_memory_closure_requests where instance_id=(select instance_id from pg_temp.fixture) and closure_key in ('fairness-gap','fairness-pending')),'bounded pass touches no more than its one-request limit');
 
+create temporary table pg_temp.error_set as select (private.world_npc_memory_register_summary_set(
+  'episode_summary','error-proof',64,'npc_known',
+  (select jsonb_agg(jsonb_build_object('ordinal',ordinal,'sourceKind',source_kind,'sourceId',source_id,'sourceVersion',source_version) order by ordinal) from private.world_npc_memory_summary_leaves where set_id=(select id from pg_temp.summary_set)),
+  (select jsonb_agg(jsonb_build_object('batchOrdinal',batch_ordinal,'firstLeafOrdinal',first_leaf_ordinal,'lastLeafOrdinal',last_leaf_ordinal,'leafCount',leaf_count) order by batch_ordinal) from private.world_npc_memory_summary_batches where set_id=(select id from pg_temp.summary_set)),
+  'npc-memory-v1'
+)).*;
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.error_claim as select public.world_npc_memory_claim('summary','npc-memory-v1') claim;
 reset role; reset request.jwt.claim.role;

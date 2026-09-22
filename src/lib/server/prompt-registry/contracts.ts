@@ -12,7 +12,7 @@ export const PROMPT_KEYS = [
   'procedural.proposer', 'procedural.critic', 'procedural.repair', 'procedural.final_critic',
   'quest_transition.proposer', 'quest_transition.critic', 'quest_transition.repair', 'quest_transition.final_critic',
   'image.community_portrait', 'image.runtime_art',
-  'npc_memory.summary'
+  'npc_memory.summary', 'npc_memory.summary.v2'
 ] as const;
 
 export type PromptKey = (typeof PROMPT_KEYS)[number];
