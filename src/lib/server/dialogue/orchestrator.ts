@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '$lib/database.types';
 import { hasExecutableSteps, type Decision, type DialogueInput } from '$lib/game/dialogue';
-import type { DialogueProvider } from './provider';
+import { ProviderContextBudgetError, type DialogueProvider } from './provider';
 import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, utf8Bytes, type ContextWindow } from './context';
 import { matchesSchema, schemas, type Stage } from './schemas';
 import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
@@ -77,7 +77,7 @@ function initialMemoryQuery(message: string, recent: unknown): string {
 }
 
 /** Content-free measurements only; the evidence itself remains checkpoint-only. */
-function memoryContextMeasurements(payload: unknown, reuse: 'fresh'|'replayed') {
+function memoryContextMeasurements(payload: unknown, reuse: 'fresh'|'replayed', preflight?: { inputTokens: number; durationMs: number }) {
   const context=(payload && typeof payload==='object' && Array.isArray((payload as Record<string, unknown>).context))
     ? (payload as {context:Array<Record<string, unknown>>}).context : [];
   const memory=context.filter(entry=>entry.category==='memories');
@@ -86,7 +86,8 @@ function memoryContextMeasurements(payload: unknown, reuse: 'fresh'|'replayed') 
   const sourceRecordCount=new Set(memory.flatMap(entry=>Array.isArray(entry.sourceIds) ? entry.sourceIds.filter((id): id is string=>typeof id==='string') : [])).size;
   const coverageGapCount=memory.reduce((count,entry)=>count+(Array.isArray((entry.data as Record<string, unknown> | undefined)?.watermarks)
     ? ((entry.data as Record<string, unknown>).watermarks as unknown[]).filter(watermark=>watermark && typeof watermark==='object' && (watermark as Record<string, unknown>).gapSequence!=null).length : 0),0);
-  return {selectedRecordCount,sourceRecordCount,utf8Bytes:utf8Bytes(payload),coverageGapCount,reuse};
+  return {selectedRecordCount,sourceRecordCount,utf8Bytes:utf8Bytes(payload),coverageGapCount,reuse,
+    ...(preflight ? { modelTokenCount: preflight.inputTokens, assemblyDurationMs: preflight.durationMs } : {})};
 }
 
 export function publicDialogueWindow(window: ContextWindow): ContextWindow {
@@ -129,6 +130,7 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
   return d;
 }
 function observabilityErrorCode(cause: unknown): string {
+  if (cause instanceof ProviderContextBudgetError) return 'context_budget';
   if (cause instanceof DialogueError) return cause.code;
   if (cause instanceof Error && cause.name === 'ProviderUnavailable') return 'provider_unavailable';
   return 'provider_failed';
@@ -190,7 +192,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       throw new DialogueError('A response stage was invalid. Please retry.',503,'STRUCTURE');
     }
     await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'completed',model:out.model,durationMs:out.durationMs,inputTokens:out.usage.input,outputTokens:out.usage.output }).catch(()=>{});
-    await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage,memoryContext:memoryContextMeasurements(payload,contextWasReplayed?'replayed':'fresh')});
+    await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage,memoryContext:memoryContextMeasurements(payload,contextWasReplayed?'replayed':'fresh',out.preflight)});
     const recorded={...out,inputContext:describePayload(payload)};
     await checkpoint(name,recorded); checkpoints[name]=recorded;
     return out.value;
@@ -279,7 +281,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     console.info('npc_turn',{turnId:input.turnId,npcId:input.npcId,calls,durationMs:Math.round(performance.now()-started),outcome:'completed'});
     return {status:'completed',result:committed.data};
   } catch(cause) {
-    if(cause instanceof ContextBudgetError)cause=new DialogueError(cause.message,503,'CONTEXT_BUDGET');
+    if(cause instanceof ContextBudgetError || cause instanceof ProviderContextBudgetError)cause=new DialogueError(cause.message,503,'CONTEXT_BUDGET');
     await checkpoint('fail',{code:cause instanceof DialogueError?cause.code:'PROVIDER_FAILED'}).catch(()=>{});
     console.info('npc_turn',{turnId:input.turnId,npcId:input.npcId,calls,outcome:cause instanceof DialogueError?cause.code:'PROVIDER_FAILED'});
     if(cause instanceof DialogueError) throw cause;

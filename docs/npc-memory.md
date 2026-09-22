@@ -11,6 +11,7 @@ The current provider settings remain the dialogue settings in the root, Git-igno
 | `NPC_PROVIDER` | `openai` by default; `local` reports an explicit unimplemented provider. |
 | `NPC_CONTEXT_MODEL` | Defaults to `gpt-5.6-luna` for investigation, review, and the existing remember stage. |
 | `NPC_CHARACTER_MODEL` | Defaults to `gpt-5.6-terra` for deliberation and speech. |
+| `NPC_MODEL_INPUT_CAPACITY` | Required verified minimum capacity across `NPC_CONTEXT_MODEL` and `NPC_CHARACTER_MODEL`; it must exceed input tokens plus the 2,500 output and 2,500 repair reserves. |
 | `NPC_MAX_CALLS`, `NPC_INVESTIGATION_ROUNDS`, `NPC_DEADLINE_MS` | Keep their existing dialogue limits: 8 calls, 1–2 rounds, and 1,000–90,000 ms respectively. |
 
 There is no separate memory-worker environment variable in this revision. A worker supplies its explicit processor kind/version and source loader. Embedding is optional and must be supplied by a server-only worker adapter; no external vector database or cache service is used.

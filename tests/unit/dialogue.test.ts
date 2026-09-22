@@ -102,7 +102,7 @@ describe('dialogue boundaries',()=>{
             : stage==='speak'
               ? {text:'Mara has stood beside me before. I will ask what she has heard.'}
               : {ok:true,issues:[]};
-        return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+        return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture',preflight:{inputTokens:7,durationMs:3}};
       }
     };
     const operationalEvents: unknown[]=[];
@@ -131,7 +131,7 @@ describe('dialogue boundaries',()=>{
       expect(payload.base.profileRevision).toBeUndefined();
     }
     expect(operationalEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({correlationId:turnId,workflow:'dialogue',stage:'investigate0',status:'completed',attempt:1,model:'fixture',tokenUsage:{input:1,output:1}}),
+      expect.objectContaining({correlationId:turnId,workflow:'dialogue',stage:'investigate0',status:'completed',attempt:1,model:'fixture',tokenUsage:{input:1,output:1},memoryContext:expect.objectContaining({modelTokenCount:7,assemblyDurationMs:3})}),
       expect.objectContaining({correlationId:turnId,workflow:'dialogue',stage:'speak',status:'completed'})
     ]));
     expect(JSON.stringify(operationalEvents)).not.toContain(base.message);

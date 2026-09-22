@@ -25,18 +25,19 @@ describe('release-pinned provider adapters', () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)); requestBodies.push(body);
+      if (_url.endsWith('/input_tokens')) return new Response(JSON.stringify({ input_tokens: 1 }), { status: 200 });
       const name = body.text?.format?.name;
       const output = name === 'world_proposer' ? JSON.stringify({ proposalJson: '{}' }) : JSON.stringify({ text: 'okay' });
       return new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: output }] }], usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200 });
     });
-    const dialogue = createProvider({ OPENAI_API_KEY: 'key' });
+    const dialogue = createProvider({ OPENAI_API_KEY: 'key', NPC_MODEL_INPUT_CAPACITY: '90000' });
     await expect(dialogue.generate('speak', {}, AbortSignal.timeout(1_000), undefined as never)).rejects.toThrow('pinned dialogue prompt');
     // Deliberate produces a valid schema-free transport assertion after the body
     // reaches Responses; the structure rejection is irrelevant to provenance.
     await dialogue.generate('speak', {}, AbortSignal.timeout(1_000), release.prompts['dialogue.speak']).catch(() => undefined);
     const settlement = createSettlementProvider({ OPENAI_API_KEY: 'key' });
     await settlement.generate('proposer', { schema: {}, profile: {}, capability: {}, worldSnapshot: {}, authorizedEvidence: [] }, AbortSignal.timeout(1_000), release.prompts['resident.proposer']).catch(() => undefined);
-    expect(requestBodies.map((body) => (body.input as Array<{ content: string }>)[0].content)).toEqual(expect.arrayContaining([
+    expect(requestBodies.filter((body) => Array.isArray(body.input)).map((body) => (body.input as Array<{ content: string }>)[0].content)).toEqual(expect.arrayContaining([
       release.prompts['dialogue.speak'].body, release.prompts['resident.proposer'].body
     ]));
   });
