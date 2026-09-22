@@ -130,10 +130,32 @@ describe('quest transition worker', () => {
     const dossiers = model.payloads.map((payload: any) => payload.memoryDossier);
     expect(dossiers).toHaveLength(4);
     expect(new Set(dossiers.map((dossier: any) => dossier.fingerprint)).size).toBe(1);
+    expect(new Set(dossiers.map((dossier: any) => dossier.evidence)).size).toBe(1);
     expect(dossiers[0]).toMatchObject({ version: 'quest-transition-memory-dossier-v1', manifest: { transitionId, terminalEventId, sourceFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }, coverage: { terminalEvent: true, eventHistory: 1 }, bytes: { frozenContext: expect.any(Number), dossier: expect.any(Number) } });
     expect(dossiers[0].evidence).toMatchObject({ ...((model.payloads[0] as any).frozenContext), memoryContext: expect.objectContaining({ evidence: expect.objectContaining({retrievalVersion:'npc-memory-evidence-v4'}), budget:expect.objectContaining({inputTokens:3}) }) });
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ memoryContext: expect.objectContaining({ utf8Bytes: dossiers[0].bytes.dossier, reuse: 'fresh' }) })]));
     expect(JSON.stringify(events)).not.toContain('Steady and cautious');
+  });
+
+  it('reclaims a persisted memory context and model checkpoints without re-opening scope, retrieval, profile, or embedding work', async () => {
+    const first=client();
+    const firstModel=provider({ quest_transition_proposer: proposal, quest_transition_critic: { decision: 'accept', instructions: [] } });
+    await expect(runQuestTransitionClaim(first.api, claim(), { provider:firstModel, promptRegistry:registry(), heartbeatMs:99_999 })).resolves.toMatchObject({status:'completed'});
+    const memoryContext=first.calls.find(call=>call.name==='world_quest_transition_checkpoint' && call.args?.p_stage==='memory_context')?.args?.p_payload;
+    expect(memoryContext).toBeTruthy();
+    const replay=client(); let recounts=0;
+    const replayModel=provider({});
+    replayModel.countMemoryContext=async()=>{ recounts++; throw new Error('replay must not recount'); };
+    await expect(runQuestTransitionClaim(replay.api,claim([
+      {stage:'memory_context',payload:memoryContext},
+      {stage:'proposer',payload:{proposal}},
+      {stage:'critic',payload:{decision:{decision:'accept',instructions:[]}}}
+    ]),{provider:replayModel,promptRegistry:registry(),heartbeatMs:99_999})).resolves.toMatchObject({status:'completed'});
+    expect(replayModel.calls).toEqual([]);
+    expect(recounts).toBe(0);
+    expect(replay.calls.map(call=>call.name)).not.toEqual(expect.arrayContaining([
+      'world_quest_transition_memory_scope','npc_memory_active_embedding_profile','npc_memory_evidence_retrieve_for_actor'
+    ]));
   });
 
   it.each([

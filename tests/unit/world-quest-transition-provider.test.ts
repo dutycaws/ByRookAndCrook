@@ -71,4 +71,27 @@ describe('quest transition provider stages', () => {
     await expect(generate('quest_transition_proposer', { context: context(), frozenContext: frozenContext(), memoryDossier: { ...memoryDossier(), privateProse: 'do not admit this' } })).rejects.toMatchObject({ code: 'provider_malformed' });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['quest_transition_critic', (payload: any) => ({ context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() }), { decision: 'accept', instructions: [] }],
+    ['quest_transition_repair', (payload: any) => ({ context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal(), instructions: [{ code: 'plan_shape', path: 'plan' }] }), { proposalJson: JSON.stringify(proposal()) }]
+  ] as const)('preflights the complete %s request at input limit-1, limit, and limit+1', async (stage, makePayload, output) => {
+    for (const [tokens,accepted] of [[4,true],[5,true],[6,false]] as const) {
+      const requests:any[]=[];
+      vi.stubGlobal('fetch',vi.fn(async (url,init:RequestInit)=>{
+        const body=JSON.parse(String(init.body)); requests.push({url:String(url),body});
+        return String(url).endsWith('/input_tokens')
+          ? new Response(JSON.stringify({input_tokens:tokens}),{status:200})
+          : completed(output);
+      }));
+      const provider=createSettlementProvider({OPENAI_API_KEY:'test-key',NPC_MODEL_INPUT_CAPACITY:'2205'});
+      const prompt=fixturePromptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]];
+      const run=()=>provider.generate(stage,makePayload({}),new AbortController().signal,prompt);
+      if (accepted) await expect(run()).resolves.toBeTruthy(); else await expect(run()).rejects.toMatchObject({code:'provider_malformed'});
+      expect(requests[0].body).toMatchObject({model:expect.any(String),input:expect.any(Array),text:expect.any(Object)});
+      expect(JSON.stringify(requests[0].body.input)).toContain('memoryDossier');
+      expect(requests).toHaveLength(accepted?2:1);
+      vi.unstubAllGlobals();
+    }
+  });
 });

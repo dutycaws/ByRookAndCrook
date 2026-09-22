@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runDialogue, type DialogueRuntimeOptions } from '../../src/lib/server/dialogue/orchestrator';
 import type { DialogueProvider } from '../../src/lib/server/dialogue/provider';
 import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
-import { assembleNpcMemoryContext } from '$lib/server/npc-memory/context';
+import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, utf8Bytes } from '$lib/server/npc-memory/context';
 
 const npcId='11111111-1111-4111-8111-111111111111';
 const instanceId='33333333-3333-4333-8333-333333333333';
@@ -24,7 +24,7 @@ describe('NPC memory dialogue context',()=>{
     const client={rpc(name:string,args?:Record<string,unknown>) {
       calls.push({name,args}); order.push(`rpc:${name}:${String(args?.p_stage??'')}`);
       if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
-      if(name==='npc_dialogue_context') return rpcResult({instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]});
+      if(name==='npc_dialogue_context') return rpcResult({instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[],evolvingProfile:'private cognition must never reach speech'});
       if(name==='npc_memory_evidence_retrieve_for_actor') return rpcResult(memory);
       if(name==='npc_dialogue_checkpoint') return rpcResult(null);
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
@@ -34,7 +34,8 @@ describe('NPC memory dialogue context',()=>{
       order.push(`generate:${stage}`);
       payloads[stage]=payload;
       const value=stage==='investigate'
-        ? {kind:'informational',needsMore:false,remember:false,requests:[]}
+        ? {kind:'social',needsMore:false,remember:false,requests:[]}
+        : stage==='deliberate' ? {stance:'respond',reaction:0,subject:'quest',evidence:'',intention:null}
         : stage==='speak' ? {text:'I can fund a guide, but not weapons.'} : {ok:true,issues:[]};
       return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
     }};
@@ -42,14 +43,23 @@ describe('NPC memory dialogue context',()=>{
     await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'What about your promise?',expectedConversationSequence:7,interactionVersion:'dialogue-v2'},provider,options)).resolves.toMatchObject({status:'completed'});
 
     expect(calls).toContainEqual({name:'npc_memory_evidence_retrieve_for_actor',args:expect.objectContaining({p_actor:'44444444-4444-4444-8444-444444444444',p_instance_id:instanceId,p_query:'What about your promise?',p_limit:12,p_cutoff_ledger_sequence:7,p_view:'speech'})});
-    expect(contextCounts).toBe(1);
+    expect(contextCounts).toBe(2);
     expect(order.indexOf('rpc:npc_dialogue_checkpoint:frozen_context:0')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('rpc:npc_dialogue_checkpoint:frozen_context:0')).toBeLessThan(order.indexOf('generate:investigate'));
-    for (const payload of [payloads.investigate,payloads.speak,payloads.review]) {
+    for (const payload of [payloads.investigate,payloads.deliberate,payloads.speak,payloads.review]) {
       expect(payload.context).toEqual(expect.arrayContaining([expect.objectContaining({
         category:'memories',sourceIds:expect.arrayContaining([memoryId,rootId,sourceId]),data:expect.objectContaining({cutoffLedgerSequence:7,items:expect.any(Array),coverage:expect.objectContaining({complete:true})})
       })]));
     }
+    // Investigation/deliberation receive the private frozen projection; the
+    // speech/review projection retains the same authorized evidence but removes
+    // private cognition before it can influence a player-visible answer.
+    expect(JSON.stringify(payloads.investigate)).toContain('private cognition must never reach speech');
+    expect(JSON.stringify(payloads.deliberate)).toContain('private cognition must never reach speech');
+    expect(JSON.stringify(payloads.speak)).not.toContain('private cognition must never reach speech');
+    expect(JSON.stringify(payloads.review)).not.toContain('private cognition must never reach speech');
+    expect(JSON.stringify(payloads.speak)).not.toContain('privateCognition');
+    expect(JSON.stringify(payloads.review)).not.toContain('privateCognition');
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({memoryContext:expect.objectContaining({selectedRecordCount:1,sourceRecordCount:3,coverageGapCount:0,reuse:'fresh'})})]));
     expect(JSON.stringify(events)).not.toContain('I will fund a guide');
   });
@@ -188,5 +198,25 @@ describe('NPC memory dialogue context',()=>{
     const provider:DialogueProvider={async countContext(){counts++;return {model:'fixture',counterId:'fixture-counter',inputTokens:tokens,durationMs:1};},async generate(){generations++;throw new Error('must not generate');}};
     await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'What changed?',expectedConversationSequence:7,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).rejects.toMatchObject({code:'CONTEXT_BUDGET'});
     expect(counts).toBe(expectedCounts); expect(generations).toBe(0);
+  });
+
+  it('canonicalizes a multilingual frozen artifact exactly and admits only byte/token boundary values',()=>{
+    const text='東京 العربية देवनागरी 𠜎 e\u0301 👩🏽‍🚀';
+    const source={id:'unicode-source',version:1,hash:'c'.repeat(64),kind:'dialogue_turn',ledgerSequence:3};
+    const payload={projections:{private:{text},public:{text}},baseProvenance:{contentVersion:'v1',profileRevision:null}};
+    const canonical=canonicalNpcMemoryContextPayload({sources:[source],requiredSourceIds:[source.id],payload});
+    expect(JSON.parse(canonical).payload.projections.private.text).toBe(text);
+    expect(canonical).toContain(text);
+    expect(utf8Bytes(canonical)).toBeGreaterThan(text.length);
+    const bytes=utf8Bytes(canonical);
+    const input={policyVersion:'test',projectionVersion:'test',sources:[source],requiredSourceIds:[source.id],payload,
+      tokenizerId:'fixture',counterId:'fixture',model:'fixture',tokenCount:16_000};
+    expect(()=>assembleNpcMemoryContext({...input,maxBytes:bytes-1,maxTokens:16_000})).toThrow();
+    expect(()=>assembleNpcMemoryContext({...input,maxBytes:bytes,maxTokens:16_000})).not.toThrow();
+    expect(()=>assembleNpcMemoryContext({...input,maxBytes:bytes+1,maxTokens:16_000})).not.toThrow();
+    for (const [tokens,accepted] of [[15_999,true],[16_000,true],[16_001,false]] as const) {
+      const assemble=()=>assembleNpcMemoryContext({...input,maxBytes:bytes,maxTokens:16_000,tokenCount:tokens});
+      if (accepted) expect(assemble).not.toThrow(); else expect(assemble).toThrow();
+    }
   });
 });

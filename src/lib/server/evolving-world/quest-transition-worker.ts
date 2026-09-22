@@ -239,7 +239,10 @@ async function captureMemoryContext(client: SettlementWorkerClient, claim: Quest
   const raw=result.evidence as Record<string,unknown>;
   if (!object(raw.coverage) || raw.coverage.complete!==true) throw new TransitionValidationError('Transition evidence coverage is incomplete.');
   const canonicalEvidence=canonical(raw);
-  const bytes=utf8Bytes(canonicalEvidence);
+  // The durable budget is for the canonical evidence bytes, not a JSON string
+  // containing that canonical JSON.  Replay recomputes from the object, so
+  // these two paths must use the identical representation.
+  const bytes=new TextEncoder().encode(canonicalEvidence).byteLength;
   if (bytes>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition evidence exceeds its byte budget.');
   const counter=runtime.countMemoryContext ?? (runtime.provider as { countMemoryContext?: QuestTransitionRuntime['countMemoryContext'] } | undefined)?.countMemoryContext;
   if (!counter) throw new TransitionValidationError('Transition evidence token counter is unavailable.');
