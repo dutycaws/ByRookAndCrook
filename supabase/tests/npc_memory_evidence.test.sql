@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(13);
+select plan(16);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000001','memory-owner@example.test','authenticated','authenticated'),
@@ -56,7 +56,35 @@ set local role service_role;
 set local request.jwt.claim.role='service_role';
 set local request.jwt.claim.sub='00000000-0000-4000-8000-000000000099';
 select is((select public.npc_memory_retrieve_for_actor('18100000-0000-4000-8000-000000000001',instance_id,'promise')->'items'->0->>'quote' from pg_temp.memory_fixture),'I will fund a guide, not weapons.','service retrieval scopes evidence to the supplied player actor');
+select is((select public.npc_memory_retrieve_for_actor('18100000-0000-4000-8000-000000000001',instance_id,'promise')->'sourceManifest'->0 from pg_temp.memory_fixture),
+  jsonb_build_object('id','18100000-0000-4000-8000-000000000010','version',1,'hash',encode(extensions.digest(convert_to('I will fund a guide, not weapons.' || E'\n' || 'I accept those conditions.','utf8'),'sha256'),'hex'),'kind','dialogue_turn'),
+  'selected dialogue evidence exposes its authoritative source id, version, hash, and kind');
+reset role;
+insert into private.world_npc_memories(turn_id,instance_id,kind,text,quote,speaker,importance,entity_refs,save_id,record_root_id,source_kind,source_id,source_version,source_hash,occurred_day,occurred_sequence)
+select '18100000-0000-4000-8000-000000000010',instance_id,'interaction','The quest dossier names an eastern route.','eastern route','keeper',2,'{}',save_id,
+       '18100000-0000-4000-8000-000000000021','quest_event','18100000-0000-4000-8000-000000000099',7,repeat('b',64),1,0
+from pg_temp.memory_fixture;
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+select is((select manifest from pg_temp.memory_fixture cross join lateral jsonb_array_elements(public.npc_memory_retrieve_for_actor('18100000-0000-4000-8000-000000000001',instance_id,'dossier')->'sourceManifest') manifest where manifest->>'kind'='quest_event'),
+  jsonb_build_object('id','18100000-0000-4000-8000-000000000099','version',7,'hash',repeat('b',64),'kind','quest_event'),
+  'non-dialogue selected evidence retains its ledger-backed quest-event manifest');
 select is((select public.world_npc_memory_claim('extract','service-claim-v1')->>'sourceId'),'18100000-0000-4000-8000-000000000010','service worker can claim a pending derived-memory source');
+reset role;
+
+insert into private.world_npc_dialogue_turns(id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until,result,completed_at)
+select '18100000-0000-4000-8000-000000000011',save_id,instance_id,npc_id,version_id,'18100000-0000-4000-8000-000000000001',
+       'A later promise must stay beyond the frozen cutoff.',1,revision,1,'completed',clock_timestamp()-interval '1 second','{"reply":"Later."}'::jsonb,clock_timestamp()
+from pg_temp.memory_fixture;
+insert into private.world_npc_memories(turn_id,instance_id,kind,text,quote,speaker,importance,entity_refs,save_id,record_root_id,source_id,source_hash,occurred_day,occurred_sequence)
+select '18100000-0000-4000-8000-000000000011',instance_id,'interaction','Later promise evidence.','Later promise','keeper',2,'{}',save_id,
+       '18100000-0000-4000-8000-000000000022','18100000-0000-4000-8000-000000000011',repeat('c',64),1,1
+from pg_temp.memory_fixture;
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+select is((select public.npc_memory_retrieve_for_actor('18100000-0000-4000-8000-000000000001',instance_id,'',12,0)->'sourceManifest' from pg_temp.memory_fixture),
+  jsonb_build_array(jsonb_build_object('id','18100000-0000-4000-8000-000000000010','version',1,'hash',encode(extensions.digest(convert_to('I will fund a guide, not weapons.' || E'\n' || 'I accept those conditions.','utf8'),'sha256'),'hex'),'kind','dialogue_turn'),jsonb_build_object('id','18100000-0000-4000-8000-000000000099','version',7,'hash',repeat('b',64),'kind','quest_event')),
+  'manifest respects the authorized retrieval cutoff and excludes later sources');
 reset role;
 
 set local role authenticated;

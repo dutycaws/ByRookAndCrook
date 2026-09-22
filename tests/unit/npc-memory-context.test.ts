@@ -6,7 +6,7 @@ import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
 const npcId='11111111-1111-4111-8111-111111111111';
 const instanceId='33333333-3333-4333-8333-333333333333';
 const turnId='22222222-2222-4222-8222-222222222222';
-const memory={cutoffSequence:7,items:[{id:'memory-1',record_root_id:'memory-root-1',source_id:'turn-1',text:'I will fund a guide, not weapons.'}],sourceFallback:[{turnId:'turn-1',sequence:7,keeper:'Will you fund this?',npc:'A guide, not weapons.'}],watermarks:[]};
+const memory={cutoffSequence:7,items:[{id:'memory-1',record_root_id:'memory-root-1',source_id:'turn-1',text:'I will fund a guide, not weapons.'}],sourceFallback:[{turnId:'turn-1',sequence:7,keeper:'Will you fund this?',npc:'A guide, not weapons.'}],watermarks:[],sourceManifest:[],sourceManifestCoverage:{missingItemIds:[],complete:true}};
 
 const rpcResult=(data:unknown)=>({abortSignal:async()=>({data,error:null})});
 

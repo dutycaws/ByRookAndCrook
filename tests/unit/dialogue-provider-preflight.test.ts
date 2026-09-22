@@ -10,6 +10,13 @@ const count = (tokens: number) => new Response(JSON.stringify({input_tokens:toke
 afterEach(()=>vi.unstubAllGlobals());
 
 describe('dialogue provider preflight',()=>{
+  it('counts a canonical context with the exact minimal context-count request',async()=>{
+    const fetch=vi.fn(async (_url:string,init:RequestInit)=>count(37)); vi.stubGlobal('fetch',fetch);
+    await expect(createProvider({OPENAI_API_KEY:'key',NPC_CONTEXT_MODEL:'gpt-5.6-luna'}).countContext?.('{"payload":"مرحبا 👩‍🌾"}',signal))
+      .resolves.toEqual(expect.objectContaining({model:'gpt-5.6-luna',counterId:'openai-responses-input-tokens-v1',inputTokens:37}));
+    expect(fetch).toHaveBeenCalledWith('https://api.openai.com/v1/responses/input_tokens',expect.objectContaining({body:JSON.stringify({model:'gpt-5.6-luna',input:'{"payload":"مرحبا 👩‍🌾"}'})}));
+  });
+
   it('uses projection/create parity for token counting and generation',async()=>{
     const bodies: unknown[]=[];
     vi.stubGlobal('fetch',vi.fn(async (_url:string,init:RequestInit)=>{ bodies.push(JSON.parse(String(init.body))); return bodies.length===1 ? count(12) : completed(); }));

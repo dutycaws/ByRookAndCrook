@@ -1,10 +1,11 @@
 import { schemas, matchesSchema, type Stage } from './schemas';
 import { PROMPT_VERSION } from './prompts';
 import type { PromptSnapshot } from '$lib/server/prompt-registry';
+export interface ContextCount { model: string; counterId: string; inputTokens: number; durationMs: number }
 export interface StageOutput { value: unknown; usage: { input: number; output: number }; model: string; durationMs: number; promptVersion: string; preflight?: { inputTokens: number; durationMs: number } }
 /** Prompt snapshots are supplied by the orchestrator after it resolves the
  * durable turn pin. Fixture implementations may ignore the fourth argument. */
-export interface DialogueProvider { generate(stage: Stage, payload: unknown, signal: AbortSignal, prompt: PromptSnapshot): Promise<StageOutput> }
+export interface DialogueProvider { countContext?(canonicalContext: string, signal: AbortSignal): Promise<ContextCount>; generate(stage: Stage, payload: unknown, signal: AbortSignal, prompt: PromptSnapshot): Promise<StageOutput> }
 export class ProviderUnavailable extends Error {
   constructor(message: string) { super(message); this.name = 'ProviderUnavailable'; }
 }
@@ -49,9 +50,16 @@ async function preflightOpenAiRequest(body: Record<string, unknown>, signal: Abo
 }
 export function createProvider(config: Record<string,string | undefined>): DialogueProvider {
   const provider = config.NPC_PROVIDER ?? 'openai';
-  if (provider==='local') return { async generate() { throw new ProviderUnavailable('Local model support is not implemented.'); } };
+  if (provider==='local') return { async countContext() { throw new ProviderUnavailable('Local model support is not implemented.'); }, async generate() { throw new ProviderUnavailable('Local model support is not implemented.'); } };
   if (provider!=='openai') throw new ProviderUnavailable('Unknown NPC provider.');
-  return { async generate(stage,payload,signal,prompt) {
+  return { async countContext(canonicalContext,signal) {
+    if (!config.OPENAI_API_KEY) throw new ProviderUnavailable('OpenAI is not configured.');
+    const model=config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna'; const started=performance.now();
+    const response=await fetch('https://api.openai.com/v1/responses/input_tokens',{method:'POST',headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,input:canonicalContext}),signal});
+    if(!response.ok) throw new ProviderContextBudgetError('The selected dialogue model does not support verified input-token counting.');
+    const data=await response.json(); if(!Number.isSafeInteger(data?.input_tokens) || data.input_tokens<0) throw new ProviderContextBudgetError('The token-count service returned an invalid count.');
+    return {model,counterId:'openai-responses-input-tokens-v1',inputTokens:data.input_tokens,durationMs:Math.round(performance.now()-started)};
+  }, async generate(stage,payload,signal,prompt) {
     if (!config.OPENAI_API_KEY) throw new ProviderUnavailable('OpenAI is not configured.');
     if (!prompt || prompt.promptType !== 'text_system') throw new ProviderUnavailable('The pinned dialogue prompt is unavailable.');
     const started=performance.now();

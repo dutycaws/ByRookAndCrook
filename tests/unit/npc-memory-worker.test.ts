@@ -82,4 +82,22 @@ describe('npc memory worker', () => {
     expect(artifact.canonicalJson).toBe(canonicalJson({ payload: { text: 'e\u0301 👩‍🌾' }, sourceManifest: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn' }], coverage: { required: [sourceId], included: [sourceId], missing: [], complete: true } }));
     expect(Object.isFrozen(artifact.payload)).toBe(true);
   });
+
+  it('uses one verified precomputed context count without calling a legacy tokenizer', () => {
+    const legacyCount = vi.fn(() => { throw new Error('legacy tokenizer must not run'); });
+    const input = { policyVersion: 'memory-v1', projectionVersion: 'speech-v1', maxBytes: 1024, maxTokens: 1024,
+      sources: [{ id: sourceId, version: 1, hash: sourceHash, kind: 'dialogue_turn' }], requiredSourceIds: [sourceId],
+      payload: { text: 'مرحبا 👩‍🌾' }, tokenCount: 37, tokenizerId: 'openai-responses-input-tokens-v1',
+      counterId: 'openai-responses-input-tokens-v1', model: 'gpt-5.6-luna', revision: 0 };
+    const artifact = assembleNpcMemoryContext({...input, tokenizer:{id:'legacy',count:legacyCount}} as any);
+    expect(artifact.tokens).toBe(37);
+    expect(artifact).toMatchObject({ tokenizer: 'openai-responses-input-tokens-v1', counterId: 'openai-responses-input-tokens-v1', model: 'gpt-5.6-luna', revision: 0 });
+    expect(legacyCount).not.toHaveBeenCalled();
+    expect(assembleNpcMemoryContext({...input, tokenizer:{id:'legacy',count:legacyCount}} as any).hash).toBe(artifact.hash);
+  });
+
+  it('rejects incomplete verified-count metadata', () => {
+    expect(() => assembleNpcMemoryContext({ policyVersion: 'memory-v1', projectionVersion: 'speech-v1', maxBytes: 1024, maxTokens: 1024,
+      sources: [], payload: {}, tokenCount: 1, tokenizerId: '', counterId: 'counter', model: 'model' } as any)).toThrow('Verified NPC memory token-count metadata is invalid');
+  });
 });

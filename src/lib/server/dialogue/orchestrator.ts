@@ -42,16 +42,23 @@ type MemoryRetrieval = {
   items: unknown[];
   sourceFallback: unknown[];
   watermarks: unknown[];
+  sourceManifest: Array<{ id: string; version: number; hash: string; kind: string }>;
+  sourceManifestCoverage: { missingItemIds: string[]; complete: boolean };
 };
 
 /** The 081 RPC already applies save/instance scope, disclosure policy, and cutoff. */
 function memoryRetrieval(value: unknown): MemoryRetrieval {
   const raw=value && typeof value==='object' ? value as Record<string, unknown> : {};
+  const manifestCoverage=raw.sourceManifestCoverage;
   return {
     cutoffSequence:typeof raw.cutoffSequence==='number' ? raw.cutoffSequence : null,
     items:Array.isArray(raw.items) ? raw.items : [],
     sourceFallback:Array.isArray(raw.sourceFallback) ? raw.sourceFallback : [],
     watermarks:Array.isArray(raw.watermarks) ? raw.watermarks : []
+    ,sourceManifest:Array.isArray(raw.sourceManifest) ? raw.sourceManifest.filter((entry): entry is {id:string;version:number;hash:string;kind:string}=>!!entry&&typeof entry==='object'&&typeof (entry as any).id==='string'&&Number.isSafeInteger((entry as any).version)&&typeof (entry as any).hash==='string'&&typeof (entry as any).kind==='string') : [],
+    sourceManifestCoverage:manifestCoverage && typeof manifestCoverage==='object' && typeof (manifestCoverage as any).complete==='boolean'
+      ? {missingItemIds:Array.isArray((manifestCoverage as any).missingItemIds) ? (manifestCoverage as any).missingItemIds.filter((id:unknown): id is string=>typeof id==='string') : [],complete:(manifestCoverage as any).complete}
+      : {missingItemIds:[],complete:false}
   };
 }
 
