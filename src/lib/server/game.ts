@@ -256,12 +256,10 @@ export async function startBake(
   client: SupabaseClient<Database>,
   command: StartBakeCommand
 ): Promise<StartBakeReceipt> {
-  const { data, error } = await client.rpc('start_bake', {
-    p_save_id: command.saveId,
-    p_ingredient_batch_id: command.ingredientBatchId,
-    p_action_id: command.actionId,
-    p_expected_revision: command.expectedRevision
-  });
+  const params = command.recipeKey && command.recipeKey !== 'herb-loaf'
+    ? { p_save_id: command.saveId, p_ingredient_batch_id: command.ingredientBatchId, p_recipe_key: command.recipeKey, p_action_id: command.actionId, p_expected_revision: command.expectedRevision }
+    : { p_save_id: command.saveId, p_ingredient_batch_id: command.ingredientBatchId, p_action_id: command.actionId, p_expected_revision: command.expectedRevision };
+  const { data, error } = await (client.rpc as any)('start_bake', params);
   if (error) throw mapDatabaseError(error);
   return parseStartBakeReceipt(data);
 }

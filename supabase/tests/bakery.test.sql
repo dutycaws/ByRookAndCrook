@@ -1,7 +1,31 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(40);
+select plan(42);
+
+-- Test-only worker harness: a day close is asynchronous, so tests which need
+-- another player mutation must settle every queued job before continuing.
+create function pg_temp.drain_world_settlement(p_settlement_id uuid) returns void
+language plpgsql as $$
+declare
+  claim jsonb;
+  processed integer := 0;
+begin
+  loop
+    claim := public.world_settlement_claim(p_settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      p_settlement_id, (claim->>'jobId')::uuid, (claim->>'fence')::uuid,
+      'no_changes', 'Fixture worker completed the settlement.'
+    );
+    processed := processed + 1;
+    if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  if claim->>'status' <> 'completed' then
+    raise exception 'fixture worker did not terminalize settlement';
+  end if;
+end;
+$$;
 
 insert into auth.users (id, email, role, aud, created_at, updated_at) values
   ('80000000-0000-4000-8000-000000000001', 'bakery-one@example.test', 'authenticated', 'authenticated', now(), now()),
@@ -111,6 +135,18 @@ select lives_ok($$select public.advance_tavern_day(
   (select id from public.tavern_saves), '78000000-0000-4000-8000-000000000006', 13
 )$$, 'a completed bake allows the day to close');
 select ok((select daily_craft_kind is null from public.tavern_saves), 'the next day resets the shared allocation');
+select set_config('app.fixture_settlement_id', public.world_settlement_status((select id from public.tavern_saves where user_id = '80000000-0000-4000-8000-000000000001'))->>'id', true);
+
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '80000000-0000-4000-8000-000000000001';
+select is(public.world_settlement_status((select id from public.tavern_saves))->>'status', 'completed', 'the fixture worker terminalizes the day settlement');
+select is((select world_phase from public.tavern_saves where user_id = '80000000-0000-4000-8000-000000000001'), 'open', 'the fixture worker reopens the tavern');
 
 select lives_ok($$select public.start_brew(
   (select id from public.tavern_saves), (select id from public.ingredient_batches),

@@ -67,7 +67,7 @@ Use these translations throughout the repository:
 | `pnpm exec vitest run tests/unit` | `npm exec -- vitest run tests/unit` |
 | `pnpm exec playwright install --with-deps chromium` | `npm exec -- playwright install --with-deps chromium` |
 | `pnpm env:local -- --rotate` | `npm run env:local -- --rotate` |
-| `pnpm npc:content:migration --migration=<filename>` | `npm run npc:content:migration -- --migration=<filename>` |
+| `pnpm npc:catalog:generate` | `npm run npc:catalog:generate` |
 | `pnpm db:types > src/lib/database.types.ts` | `npm run --silent db:types > src/lib/database.types.ts` |
 
 The `--` separator forwards flags to the underlying script, as described in [npm run](https://docs.npmjs.com/cli/v11/commands/npm-run/). Use `--silent` for database type generation so npm's script banner cannot become part of the TypeScript file. First verify generated output in a temporary file before replacing the existing types.
@@ -103,7 +103,7 @@ After the clean npm installation, run:
 
 ```sh
 npm run check
-npm run npc:content:check
+npm run npc:catalog:check
 npm exec -- vitest run tests/unit
 npm run build
 ```

@@ -1,0 +1,3 @@
+-- Capability authorization is resolved from immutable NPC version packages.
+-- This historical slot intentionally creates no pilot capability registry,
+-- source-copy table, profile conversion trigger, or runtime helper.

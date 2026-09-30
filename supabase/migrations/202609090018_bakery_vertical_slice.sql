@@ -588,36 +588,6 @@ begin
 end;
 $$;
 
--- A newly-started bake is also an active minigame for dialogue gating. Existing
--- turn retries retain the original dialogue recovery behavior.
-alter function public.dialogue_begin(uuid, uuid, text, text, bigint, uuid, text, uuid)
-  rename to dialogue_begin_before_bakery;
-alter function public.dialogue_begin_before_bakery(uuid, uuid, text, text, bigint, uuid, text, uuid)
-  set schema private;
-create function public.dialogue_begin(
-  p_actor uuid, p_turn uuid, p_patron text, p_message text, p_sequence bigint,
-  p_intent_card uuid default null, p_offering_kind text default null,
-  p_offering_item uuid default null
-)
-returns jsonb language plpgsql security definer set search_path = '' as $$
-begin
-  if exists (select 1 from public.dialogue_turns where id = p_turn) then
-    return private.dialogue_begin_before_bakery(
-      p_actor, p_turn, p_patron, p_message, p_sequence,
-      p_intent_card, p_offering_kind, p_offering_item
-    );
-  end if;
-  if exists (
-    select 1 from public.tavern_saves s join public.bake_sessions bake on bake.save_id = s.id
-    where s.user_id = p_actor and bake.status <> 'completed'
-  ) then raise sqlstate 'PT422' using message = 'Finish your active bake before talking'; end if;
-  return private.dialogue_begin_before_bakery(
-    p_actor, p_turn, p_patron, p_message, p_sequence,
-    p_intent_card, p_offering_kind, p_offering_item
-  );
-end;
-$$;
-
 -- Preserve the established Garden/Brewery projection and add Bakery state plus
 -- explicit source links for every intent and food item.
 alter function public.get_tavern_snapshot() rename to get_tavern_snapshot_before_bakery;
@@ -642,10 +612,7 @@ begin
     ) order by c.created_at, c.id)
     from public.intent_cards c join public.intent_card_catalog catalog
       on catalog.card_key = c.card_key and catalog.version = c.catalog_version
-    where c.save_id = v_save and not exists (
-      select 1 from public.intent_card_plays play
-      where play.save_id = v_save and play.card_id = c.id
-    )
+    where c.save_id = v_save
   ), '[]'::jsonb), true);
   v_result := v_result || jsonb_build_object('foods', coalesce((
     select jsonb_agg(jsonb_build_object(
@@ -699,7 +666,6 @@ revoke all on function private.bake_gesture_points(integer), private.bake_timing
   private.bread_name(smallint), private.start_brew_before_bakery(uuid, uuid, uuid, bigint),
   private.complete_brew_before_daily_craft(uuid, uuid, uuid, bigint, integer, integer, integer),
   private.advance_tavern_day_before_bakery(uuid, uuid, bigint),
-  private.dialogue_begin_before_bakery(uuid, uuid, text, text, bigint, uuid, text, uuid),
   private.get_tavern_snapshot_before_bakery() from public, anon, authenticated;
 
 revoke all on function public.start_bake(uuid, uuid, uuid, bigint),
@@ -720,9 +686,5 @@ grant execute on function public.start_bake(uuid, uuid, uuid, bigint),
   public.complete_brew(uuid, uuid, uuid, bigint, integer, integer, integer),
   public.advance_tavern_day(uuid, uuid, bigint), public.get_tavern_snapshot()
   to authenticated;
-revoke all on function public.dialogue_begin(uuid, uuid, text, text, bigint, uuid, text, uuid)
-  from public, anon, authenticated;
-grant execute on function public.dialogue_begin(uuid, uuid, text, text, bigint, uuid, text, uuid)
-  to service_role;
 
 commit;

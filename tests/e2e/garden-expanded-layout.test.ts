@@ -28,12 +28,13 @@ async function openGardenActions(page: Page) {
 }
 
 async function closeMobileGardenActions(page: Page) {
-  const close = page.locator('[data-garden-action-menu]').getByRole('button', { name: 'Close plot actions' });
-  if (await close.count()) {
-    await close.scrollIntoViewIfNeeded();
-    await close.click();
-  }
-  await expect(page.locator('[data-garden-action-menu]')).toHaveCount(0);
+  const menu = page.locator('[data-garden-action-menu]');
+  await expect(menu).toBeVisible();
+  // The menu is fixed to the camera viewport. Scrolling its dismiss control can
+  // move the plot anchor outside that viewport and let the responsive position
+  // loop dismiss it before the user click is delivered.
+  await menu.getByRole('button', { name: 'Close plot actions' }).click();
+  await expect(menu).toHaveCount(0);
 }
 
 test('floating plot menus branch through plant, water, fertilize, and move previews', async ({ page }) => {

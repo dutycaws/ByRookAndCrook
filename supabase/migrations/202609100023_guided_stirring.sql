@@ -4,20 +4,18 @@ begin;
 
 alter table public.brew_sessions
   add column countdown_seconds integer not null default 0,
-  add column stir_rules_version text not null default 'rpm-v1';
+  add column stir_rules_version text not null default 'guide-v2';
 
 alter table public.brew_sessions
   add constraint brew_sessions_countdown_seconds_check check (countdown_seconds >= 0),
   add constraint brew_sessions_stir_rules_version_check
-    check (stir_rules_version in ('rpm-v1', 'guide-v2'));
+    check (stir_rules_version = 'guide-v2');
 
 alter table public.brew_sessions
   drop constraint if exists brew_sessions_duration_seconds_check;
 alter table public.brew_sessions
   add constraint brew_sessions_stir_timing_check check (
-    (stir_rules_version = 'rpm-v1' and duration_seconds = 30 and countdown_seconds = 0)
-    or
-    (stir_rules_version = 'guide-v2' and duration_seconds = 15 and countdown_seconds = 2)
+    duration_seconds = 15 and countdown_seconds = 2
   );
 
 create or replace function public.start_brew(
@@ -174,21 +172,6 @@ begin
   if v_session.status <> 'active' then raise sqlstate 'PT409' using message = 'This brew is already complete'; end if;
   if v_session.day_number <> v_save.current_day then
     raise sqlstate 'PT422' using message = 'This brew cannot be completed on the current tavern day';
-  end if;
-
-  -- Historical sessions retain the original calculator and reward wrapper.
-  if v_session.stir_rules_version = 'rpm-v1' then
-    update public.tavern_saves
-    set day_minigame_completed = false, daily_craft_kind = 'brew'
-    where id = p_save_id;
-    v_result := private.complete_brew_before_daily_craft(
-      p_save_id, p_session_id, p_action_id, p_expected_revision,
-      p_perfect_ticks, p_good_ticks, p_total_ticks
-    );
-    update public.tavern_saves
-    set day_minigame_completed = true, daily_craft_kind = null
-    where id = p_save_id;
-    return v_result;
   end if;
 
   v_target_ticks := v_session.duration_seconds * 4;

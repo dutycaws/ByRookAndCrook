@@ -1,0 +1,79 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createProvider } from '../../src/lib/server/dialogue/provider.js';
+import { createSettlementProvider } from '../../src/lib/server/evolving-world/provider.js';
+import { initialPromptReleaseSnapshot } from '../../src/lib/server/prompt-registry/index.js';
+import { PromptRegistryService } from '../../src/lib/server/prompt-registry/service.js';
+
+const release = initialPromptReleaseSnapshot();
+const oldReleaseId = '11111111-1111-4111-8111-111111111111';
+const oldRelease = {
+  ...release,
+  releaseId: oldReleaseId,
+  prompts: Object.fromEntries(
+    Object.entries(release.prompts)
+      .filter(([key]) => key !== 'npc_memory.summary.v2')
+      .map(([key, prompt]) => [key, { ...prompt, releaseId: oldReleaseId }])
+  )
+} as typeof release;
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('release-pinned provider adapters', () => {
+  it('resolves durable work release IDs instead of the active release', async () => {
+    const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+    const registry = new PromptRegistryService({ rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'prompt_registry_service_work_release') return Promise.resolve({ data: oldRelease.releaseId, error: null });
+      return Promise.resolve({ data: { releaseId: oldRelease.releaseId, releaseNumber: 1, label: 'old', prompts: oldRelease.prompts }, error: null });
+    } });
+    expect((await registry.resolveForWork('dialogue', '22222222-2222-4222-8222-222222222222')).releaseId).toBe(oldRelease.releaseId);
+    expect(calls).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'prompt_registry_service_work_release', args: { p_work_kind: 'dialogue', p_work_id: '22222222-2222-4222-8222-222222222222' } })]));
+  });
+
+  it('resolves a summary job only through its durable prompt-release pin', async () => {
+    const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+    const registry = new PromptRegistryService({ rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'prompt_registry_service_work_release') return Promise.resolve({ data: oldRelease.releaseId, error: null });
+      return Promise.resolve({ data: { releaseId: oldRelease.releaseId, releaseNumber: 1, label: 'old', prompts: oldRelease.prompts }, error: null });
+    } });
+    await expect(registry.resolveForWork('npc_memory_summary', '33333333-3333-4333-8333-333333333333')).resolves.toMatchObject({ releaseId: oldRelease.releaseId });
+    expect(calls).toContainEqual({ name: 'prompt_registry_service_work_release', args: { p_work_kind: 'npc_memory_summary', p_work_id: '33333333-3333-4333-8333-333333333333' } });
+  });
+
+  it('accepts a historical release without v2 and resolves v2 only from its pinned v2 release', async () => {
+    const calls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+    const registry = new PromptRegistryService({ rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'prompt_registry_service_work_release') return Promise.resolve({ data: release.releaseId, error: null });
+      if ((args?.p_release_id as string | undefined) === oldRelease.releaseId) {
+        return Promise.resolve({ data: { releaseId: oldRelease.releaseId, releaseNumber: 1, label: 'old', prompts: oldRelease.prompts }, error: null });
+      }
+      return Promise.resolve({ data: { releaseId: release.releaseId, releaseNumber: 2, label: 'v2', prompts: release.prompts }, error: null });
+    } });
+    await expect(registry.resolve(oldRelease.releaseId)).resolves.not.toHaveProperty(['prompts', 'npc_memory.summary.v2']);
+    await expect(registry.resolveForWork('npc_memory_summary_v2', '44444444-4444-4444-8444-444444444444')).resolves.toHaveProperty(['prompts', 'npc_memory.summary.v2']);
+    expect(calls).toContainEqual({ name: 'prompt_registry_service_work_release', args: { p_work_kind: 'npc_memory_summary_v2', p_work_id: '44444444-4444-4444-8444-444444444444' } });
+  });
+
+  it('sends the pinned dialogue and settlement bodies, and refuses an absent prompt', async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)); requestBodies.push(body);
+      if (_url.endsWith('/input_tokens')) return new Response(JSON.stringify({ input_tokens: 1 }), { status: 200 });
+      const name = body.text?.format?.name;
+      const output = name === 'world_proposer' ? JSON.stringify({ proposalJson: '{}' }) : JSON.stringify({ text: 'okay' });
+      return new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: output }] }], usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200 });
+    });
+    const dialogue = createProvider({ OPENAI_API_KEY: 'key', NPC_MODEL_INPUT_CAPACITY: '90000' });
+    await expect(dialogue.generate('speak', {}, AbortSignal.timeout(1_000), undefined as never)).rejects.toThrow('pinned dialogue prompt');
+    // Deliberate produces a valid schema-free transport assertion after the body
+    // reaches Responses; the structure rejection is irrelevant to provenance.
+    await dialogue.generate('speak', {}, AbortSignal.timeout(1_000), release.prompts['dialogue.speak']).catch(() => undefined);
+    const settlement = createSettlementProvider({ OPENAI_API_KEY: 'key', NPC_MODEL_INPUT_CAPACITY: '100000' });
+    await settlement.generate('proposer', { schema: {}, profile: {}, capability: {}, worldSnapshot: {}, authorizedEvidence: [] }, AbortSignal.timeout(1_000), release.prompts['resident.proposer']).catch(() => undefined);
+    expect(requestBodies.filter((body) => Array.isArray(body.input)).map((body) => (body.input as Array<{ content: string }>)[0].content)).toEqual(expect.arrayContaining([
+      release.prompts['dialogue.speak'].body, release.prompts['resident.proposer'].body
+    ]));
+  });
+});

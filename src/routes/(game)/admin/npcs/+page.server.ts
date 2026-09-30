@@ -1,6 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { communityContext, requireCapability } from '$lib/server/community-npc-workspace';
 import { drainPortraitDeletionQueue } from '$lib/server/community-npc-jobs/portrait-service';
+import { clearProjectionCache } from '$lib/server/npc-memory/projection-cache';
 import type { Actions, PageServerLoad } from './$types';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,13 +25,23 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     reportDetailRequest
   ]);
   for (const result of [queue, reports, retirements, users, audit, reportDetail]) if (result.error) throw new Error(result.error.message);
+  const queueItems = (queue.data ?? []) as Array<{ versionId?: string }>;
+  // The queue is intentionally a small index.  Each submitted V2 version is
+  // then read through the reviewer-only projection so the browser receives the
+  // frozen candidate and server-issued option IDs, never a writable envelope.
+  const submissions = await Promise.all(queueItems.map(async (item) => {
+    if (!UUID_PATTERN.test(item.versionId ?? '')) return null;
+    const result = await locals.supabase.rpc('npc_reviewer_submission', { p_version_id: item.versionId! });
+    if (result.error) throw new Error(result.error.message);
+    return result.data as Record<string, unknown>;
+  }));
 
   return {
     community,
     query,
     selectedReportId: UUID_PATTERN.test(selectedReportId) ? selectedReportId : null,
     reportDetail: reportDetail.data as any,
-    queue: (queue.data ?? []) as any[],
+    queue: submissions.filter((item): item is Record<string, unknown> => item !== null),
     moderation: [
       ...((reports.data ?? []) as any[]).map((row) => ({ ...row, kind: 'report' })),
       ...((retirements.data ?? []) as any[]).map((row) => ({ ...row, kind: 'retirement' }))
@@ -39,10 +50,24 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     audit: (audit.data ?? []) as any[]
   };
 };
+
+/** Kept separate so approvals cannot accidentally revive the retired rating
+ * control or pass a creator-authored capability envelope to the server. */
+export function _reviewerDecisionArgs(data: FormData): Record<string, unknown> {
+  const decision = String(data.get('decision') ?? '');
+  const optionIds = data.getAll('optionId').map(String).filter(Boolean);
+  return {
+    p_version_id: String(data.get('versionId') ?? ''),
+    p_decision: decision,
+    p_notes: String(data.get('notes') ?? ''),
+    p_rating: null,
+    p_option_ids: decision === 'approve' ? optionIds : []
+  };
+}
 async function call(locals: App.Locals, request: Request, rpc: string, capability = 'npc_reviewer') {
   await guard(locals, capability); const d = await request.formData(); const value = (key: string) => String(d.get(key) ?? '');
   const args: Record<string, Record<string, unknown>> = {
-    npc_reviewer_comment: { p_npc_id: value('npcId'), p_version_id: value('versionId'), p_section: value('section'), p_body: value('body') }, npc_reviewer_decide: { p_version_id: value('versionId'), p_decision: value('decision'), p_notes: value('notes'), p_rating: value('rating') || undefined }, npc_reviewer_publish: { p_version_id: value('versionId') }, npc_reviewer_resolve_report: { p_report: value('reportId'), p_uphold: value('uphold') === 'true', p_reviewer_reason: value('reviewerReason'), p_creator_reason: value('creatorReason'), p_action: value('action') }, npc_reviewer_retirement: { p_request: value('requestId'), p_approve: value('approve') === 'true', p_reason: value('reason') }, npc_admin_set_capability: { p_user: value('userId'), p_capability: value('capability'), p_enabled: value('enabled') === 'true', p_reason: value('reason') }, npc_admin_quarantine_or_purge: { p_npc: value('npcId'), p_purge: value('purge') === 'true', p_reason: value('reason') }
+    npc_reviewer_comment: { p_npc_id: value('npcId'), p_version_id: value('versionId'), p_section: value('section'), p_body: value('body') }, npc_reviewer_decide: _reviewerDecisionArgs(d), npc_reviewer_publish: { p_version_id: value('versionId') }, npc_reviewer_resolve_report: { p_report: value('reportId'), p_uphold: value('uphold') === 'true', p_reviewer_reason: value('reviewerReason'), p_creator_reason: value('creatorReason'), p_action: value('action') }, npc_reviewer_retirement: { p_request: value('requestId'), p_approve: value('approve') === 'true', p_reason: value('reason') }, npc_admin_set_capability: { p_user: value('userId'), p_capability: value('capability'), p_enabled: value('enabled') === 'true', p_reason: value('reason') }, npc_admin_quarantine_or_purge: { p_npc: value('npcId'), p_purge: value('purge') === 'true', p_reason: value('reason') }
   }; const r = await locals.supabase.rpc(rpc as never, args[rpc] as never); return r.error ? fail(400, { message: r.error.message }) : { message: 'Community action recorded.' };
 }
 async function quarantine(locals: App.Locals, request: Request) {
@@ -58,6 +83,7 @@ async function quarantine(locals: App.Locals, request: Request) {
     p_reason: String(data.get('reason') ?? '')
   });
   if (result.error) return fail(400, { message: result.error.message });
+  clearProjectionCache();
   if (!purge) return { message: 'Community action recorded.' };
   try {
     const cleanup = await drainPortraitDeletionQueue();

@@ -7,12 +7,13 @@ export const intentionSchema = object({ goal: string, motivation: string, target
 })) });
 export const schemas = {
   investigate: object({ kind: enumeration(['informational','social','planning']), needsMore: { type:'boolean' }, remember: { type:'boolean' },
-    requests: array(object({ category: enumeration(['quests','history','relationships','memories','news']), query: string })) }),
+    requests: array(object({ category: enumeration(['quests','history','relationships','memories','news','beliefs']), query: string })) }),
   deliberate: object({ stance: enumeration(['agree','refuse','clarify','respond']), reaction: { type:'integer', enum:[-1,0,1] },
     subject: enumeration(['quest','personal','hospitality']), evidence: string, intention: { anyOf:[intentionSchema,{type:'null'}] } }),
   speak: object({ text: string }),
   review: object({ ok: { type:'boolean' }, issues: array(string) }),
-  remember: object({ memories: array(object({ kind: enumeration(['keeper_claim','npc_statement','promise','interaction']), text:string, quote:string, speaker:enumeration(['keeper','npc']) })) })
+  remember: object({ memories: array(object({ kind: enumeration(['keeper_claim','npc_statement','promise','interaction']), text:string, quote:string, speaker:enumeration(['keeper','npc']),
+    priorCommitmentId:{anyOf:[string,{type:'null'}]}, commitmentStatus:{anyOf:[enumeration(['unresolved','withdrawn','disputed','superseded']),{type:'null'}]} })) })
 };
 export type Stage = keyof typeof schemas;
 

@@ -48,7 +48,7 @@ export interface BrewVisualState {
     startedAt: string;
     durationSeconds: number;
     countdownSeconds: number;
-    stirRulesVersion: 'rpm-v1' | 'guide-v2';
+    stirRulesVersion: 'guide-v2';
   } | null;
   pending: boolean;
   error: string | null;

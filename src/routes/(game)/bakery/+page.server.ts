@@ -45,7 +45,11 @@ export const load: PageServerLoad = async ({ locals, setHeaders }) => {
   await requireUser(locals);
   setHeaders({ 'cache-control': 'private, no-store' });
   try {
-    return { snapshot: await getSnapshot(locals.supabase) };
+    const snapshot = await getSnapshot(locals.supabase);
+    const rpc = locals.supabase.rpc.bind(locals.supabase) as any;
+    const availability = snapshot ? await rpc('world_generated_gameplay_availability', { p_save_id: snapshot.save.id }) : { data: { recipes: [] }, error: null };
+    if (availability.error) throw availability.error;
+    return { snapshot, generatedRecipes: Array.isArray(availability.data?.recipes) ? availability.data.recipes : [] };
   } catch (cause) {
     console.error('get_tavern_snapshot failed', cause);
     error(500, 'The bakery ledger is unavailable. Please try again.');
@@ -59,10 +63,11 @@ export const actions: Actions = {
     const command = {
       saveId: String(data.get('saveId') ?? ''),
       ingredientBatchId: String(data.get('ingredientBatchId') ?? ''),
+      recipeKey: String(data.get('recipeKey') ?? 'herb-loaf'),
       actionId: String(data.get('actionId') ?? ''),
       expectedRevision: integer(data.get('expectedRevision'))
     };
-    if (!validBase(command) || !UUID_PATTERN.test(command.ingredientBatchId)) {
+    if (!validBase(command) || !UUID_PATTERN.test(command.ingredientBatchId) || !/^(herb-loaf|generated-[a-z][a-z0-9-]{1,79})$/.test(command.recipeKey)) {
       return fail(400, { message: 'Choose an available ingredient before starting the loaf.' });
     }
     try {

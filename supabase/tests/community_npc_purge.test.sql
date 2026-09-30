@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(19);
+select plan(31);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000061','purge-player@example.test','authenticated','authenticated'),
@@ -27,17 +27,54 @@ create temporary table pg_temp.mature_world as
     and w.npc_id='18181818-1818-4181-8181-181818181818';
 grant select on pg_temp.mature_world to authenticated;
 
+select throws_ok(
+  $$delete from private.world_resident_package_pins where instance_id=(select instance_id from pg_temp.mature_world)$$,
+  '55000',null,
+  'a resident package pin cannot be deleted directly'
+);
+
 insert into private.world_npc_dialogue_turns(
   id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,
-  source_revision,day_number,status,lease_until,result,completed_at
+  source_revision,day_number,status,lease_until,result,completed_at,checkpoints
 ) values (
   '18100000-3000-4000-8000-000000000001',(select save_id from pg_temp.mature_world),
   (select instance_id from pg_temp.mature_world),'18181818-1818-4181-8181-181818181818',
   (select version_id from pg_temp.mature_world),'18100000-0000-4000-8000-000000000061',
-  'Please remember the old road.',0,0,1,'completed',now(),'{"reply":"I remember the old road."}'::jsonb,now()
+  'Please remember the old road.',0,0,1,'completed',now(),'{"reply":"I remember the old road."}'::jsonb,now(),
+  '{"frozen_context:0":{"payload":{"evidence":"fake frozen context"},"sourceManifest":[]}}'::jsonb
 );
-insert into private.world_npc_memories(turn_id,instance_id,kind,text,quote,speaker)
-  values('18100000-3000-4000-8000-000000000001',(select instance_id from pg_temp.mature_world),'npc_statement','Lira remembers the old road.','old road','npc');
+insert into private.world_npc_memories(
+  id,turn_id,instance_id,kind,text,quote,speaker,save_id,record_root_id,
+  source_id,source_hash,occurred_day,occurred_sequence
+) values (
+  '18100000-3000-4000-8000-000000000004','18100000-3000-4000-8000-000000000001',
+  (select instance_id from pg_temp.mature_world),'npc_statement','Lira remembers the old road.','old road','npc',
+  (select save_id from pg_temp.mature_world),'18100000-3000-4000-8000-000000000004',
+  '18100000-3000-4000-8000-000000000001',
+  encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex'),1,0
+);
+insert into private.world_npc_memory_artifacts(
+  save_id,instance_id,artifact_kind,source_kind,source_ids,source_versions,
+  source_hash,processor_version,content,content_hash
+) values (
+  (select save_id from pg_temp.mature_world),(select instance_id from pg_temp.mature_world),'episode_summary','dialogue_turn',
+  array['18100000-3000-4000-8000-000000000001'::uuid],array[1::bigint],
+  encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex'),
+  'purge-fixture-v1','{"summary":"Old road."}'::jsonb,
+  encode(extensions.digest(convert_to('{"summary":"Old road."}','utf8'),'sha256'),'hex')
+);
+select private.world_npc_memory_enqueue(
+  (select save_id from pg_temp.mature_world),(select instance_id from pg_temp.mature_world),'dialogue_turn',
+  '18100000-3000-4000-8000-000000000001',1,0,
+  encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex')
+);
+update private.world_npc_memory_outbox
+set status='processing', fence='18100000-3000-4000-8000-000000000005', lease_until=clock_timestamp()+interval '5 minutes'
+where source_id='18100000-3000-4000-8000-000000000001' and processor_kind='extract';
+create temporary table pg_temp.mature_memory_lease as
+  select id job_id,fence from private.world_npc_memory_outbox
+  where source_id='18100000-3000-4000-8000-000000000001' and processor_kind='extract';
+grant select on pg_temp.mature_memory_lease to service_role;
 insert into private.world_npc_quest_events(instance_id,day,outcome,narration,public_news)
   values((select instance_id from pg_temp.mature_world),1,'prepared','Lira prepared a private route.',true);
 insert into public.foods(save_id,name,quality_index,source_action_id,day_number,recipe_key,rules_version)
@@ -59,6 +96,36 @@ grant select on pg_temp.mature_share to authenticated;
 insert into private.npc_reports(reporter_id,world_id,version_id,category,evidence,transcript,frozen_version,generation_metadata)
   values('18100000-0000-4000-8000-000000000061',(select save_id from pg_temp.mature_world),(select version_id from pg_temp.mature_world),'privacy','Remove every visible copied narrative.','[{"text":"Lira prepared a private route."}]'::jsonb,'{"sheet":{"identity":{"name":"Lira"}}}'::jsonb,'{"provider":"fixture"}'::jsonb);
 
+-- Exercise the same terminal transition claim/checkpoint boundary used by
+-- transition evidence before removal, so the cascade covers frozen context.
+update public.tavern_saves set current_day=4,world_phase='open'
+  where id=(select save_id from pg_temp.mature_world);
+create temporary table pg_temp.mature_prepared as
+  select * from private.world_resolve_quest_step(
+    (select id from private.world_quests where save_id=(select save_id from pg_temp.mature_world)
+      and instance_id=(select instance_id from pg_temp.mature_world)),4,0
+  );
+create temporary table pg_temp.mature_terminal as
+  select * from private.world_resolve_quest_step((select quest_id from pg_temp.mature_prepared),5,0);
+grant select on pg_temp.mature_terminal to service_role;
+update public.tavern_saves set current_day=6,world_phase='settling'
+  where id=(select save_id from pg_temp.mature_world);
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.mature_transition_claim as
+  select public.world_quest_transition_claim((select id from pg_temp.mature_terminal)) result;
+create temporary table pg_temp.mature_transition_checkpoint as
+  select public.world_quest_transition_checkpoint(
+    (result->>'transitionId')::uuid,(result->>'fence')::uuid,'memory_context',
+    jsonb_build_object('evidence',jsonb_build_object('version','v4'),'budget',jsonb_build_object('utf8Bytes',1,'inputTokens',1))
+  ) result from pg_temp.mature_transition_claim;
+reset role;
+grant select on pg_temp.mature_transition_claim to service_role;
+
+-- The mature preference mutation is valid in the ordinary playable phase.
+update public.tavern_saves set world_phase='open'
+  where id=(select save_id from pg_temp.mature_world);
+
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000061';
@@ -69,8 +136,25 @@ select is(public.npc_share_view((select share_token from pg_temp.mature_share)):
 select lives_ok($$select public.npc_set_mature_preference(false,false)$$,'mature opt-out can be repeated safely');
 reset role;
 select is((select count(*) from private.world_npc_instances where id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal deletes the world resident');
-select is((select count(*) from private.world_npc_dialogue_turns where id='18100000-3000-4000-8000-000000000001'),0::bigint,'dialogue and memory cascade away with the removed resident');
+select is((select count(*) from private.world_resident_package_pins where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal cascades the resident package pin with its resident');
+select is((select count(*) from private.world_npc_dialogue_turns where id='18100000-3000-4000-8000-000000000001'),0::bigint,'dialogue and its frozen checkpoint cascade away with the removed resident');
 select is((select count(*) from private.world_npc_memories where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'significant dialogue memories are removed with their source exchange');
+select is((select count(*) from private.world_npc_memory_artifacts where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'derived memory artifacts are removed with a purged resident');
+select is((select count(*) from private.world_npc_memory_outbox where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'queued memory work is removed with a purged resident');
+select ok(exists(select 1 from private.world_npc_memory_invalidations invalidation join pg_temp.mature_memory_lease lease on lease.job_id=invalidation.job_id and lease.fence=invalidation.fence),'purge records an active memory fence invalidation before cascade deletion');
+select ok(exists(select 1 from private.world_npc_memory_tombstones where instance_id=(select instance_id from pg_temp.mature_world)),'purge preserves one aggregate memory tombstone after cascade deletion');
+select isnt((select source_fingerprint from private.world_npc_memory_tombstones where instance_id=(select instance_id from pg_temp.mature_world) order by invalidated_at desc limit 1),(select encode(extensions.digest(convert_to('Please remember the old road.' || E'\n' || 'I remember the old road.','utf8'),'sha256'),'hex')),'aggregate tombstone is not a raw source hash');
+select is((select count(*) from private.world_quest_transitions where id=(select (result->>'transitionId')::uuid from pg_temp.mature_transition_claim)),0::bigint,'purge cascades the terminal transition carrying frozen memory context');
+select is((select count(*) from private.world_quest_transition_checkpoints where transition_id=(select (result->>'transitionId')::uuid from pg_temp.mature_transition_claim)),0::bigint,'purge cascades transition memory_context checkpoints');
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+select throws_ok(format('select public.world_npc_memory_complete(%L,%L,%L::jsonb,null)',(select job_id from pg_temp.mature_memory_lease),(select fence from pg_temp.mature_memory_lease),'[]'),'PT409',null,'a late memory worker completion cannot restore a purged resident');
+select throws_ok($$select public.world_quest_transition_checkpoint(
+  (select (result->>'transitionId')::uuid from pg_temp.mature_transition_claim),
+  (select (result->>'fence')::uuid from pg_temp.mature_transition_claim),
+  'memory_context','{}'::jsonb
+)$$,'PT409',null,'a late transition checkpoint cannot restore purged frozen context');
+reset role;
 select is((select count(*) from private.world_npc_quest_events where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'quest prose and public news are removed');
 select is((select count(*) from private.world_npc_hospitality_events where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'hospitality projections are removed');
 select is((select transcript from private.npc_reports where world_id=(select save_id from pg_temp.mature_world)),'[]'::jsonb,'report copy retains its record but not NPC narrative');
@@ -81,13 +165,38 @@ insert into private.npc_identities(id,origin,creator_id,normalized_name,status,r
   values('18100000-4000-4000-8000-000000000001','community','18100000-0000-4000-8000-000000000063','removal witness','published','standard');
 insert into private.npc_identity_owners(npc_id,user_id)
   values('18100000-4000-4000-8000-000000000001','18100000-0000-4000-8000-000000000063');
-insert into private.npc_versions(id,npc_id,version_number,sheet,sheet_hash,state,created_by)
-  select '18100000-4000-4000-8000-000000000002','18100000-4000-4000-8000-000000000001',1,sheet,'purge-test-sheet-v1','published','18100000-0000-4000-8000-000000000063'
+insert into private.npc_versions(id,npc_id,version_number,schema_version,sheet,sheet_hash,state,created_by)
+  select '18100000-4000-4000-8000-000000000002','18100000-4000-4000-8000-000000000001',1,schema_version,sheet,sheet_hash,'published','18100000-0000-4000-8000-000000000063'
   from private.npc_versions where id='18181818-1818-4181-8181-181818181819';
 update private.npc_identities set current_published_version_id='18100000-4000-4000-8000-000000000002'
   where id='18100000-4000-4000-8000-000000000001';
-insert into private.world_npc_instances(save_id,npc_id,version_id,arrived_day)
-  values((select save_id from pg_temp.mature_world),'18100000-4000-4000-8000-000000000001','18100000-4000-4000-8000-000000000002',1);
+insert into private.npc_version_resident_packages(
+  npc_id,version_id,source_kind,frozen_sheet_hash,definition_hash,
+  personality_schema,initial_profile,appearance_spec,capability_envelope,
+  capability_registry_version,capability_option_ids,resolved_options_hash,
+  terminal_outcomes,package_hash
+)
+select
+  '18100000-4000-4000-8000-000000000001','18100000-4000-4000-8000-000000000002','community',
+  package.frozen_sheet_hash,package.definition_hash,package.personality_schema,
+  package.initial_profile,package.appearance_spec,package.capability_envelope,
+  package.capability_registry_version,package.capability_option_ids,
+  package.resolved_options_hash,package.terminal_outcomes,
+  private.npc_resident_package_hash(
+    '18100000-4000-4000-8000-000000000001',
+    '18100000-4000-4000-8000-000000000002','community',null,
+    package.frozen_sheet_hash,package.definition_hash,package.personality_schema,
+    package.initial_profile,package.appearance_spec,package.capability_envelope,
+    package.capability_registry_version,package.capability_option_ids,
+    package.resolved_options_hash,package.terminal_outcomes
+  )
+from private.npc_version_resident_packages package
+where package.version_id='18181818-1818-4181-8181-181818181819';
+select * from private.world_materialize_resident_from_version(
+  (select save_id from pg_temp.mature_world),
+  '18100000-4000-4000-8000-000000000001',
+  '18100000-4000-4000-8000-000000000002',1
+);
 create temporary table pg_temp.quarantine_world as
   select id instance_id from private.world_npc_instances where npc_id='18100000-4000-4000-8000-000000000001';
 
@@ -99,18 +208,8 @@ set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000062';
 select throws_ok($$select public.npc_reviewer_resolve_report('18100000-4000-4000-8000-000000000004',false,'The report is dismissed.','No remedy is warranted.','quarantine')$$,'PT400',null,'a dismissed report cannot trigger a quarantine');
 reset role;
 
-set local role authenticated;
-set local request.jwt.claim.role='authenticated';
-set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000062';
-select public.npc_admin_quarantine_or_purge('18100000-4000-4000-8000-000000000001',false,'Immediate quarantine test.');
-reset role;
-select is((select count(*) from private.world_npc_instances where id=(select instance_id from pg_temp.quarantine_world)),0::bigint,'quarantine removes the resident from every visible world projection');
-select ok(exists(select 1 from private.world_npc_tombstones where npc_id='18100000-4000-4000-8000-000000000001' and reason='quarantined'),'quarantine preserves the removal reason in a tombstone');
-
 -- Approved retirement stops future sampling while leaving already-arrived
 -- residents and their saved history playable in their existing worlds.
-insert into private.world_npc_instances(save_id,npc_id,version_id,arrived_day)
-  values((select save_id from pg_temp.mature_world),'18100000-4000-4000-8000-000000000001','18100000-4000-4000-8000-000000000002',1);
 insert into private.npc_retirement_requests(id,npc_id,requested_by,reason)
   values('18100000-4000-4000-8000-000000000003','18100000-4000-4000-8000-000000000001','18100000-0000-4000-8000-000000000063','The prototype needs this author-owned NPC removed.');
 set local role authenticated;
@@ -121,15 +220,24 @@ reset role;
 select is((select status from private.npc_identities where id='18100000-4000-4000-8000-000000000001'),'retired','approved retirement stops future sampling at the identity');
 select is((select count(*) from private.world_npc_instances where npc_id='18100000-4000-4000-8000-000000000001'),1::bigint,'retirement leaves already-arrived residents playable and pinned');
 
--- A ban is the emergency removal variant, and former owners remain unable to
--- use their reviewer capability against a character they once owned.
+-- Quarantine removes that package-backed resident without permitting a direct
+-- pin edit, and a later ban records the emergency removal variant.
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000062';
+select public.npc_admin_quarantine_or_purge('18100000-4000-4000-8000-000000000001',false,'Immediate quarantine test.');
+reset role;
+select is((select count(*) from private.world_npc_instances where id=(select instance_id from pg_temp.quarantine_world)),0::bigint,'quarantine removes the resident from every visible world projection');
+select ok(exists(select 1 from private.world_npc_tombstones where npc_id='18100000-4000-4000-8000-000000000001' and reason='quarantined'),'quarantine preserves the removal reason in a tombstone');
+select ok(exists(select 1 from private.world_npc_memory_tombstones where instance_id=(select instance_id from pg_temp.quarantine_world)),'quarantine retains an aggregate memory tombstone without derived prose');
+
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000062';
 select public.npc_admin_quarantine_or_purge('18100000-4000-4000-8000-000000000001',true,'Emergency ban removal test.');
 reset role;
 select is((select status from private.npc_identities where id='18100000-4000-4000-8000-000000000001'),'banned','emergency purge records a banned identity after redaction');
-select ok(exists(select 1 from private.world_npc_tombstones where npc_id='18100000-4000-4000-8000-000000000001' and reason='banned'),'emergency purge leaves a banned tombstone');
+select ok(exists(select 1 from private.world_npc_tombstones where npc_id='18100000-4000-4000-8000-000000000001' and reason='quarantined'),'emergency purge preserves the earlier no-reuse tombstone after promoting the identity to banned');
 update private.npc_identity_owners set ended_at=now()
   where npc_id='18100000-4000-4000-8000-000000000001' and user_id='18100000-0000-4000-8000-000000000063';
 insert into private.npc_capabilities(user_id,capability)

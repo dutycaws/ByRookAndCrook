@@ -8,7 +8,8 @@
     { href: '/bar', label: 'Bar', icon: 'mug' },
     { href: '/brewery', label: 'Brewery', icon: 'barrel' },
     { href: '/bakery', label: 'Bakery', icon: 'bread' },
-    { href: '/shop', label: 'Shop', icon: 'satchel' }
+    { href: '/shop', label: 'Shop', icon: 'satchel' },
+    { href: '/codex', label: 'Codex', icon: 'codex' }
   ] as const;
 </script>
 
@@ -32,6 +33,8 @@
             <path d="M6 4c3-1.3 9-1.3 12 0v16c-3 1.3-9 1.3-12 0zM6 8h12M6 16h12M9 3.2l-1 17.6M15 3.2l1 17.6" />
           {:else if item.icon === 'satchel'}
             <path d="M5 8.5h14v11H5zM8.5 8.5V6.7A3.5 3.5 0 0 1 12 3.2a3.5 3.5 0 0 1 3.5 3.5v1.8M5 12.5h14M10 12.5v1.8h4v-1.8" />
+          {:else if item.icon === 'codex'}
+            <path d="M5 4.5h11.5A2.5 2.5 0 0 1 19 7v12.5H7.5A2.5 2.5 0 0 0 5 22zM5 4.5V22M8 8h7M8 12h7" />
           {:else}
             <path d="M4 13c0-3 2.2-5 5-5 .8-3 5.7-3.2 7 0 2.3.3 4 2.2 4 4.5V19H4zM8 12v4M12 10v6M16 12v4" />
           {/if}

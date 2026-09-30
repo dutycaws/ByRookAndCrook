@@ -1,4 +1,5 @@
 import type { NpcSheet } from '$lib/game/npc-sheet';
+import { releaseTextPrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
 
 export type AuthoringProviderAvailability =
   | { available: true }
@@ -101,7 +102,7 @@ async function requestOpenAi(config: Record<string, string | undefined>, body: R
  * response schema strict while allowing each supported authoring section to
  * retain its canonical shape.
  */
-export function createAuthoringProvider(config: Record<string, string | undefined>): AuthoringProvider {
+export function createAuthoringProvider(config: Record<string, string | undefined>, release?: PromptReleaseSnapshot): AuthoringProvider {
   const availability = authoringProviderAvailability(config);
   if (!availability.available) {
     return {
@@ -110,12 +111,16 @@ export function createAuthoringProvider(config: Record<string, string | undefine
     };
   }
   const model = config.NPC_AUTHORING_MODEL ?? config.NPC_CHARACTER_MODEL ?? 'gpt-5.6-terra';
+  if (!release) return {
+    async assist() { throw new AuthoringProviderError('provider_unavailable', 'The pinned authoring prompt is unavailable.'); },
+    async sandbox() { throw new AuthoringProviderError('provider_unavailable', 'The pinned authoring prompt is unavailable.'); }
+  };
   return {
     async assist(request, signal) {
       const result = await requestOpenAi(config, {
         model, store: false, max_output_tokens: 2200, reasoning: { effort: 'low' },
         input: [
-          { role: 'system', content: 'You assist a game author. Return a replacement only for the requested NPC sheet section. Preserve established facts unless the instruction asks for a supported change. Do not invent world outcomes, internal IDs, or other sections.' },
+          { role: 'system', content: releaseTextPrompt(release, 'authoring.assist').body },
           { role: 'user', content: JSON.stringify({ task: 'replace_one_section', section: request.section, instruction: request.instruction, sheet: request.sheet, currentSection: (request.sheet as unknown as Record<string, unknown>)[request.section] }) }
         ],
         text: structuredFormat('npc_authoring_assistance', assistanceSchema)
@@ -130,7 +135,7 @@ export function createAuthoringProvider(config: Record<string, string | undefine
       const result = await requestOpenAi(config, {
         model, store: false, max_output_tokens: 1600, reasoning: { effort: 'low' },
         input: [
-          { role: 'system', content: 'You are roleplaying the supplied NPC in an isolated authoring sandbox. Follow only the frozen NPC sheet, maintain continuity with prior turns, and never claim to alter the draft, save, or game world.' },
+          { role: 'system', content: releaseTextPrompt(release, 'authoring.sandbox').body },
           { role: 'user', content: JSON.stringify({ task: 'sandbox_reply', sheet: request.sheet, turns: request.turns }) }
         ],
         text: structuredFormat('npc_authoring_sandbox', sandboxSchema)

@@ -2,7 +2,7 @@
   import { invalidateAll } from '$app/navigation';
   import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
   import type { BarSnapshot } from '$lib/game/serving';
-  let { npcId, name, journal, stock, unavailable }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null}=$props();
+  let { npcId, name, journal, stock, unavailable, archiveHref = null, archived = false }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null;archiveHref?:string|null;archived?:boolean}=$props();
   let message=$state(''); let intentCardId=$state(''); let offeringSelection=$state(''); let busy=$state(false);
   let frozen=$state<DialogueInput|null>(null); let notice=$state(''); let failure=$state(false);
   let hydrated=$state(false);
@@ -108,8 +108,8 @@
 <section class="npc-dialogue" aria-labelledby="conversation-heading">
   <h2 id="conversation-heading" class="sr-only">Talk with {name}</h2>
 
-  {#if journal.availability!=='present'}
-    <div class="dialogue-unavailable"><p class="eyebrow">{journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
+  {#if journal.availability!=='present' || archived}
+    <div class="dialogue-unavailable"><p class="eyebrow">{archived ? 'Read-only archive' : journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
   {:else}
     {#if unavailable}<p class="form-message dialogue-provider-notice" role="note">{unavailable}</p>{/if}
     <form onsubmit={send} class="dialogue-composer">
@@ -162,21 +162,29 @@
   {#if notice}<p class="form-message dialogue-notice" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
 
   <details class="dialogue-journal">
-    <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questStatus}</small></summary>
+    <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questLifecycleStatus.replace('_',' ')}</small></summary>
     <div class="journal-drawer">
       <section class="npc-intention">
-        <p class="eyebrow">{journal.availability==='present'?'Current intention':journal.availability==='dead'?'In memory':'Departed'} · {journal.questStatus}</p>
-        {#if journal.intention}<h3>{journal.intention.goal}</h3><p>{journal.intention.motivation}</p>{/if}
-        {#if journal.questStatus==='active'}<p>Readiness: {journal.preparation===2?'well prepared':journal.preparation===1?'some preparation':'unprepared'} · Risk: {journal.risk}</p>{/if}
-        {#if journal.questStatus==='active'&&journal.intention}
+        <p class="eyebrow">{journal.availability==='present'?'Current quest':journal.availability==='dead'?'In memory':'Departed'} · {journal.questLifecycleStatus.replace('_',' ')}</p>
+        {#if journal.currentQuest}<h3>{journal.currentQuest.title}</h3><p>{journal.currentQuest.objective}</p>{/if}
+        {#if journal.questLifecycleStatus==='awaiting_transition'}<p>They are considering their next step.</p>{/if}
+        {#if journal.questLifecycleStatus==='departing'}<p>They are leaving after the tavern closes.</p>{/if}
+        {#if journal.questLifecycleStatus==='active'&&journal.currentQuest}
+          <p>Readiness: {journal.currentQuest.readiness} · Risk: {journal.currentQuest.risk}. Food and drink can help their readiness.</p>
           <ol class="intention-steps" aria-label="Intended daily steps">
-            {#each journal.intention.steps as step,index}<li class:completed={index<journal.nextStep}>
-              {index<journal.nextStep?'Done':index===journal.nextStep?'Next outing':'Later'}: {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
+            {#each journal.currentQuest.plan as step,index}<li class:completed={index<journal.currentQuest.currentStep}>
+              {index<journal.currentQuest.currentStep?'Done':index===journal.currentQuest.currentStep?'Next outing':'Later'}: {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
             </li>{/each}
           </ol>
         {/if}
-        {#if journal.warning}<p class="form-message error" role="note">{journal.warning}</p>{/if}
+        {#if journal.farewellText}<p class="form-message" role="note">{journal.farewellText}</p>{/if}
       </section>
+      {#if journal.disposition}
+        <section class="npc-news" aria-label="How they seem lately">
+          <p class="eyebrow">How they seem lately</p>
+          <p>{journal.disposition.summary}</p>
+        </section>
+      {/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (The overflow transcript must be keyboard-scrollable.) -->
       <div class="npc-transcript" role="region" aria-label="Conversation history" tabindex="0">
         {#if journal.turns.length===0}<p class="muted">Ask about their plans, share advice, or simply get to know them.</p>{/if}
@@ -184,7 +192,22 @@
           <article class="npc-exchange"><p class="eyebrow">Day {turn.day}</p><p class="keeper-line"><strong>You</strong> {turn.message}</p><p><strong>{name}</strong> {turn.reply}</p></article>
         {/each}
       </div>
-      {#if journal.events.length}<div class="npc-news"><p class="eyebrow">News and remembered events</p><ul>{#each journal.events as event (event.id)}<li><small>Day {event.day}</small> {event.text}</li>{/each}</ul></div>{/if}
+      {#if journal.evolution.length}
+        <section class="npc-news" aria-label="What shaped them">
+          <p class="eyebrow">What shaped them</p>
+          <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
+        </section>
+      {/if}
+      {#if journal.questArchive.items.length}
+        <section class="npc-news" aria-label="Quest archive"><p class="eyebrow">Quest archive</p>
+          {#each journal.questArchive.items as quest (quest.id)}
+            <article><p class="eyebrow">Days {quest.activationDay}–{quest.terminalDay} · {quest.origin === 'authored_milestone' ? 'Authored quest' : 'Successor quest'} · {quest.outcome}</p><h3>{quest.title}</h3><p>{quest.objective}</p>
+              {#if quest.events.length}<ul>{#each quest.events as event (event.id)}<li><small>Day {event.day} · {event.outcome}</small> {event.text}</li>{/each}</ul>{/if}
+            </article>
+          {/each}
+          {#if journal.questArchive.nextCursor && archiveHref}<a class="text-button" href={archiveHref}>Earlier quests</a>{/if}
+        </section>
+      {/if}
     </div>
   </details>
 </section>

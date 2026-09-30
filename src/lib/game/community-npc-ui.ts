@@ -13,10 +13,26 @@ export function hasCapability(capabilities: string[], capability: string): boole
 
 export function createNpcSheet(name = 'New companion'): NpcSheet {
   return {
-    schemaVersion: 'npc-sheet-v1', rating: 'standard',
+    schemaVersion: 'npc-sheet-v2', rating: 'standard',
     identity: { name, title: 'Wayfarer', shortDescription: 'A capable traveler with a reason to stay near the tavern for a while.', voice: 'Speaks plainly, listens before making a promise, and keeps their replies grounded in what they know.' },
-    appearance: { physicalAppearance: 'A travel-worn figure with an alert expression and a practical manner.', attire: 'Layered clothing suited to the road, carefully mended and fit for work.', notableFeatures: 'A weathered keepsake and an observant gaze that notices small changes.', mood: 'Cautiously hopeful, especially when offered a warm place to rest.' },
-    personality: { values: ['Keeps promises'], likes: ['Honest work'], dislikes: ['Needless cruelty'], boundaries: ['Will not betray a trusted companion without a compelling reason.'] },
+    appearance: { physicalAppearance: 'A travel-worn figure with an alert expression and a practical manner.', silhouette: 'A practical traveler in a mended cloak, boots, and a compact road satchel.', palette: ['tavern-amber', 'forest-green'], attire: 'Layered clothing suited to the road, carefully mended and fit for work.', notableFeatures: 'A weathered keepsake and an observant gaze that notices small changes.', mood: 'Cautiously hopeful, especially when offered a warm place to rest.' },
+    personality: {
+      dimensions: [
+        { key: 'resolve', label: 'Resolve', negativeAnchor: 'yielding', positiveAnchor: 'steadfast', initialValue: 25, volatility: 1, ordinaryChangeThreshold: 25, definingRuptureThreshold: 100 },
+        { key: 'openness', label: 'Openness', negativeAnchor: 'guarded', positiveAnchor: 'forthcoming', initialValue: 10, volatility: 1, ordinaryChangeThreshold: 25, definingRuptureThreshold: 100 }
+      ],
+      collections: [
+        { kind: 'value', maximumEntries: 4 }, { kind: 'boundary', maximumEntries: 4 }, { kind: 'preference', maximumEntries: 4 }, { kind: 'aversion', maximumEntries: 4 }, { kind: 'motive', maximumEntries: 4 }, { kind: 'fear', maximumEntries: 4 }, { kind: 'coping_pattern', maximumEntries: 4 }, { kind: 'voice_trait', maximumEntries: 4 }
+      ],
+      initialEntries: [
+        { id: 'value_promises', kind: 'value', text: 'Keeps promises made in good faith.', core: true, active: true },
+        { id: 'boundary_companion', kind: 'boundary', text: 'Will not betray a trusted companion without a compelling reason.', core: true, active: true },
+        { id: 'preference_honest_work', kind: 'preference', text: 'Prefers honest work and a clear agreement.', core: false, active: true },
+        { id: 'aversion_cruelty', kind: 'aversion', text: 'Dislikes needless cruelty.', core: true, active: true },
+        { id: 'voice_plain', kind: 'voice_trait', text: 'Speaks plainly and listens before making a promise.', core: true, active: true },
+        { id: 'motive_belonging', kind: 'motive', text: 'Wants to earn a place in the local community.', core: false, active: true }
+      ]
+    },
     lore: { entities: [], npcReferences: [], relationships: [], facts: [] },
     skills: { scouting: 4, combat: 3, diplomacy: 2, trade: 1 },
     campaign: { durableGoal: 'Build enough trust and local knowledge to resolve a difficult obligation without leaving friends behind.', milestones: [

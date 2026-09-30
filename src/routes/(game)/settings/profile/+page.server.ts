@@ -1,5 +1,6 @@
 import { fail } from '@sveltejs/kit';
 import { communityContext } from '$lib/server/community-npc-workspace';
+import { clearProjectionCache } from '$lib/server/npc-memory/projection-cache';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => ({ community: await communityContext(locals.supabase) });
@@ -20,6 +21,7 @@ export const actions: Actions = {
       p_attest_adult: data.get('attest') === 'on',
       p_creator_terms: data.get('terms') === 'on'
     } as never);
+    if (!result.error && !mature && wasMature) clearProjectionCache();
     return result.error
       ? fail(400, { message: result.error.message })
       : { message: mature || !wasMature ? 'Community profile updated.' : 'Community profile updated and mature NPC stories were removed from this tavern.' };
