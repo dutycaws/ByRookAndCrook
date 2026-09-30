@@ -100,7 +100,7 @@ select is((select commitment_status from private.world_npc_memories where record
 update private.world_npc_memory_outbox set status='completed',lease_until=null,completed_at=clock_timestamp() where instance_id=(select instance_id from pg_temp.f) and source_kind<>'quest_event' and status='pending';
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.claim as select public.world_npc_memory_claim('extract','npc-memory-v1') claim;
-select is((select claim->>'sourceKind' from pg_temp.claim),'quest_event','completion fixture claims a non-dialogue quest source');
+select is((select jsonb_build_array(claim->>'sourceKind',claim->>'sourceId') from pg_temp.claim),jsonb_build_array('quest_event','18600000-0000-4000-8000-000000000020'),'completion fixture claims its own non-dialogue quest source');
 select lives_ok(format('select public.world_npc_memory_complete(%L,%L,%L::jsonb,null)',(select claim->>'id' from pg_temp.claim),(select claim->>'fence' from pg_temp.claim),'[]'),'valid non-dialogue source completion accepts its matching fence');
 reset role;
 select is((select status from private.world_npc_memory_outbox where id=(select (claim->>'id')::uuid from pg_temp.claim)),'completed','non-dialogue completion records a completed extract job');

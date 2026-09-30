@@ -46,11 +46,10 @@ select set_config('test.candidate_release',(public.prompt_registry_activate(curr
 select is(jsonb_array_length(public.prompt_registry_summary()->'prompts'),32,'activation keeps a complete release');
 select throws_ok(format($sql$select public.prompt_registry_activate(%L::uuid,'Stale release','{"dialogue.speak":"%s"}'::jsonb,'["safety_language_changed"]'::jsonb,'Must conflict')$sql$,current_setting('test.active_release'),current_setting('test.candidate')),'PT409',null,'active release conflict protects concurrent activation');
 select set_config('test.restored_release',(public.prompt_registry_restore(current_setting('test.candidate_release')::uuid,current_setting('test.active_release')::uuid,'Restored baseline','[]'::jsonb,'Restore known baseline')->>'releaseId'),true);
-select is((select count(*) from jsonb_array_elements(public.prompt_registry_recent_runs())),0::bigint,'safe run list starts empty');
 select throws_ok($$select public.npc_admin_set_capability('62000000-0000-4000-8000-000000000003','prompt_manager',true,'not admin')$$,'PT403',null,'prompt manager cannot grant capabilities');
 reset role;
 
-select is((select count(*) from private.prompt_governance_audit where event_kind='release_restored'),1::bigint,'restore has its own audit event');
+select is((select count(*) from private.prompt_governance_audit where event_kind='release_restored' and release_id=current_setting('test.restored_release')::uuid),1::bigint,'restore has its own audit event');
 select is((select restored_from_release_id::text from private.prompt_releases where id=current_setting('test.restored_release')::uuid),current_setting('test.active_release'),'restore release retains source provenance');
 
 set local role authenticated;
@@ -68,6 +67,30 @@ select is((select count(*) from jsonb_object_keys(current_setting('test.resolved
 select lives_ok(format($sql$select public.prompt_registry_service_record_run('fixture:dialogue:turn',1,'dialogue','dialogue.speak','dialogue.speak',%L::uuid,%L::uuid,'completed','fixture',10,1,1,null)$sql$,current_setting('test.restored_release'),current_setting('test.speak_revision')),'service records allow-listed safe event');
 reset role;
 reset request.jwt.claim.role;
+set local role authenticated;
+set local request.jwt.claim.sub='62000000-0000-4000-8000-000000000002';
+with run_list as (select public.prompt_registry_recent_runs() as runs),
+run_items as (
+  select recent.item
+  from run_list
+  cross join lateral jsonb_array_elements(case when jsonb_typeof(run_list.runs)='array' then run_list.runs else '[]'::jsonb end) as recent(item)
+)
+select ok(
+  jsonb_typeof(run_list.runs)='array'
+  and exists(select 1 from run_items where item->>'executionId'='fixture:dialogue:turn')
+  and not exists(
+    select 1 from run_items
+    where case when jsonb_typeof(run_items.item)='object' then
+      (select count(*) from jsonb_object_keys(run_items.item))<>14
+      or exists(
+        select 1 from jsonb_object_keys(run_items.item) as field(key)
+        where key not in ('executionId','attempt','workflow','node','promptKey','releaseId','revisionId','status','model','durationMs','inputTokens','outputTokens','errorCode','occurredAt')
+      )
+    else true end
+  ),
+  'recent run list includes the fixture and exposes only allow-listed fields'
+) from run_list;
+reset role;
 select set_config('test.release_one',(select id::text from private.prompt_releases where release_number=1),true);
 select set_config('test.summary_release',(select release_id::text from private.prompt_registry_active_release where singleton),true);
 set local role service_role; set local request.jwt.claim.role='service_role';
@@ -75,7 +98,11 @@ select lives_ok($$select public.prompt_registry_service_resolve(current_setting(
 select ok(not ((public.prompt_registry_service_resolve(current_setting('test.release_one')::uuid)->'prompts') ? 'npc_memory.summary'),'old dialogue-era release cannot serve the summary key');
 select ok((public.prompt_registry_service_resolve(current_setting('test.summary_release')::uuid)->'prompts') ? 'npc_memory.summary','new baseline release resolves the summary key');
 reset role; reset request.jwt.claim.role;
-select is((select count(*) from private.prompt_execution_ledger),1::bigint,'service insertion prunes expired events');
+select ok(
+  (select count(*) from private.prompt_execution_ledger where execution_id='fixture:dialogue:turn' and attempt=1 and workflow='dialogue' and node_key='dialogue.speak' and prompt_key='dialogue.speak' and status='completed')=1
+  and not exists(select 1 from private.prompt_execution_ledger where execution_id='fixture:expired:dialogue'),
+  'service insertion records its fixture run and prunes its expired fixture event'
+);
 
 create temporary table prompt_pin_fixture(prompt_release_id uuid);
 create trigger prompt_registry_pin_release before insert on prompt_pin_fixture for each row execute function private.prompt_registry_pin_active_release();

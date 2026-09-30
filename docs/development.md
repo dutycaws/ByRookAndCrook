@@ -29,7 +29,13 @@ Then use the normal human-testing command from the repository root:
 npm run brac-app:dev
 ```
 
-The launcher runs preflight and unit tests, starts or reuses this repository's Supabase stack, refreshes the local environment, applies pending migrations with `supabase migration up --local`, provisions pilot users, runs database and RPC integration tests, then starts Vite with hot reload. Open `http://127.0.0.1:3000/login`. It uses real local authentication, migrations, RPCs, and persistent services to keep local behavior close to the future hosted application; production builds remain a CI and `npm run build` check.
+The launcher runs unit tests and SQL tests in a fresh disposable project before inspecting or starting this repository's persistent Supabase stack. It then refreshes the local environment, applies pending migrations with `supabase migration up --local` without resetting saves, provisions pilot users, runs RPC integration tests against the populated app database, and starts Vite with hot reload. Open `http://127.0.0.1:3000/login`. It uses real local authentication, migrations, RPCs, and persistent services to keep local behavior close to the future hosted application; production builds remain a CI and `npm run build` check.
+
+### SQL test isolation
+
+`npm run test:db:isolated` provisions a fresh, uniquely named local Supabase Postgres-only project, applies the repository migrations and seed, and runs the SQL test suite. It uses temporary configuration and ports, then attempts to remove only its own project resources and temporary files on success, test failure, or a handled interrupt. Cleanup failure makes the gate fail, retains the temporary configuration, and prints a recovery command scoped to that project. Its database is discarded, so no backup is needed for this disposable project; the persistent app database and its saves are not copied, reset, or removed. Optional SQL fixture paths can be passed after npm's `--`.
+
+`npm run test:db` runs `supabase test db` against the project currently selected by the Supabase CLI. When the app stack is running, that means its persistent database. Use this command only when you intend to target that database; the startup gate uses `test:db:isolated` instead.
 
 The local Supabase services use project-specific ports so they can coexist with another local stack:
 
@@ -115,7 +121,7 @@ To rebuild a disposable local database and verify the migration/backfill path, r
 ```sh
 npm run db:reset:local
 npm run db:types:check
-npm run test:db
+npm run test:db:isolated
 ```
 
 The reset destroys local saves. Type output is checked into `src/lib/database.types.ts`; generate it only after the local schema is current. Garden and Apiary RPC coverage is in `tests/integration/garden-commands-rpc.test.ts` and `tests/integration/apiary-commands-rpc.test.ts`. The complete accessible interaction coverage is in `tests/e2e/garden-expanded-layout.test.ts` with compatibility journeys in `garden-journey.test.ts` and `crafting-layout.test.ts`.
@@ -124,7 +130,7 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 
 | Command | Purpose |
 | --- | --- |
-| `npm run brac-app:dev` | Run the supervised local human-testing session: preflight, units, local stack, migration, fixtures, database/RPC gates, and Vite at `127.0.0.1:3000`. Ctrl+C preserves data while stopping the app and adopted project stack. |
+| `npm run brac-app:dev` | Run preflight and unit tests, isolated SQL tests, the persistent local stack, migrations, pilot fixtures, RPC integration tests against the populated app database, and Vite at `127.0.0.1:3000`. Ctrl+C preserves data while stopping the app and adopted project stack. |
 | `npm run dev` | Start the SvelteKit development server on port 3000. |
 | `npm run build` | Create the adapter-node production build. |
 | `npm run preview` | Run the built Node server. |
@@ -153,7 +159,8 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 | `npm run check` | Run Svelte and TypeScript diagnostics. |
 | `npm run test:unit` | Run the focused unit-test suite. |
 | `npm run test` | Run the existing full Vitest suite. |
-| `npm run test:db` | Run pgTAP assertions for garden, brewery, bakery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
+| `npm run test:db:isolated` | Run SQL tests in a fresh disposable Supabase project and remove only that project's temporary resources. |
+| `npm run test:db` | Run SQL tests against the Supabase project currently selected by the CLI; it is not isolated. |
 | `npm run test:integration` | Use real Auth and RPC requests to test initialization, harvest, shared daily crafting, replay, locking, isolation, rewards, and denied direct writes. |
 | `npm run test:e2e` | Run desktop/mobile browser journeys, including Bakery persistence, dialogue recovery, atomic hospitality, overnight intentions, and visual layout bounds. |
 | `npm run npc:catalog:generate` | Validate the editable first-party identity catalogs and deterministically regenerate their executable catalog migration. |
@@ -174,7 +181,7 @@ npm run secrets:audit
 npm run art:assets:check
 npm run db:types:check
 npm run check
-npm run test:db
+npm run test:db:isolated
 npm run test:integration
 npm run test:e2e
 npm run build
@@ -208,7 +215,7 @@ Add schema or game-rule changes as new files in `supabase/migrations/`. Then run
 npm run db:reset:local
 npm run --silent db:types > src/lib/database.types.ts
 npm run db:types:check
-npm run test:db
+npm run test:db:isolated
 npm run test:integration
 ```
 

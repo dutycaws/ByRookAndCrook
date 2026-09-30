@@ -31,7 +31,9 @@ class FakeChild implements Child {
   private settle!: (result: ProcessResult) => void;
   readonly result: Promise<ProcessResult>;
   stopped = 0;
+  readonly stopGraceMs: number[] = [];
   private done = false;
+  private stopping: Promise<void> | undefined;
   constructor(private readonly initial?: ProcessResult) {
     this.result = new Promise((resolve) => { this.settle = resolve; });
     if (initial) queueMicrotask(() => this.finish(initial));
@@ -44,10 +46,13 @@ class FakeChild implements Child {
   emit(options: ManagedProcessOptions, stream: 'stdout' | 'stderr', chunk: string): void {
     options.onOutput?.(stream, chunk);
   }
-  stop(): Promise<void> {
+  stop(graceMs = 10_000): Promise<void> {
+    if (this.stopping) return this.stopping;
     this.stopped++;
+    this.stopGraceMs.push(graceMs);
     this.finish();
-    return Promise.resolve();
+    this.stopping = Promise.resolve();
+    return this.stopping;
   }
 }
 
@@ -109,10 +114,15 @@ describe('brac-app:dev launcher', () => {
     const h = harness(root, { cold: true });
     expect(await runDevelopment(h.options)).toBe(130);
     const order = commandNames(h.calls);
+    expect(order.indexOf('npm test:unit')).toBeLessThan(order.indexOf('npm test:db:isolated'));
+    expect(order.indexOf('npm test:db:isolated')).toBeLessThan(order.indexOf('supabase status'));
+    expect(order.indexOf('npm test:db:isolated')).toBeLessThan(order.indexOf('supabase start'));
     expect(order.indexOf('npm test:unit')).toBeLessThan(order.indexOf('supabase start'));
-    expect(order.indexOf('supabase start')).toBeLessThan(order.indexOf('npm test:db'));
-    expect(order.indexOf('npm test:db')).toBeLessThan(order.indexOf('npm test:integration'));
+    expect(order.indexOf('supabase start')).toBeLessThan(order.indexOf('supabase migration'));
+    expect(order.indexOf('supabase migration')).toBeLessThan(order.indexOf('npm fixtures:users:local'));
+    expect(order.indexOf('npm fixtures:users:local')).toBeLessThan(order.indexOf('npm test:integration'));
     expect(order.indexOf('npm test:integration')).toBeLessThan(order.indexOf('npm dev'));
+    expect(order).not.toContain('npm test:db');
     expect(order).toContain('supabase migration');
     expect(order).toContain('supabase stop');
     const app = h.calls.find((call) => commandNames([call])[0] === 'npm dev')!;
@@ -226,15 +236,53 @@ describe('brac-app:dev launcher', () => {
     expect(commandNames(h.calls)).not.toContain('supabase stop');
   }));
 
-  it('cleans up an adopted stack after a later startup failure', async () => withRoot(async (root) => {
+  it('leaves the persistent Supabase project untouched when isolated database tests fail', async () => withRoot(async (root) => {
     const h = harness(root);
     const original = h.options.spawn!;
-    h.options.spawn = (command, args, options) => args.includes('test:db')
+    h.options.spawn = (command, args, options) => args.includes('test:db:isolated')
+      ? new FakeChild(result(1, '', 'isolated database failure')) : original(command, args, options);
+    expect(await runDevelopment(h.options)).toBe(1);
+    const commands = commandNames(h.calls);
+    expect(commands).not.toContain('supabase status');
+    expect(commands).not.toContain('supabase start');
+    expect(commands).not.toContain('supabase stop');
+    expect(commands).not.toContain('supabase migration');
+    expect(commands).not.toContain('npm env:local');
+    expect(commands).not.toContain('npm fixtures:users:local');
+    expect(commands).not.toContain('npm test:integration');
+    expect(commands).not.toContain('npm dev');
+    expect(h.released).toBe(1);
+  }));
+
+  it('allows the isolated database runner time to clean up its project after an interrupt', async () => withRoot(async (root) => {
+    const h = harness(root);
+    const original = h.options.spawn!;
+    let isolated: FakeChild | undefined;
+    h.options.spawn = (command, args, options) => {
+      if (args.includes('test:db:isolated')) {
+        isolated = new FakeChild();
+        queueMicrotask(() => h.controller.abort());
+        return isolated;
+      }
+      return original(command, args, options);
+    };
+    expect(await runDevelopment(h.options)).toBe(130);
+      expect(isolated?.stopGraceMs).toEqual([90_000]);
+    expect(commandNames(h.calls)).not.toContain('supabase status');
+    expect(commandNames(h.calls)).not.toContain('supabase stop');
+    expect(h.released).toBe(1);
+  }));
+
+  it('cleans up an adopted stack after a later integration test failure', async () => withRoot(async (root) => {
+    const h = harness(root);
+    const original = h.options.spawn!;
+    h.options.spawn = (command, args, options) => args.includes('test:integration')
       ? new FakeChild(result(1, '', 'database failure')) : original(command, args, options);
     expect(await runDevelopment(h.options)).toBe(1);
     const commands = commandNames(h.calls);
     expect(commands.filter((name) => name === 'supabase stop')).toHaveLength(1);
-    expect(commands).not.toContain('npm test:integration');
+    expect(commands).toContain('npm test:db:isolated');
+    expect(commands).toContain('npm fixtures:users:local');
     expect(commands).not.toContain('npm simulation:worker');
     expect(commands).not.toContain('npm dev');
     expect(h.released).toBe(1);

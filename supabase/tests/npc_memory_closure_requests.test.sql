@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(42);
+select plan(43);
 insert into auth.users(id,email,role,aud) values ('18800000-0000-4000-8000-000000000001','closure-owner@example.test','authenticated','authenticated');
 set local role authenticated; set local request.jwt.claim.role='authenticated'; set local request.jwt.claim.sub='18800000-0000-4000-8000-000000000001'; select public.create_tavern(); reset role;
 create temporary table pg_temp.f as select (snapshot#>>'{save,id}')::uuid save_id,(snapshot->'roster'->0->>'instanceId')::uuid instance_id,(snapshot->'roster'->0->>'npcId')::uuid npc_id,(snapshot->'roster'->0->>'versionId')::uuid version_id,(snapshot#>>'{save,revision}')::bigint revision from (select public.npc_bar_snapshot() snapshot) x;
@@ -11,10 +11,10 @@ select throws_ok($$select private.world_npc_memory_request_episode((select insta
 select throws_ok($$select private.world_npc_memory_request_episode((select instance_id from pg_temp.f),3,0)$$,'PT409',null,'future episode day is not requestable');
 select throws_ok($$select private.world_npc_memory_request_episode((select instance_id from pg_temp.f),1,999)$$,'PT409',null,'divergent episode cutoff is rejected');
 select is((private.world_npc_memory_request_episode((select instance_id from pg_temp.f),1,0)).reason,'no_summary','greeting-only episode records no-summary closure');
-select is((select count(*) from private.world_npc_memory_summary_sets),0::bigint,'greeting-only episode creates no set');
+select is((select count(*) from private.world_npc_memory_summary_sets where instance_id=(select instance_id from pg_temp.f)),0::bigint,'greeting-only episode creates no set');
 insert into private.world_npc_memories(turn_id,instance_id,kind,text,quote,speaker,importance,entity_refs,save_id,record_root_id,record_version,source_kind,source_id,source_version,source_hash,occurred_day,occurred_sequence,learned_day,learned_sequence,truth_class,disclosure_class,observer_instance_id) select id,instance_id,'interaction','Meaningful event','Meaningful event','npc',2,'{}',save_id,extensions.gen_random_uuid(),1,'dialogue_turn',id,1,private.world_npc_memory_source_hash('dialogue_turn',id),1,0,1,0,'attributed','npc_known',instance_id from private.world_npc_dialogue_turns where id='18800000-0000-4000-8000-000000000010';
 select is((private.world_npc_memory_request_episode((select instance_id from pg_temp.f),1,0)).status,'registered','existing no-summary request remains immutable');
-select is((select count(*) from private.world_npc_memory_closure_requests),1::bigint,'duplicate episode delivery has one request');
+select is((select count(*) from private.world_npc_memory_closure_requests where instance_id=(select instance_id from pg_temp.f) and summary_kind='episode_summary' and closed_day=1),1::bigint,'duplicate episode delivery has one request');
 update private.world_npc_memory_outbox set status='completed',completed_at=clock_timestamp(),lease_until=null where source_id='18800000-0000-4000-8000-000000000010';
 select private.world_npc_memory_refresh_watermark((select instance_id from pg_temp.f),'extract','npc-memory-v1');
 select is(private.world_npc_memory_schedule_closures((select instance_id from pg_temp.f)),0,'no-summary request does not schedule a provider job');
@@ -25,7 +25,7 @@ select throws_ok($$select private.world_npc_memory_request_quest('18800000-0000-
 insert into private.world_quest_events(id,quest_id,save_id,instance_id,day_number,step_index,action,approach,skill,difficulty,preparation_before,preparation_after,hospitality,readiness,chance,draw,outcome,narration,public_news)
 select '18800000-0000-4000-8000-000000000021',q.id,f.save_id,f.instance_id,4,1,'attempt','scouting',1,q.difficulty,1,1,0,0,50,99,'failed','The quest failed.',false from pg_temp.f f join lateral (select * from private.world_quests where instance_id=f.instance_id limit 1) q on true;
 select is((private.world_npc_memory_request_quest('18800000-0000-4000-8000-000000000021')).status,'pending','failed terminal quest registers a closure request');
-select is((select count(*) from private.world_npc_memory_closure_requests where summary_kind='quest_summary'),1::bigint,'failed terminal request is idempotent');
+select is((select count(*) from private.world_npc_memory_closure_requests where instance_id=(select instance_id from pg_temp.f) and summary_kind='quest_summary' and terminal_event_id='18800000-0000-4000-8000-000000000021'),1::bigint,'failed terminal request is idempotent');
 -- Fresh second save: sequence zero remains a real extract gap while sequence
 -- one is already examined; completing zero through the public service seam
 -- unblocks exactly one closure registration.
@@ -47,6 +47,7 @@ select is((select status from private.world_npc_memory_closure_requests where in
 update private.world_npc_memory_outbox set status='completed',lease_until=null,completed_at=clock_timestamp() where instance_id<>(select instance_id from pg_temp.f2) and status='pending';
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.gap_claim as select public.world_npc_memory_claim('extract','npc-memory-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.gap_claim),'18800000-0000-0000-0000-000000000010','gap claim belongs to the second-instance fixture source');
 select lives_ok($$select public.world_npc_memory_complete((select (claim->>'id')::uuid from pg_temp.gap_claim),(select (claim->>'fence')::uuid from pg_temp.gap_claim),'[]'::jsonb,null)$$,'service completion of gap source succeeds');
 reset role;
 select is((private.world_npc_memory_schedule_closures((select instance_id from pg_temp.f2))),0,'completion wrapper schedules the closure before explicit retry');

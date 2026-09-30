@@ -153,8 +153,11 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
   const log = (message: string) => (options.log ?? console.info)(redact(message, secrets));
   const readinessMs = options.readinessMs ?? 60_000;
   const graceMs = options.graceMs ?? 10_000;
+  // The isolated SQL runner may spend up to 60 seconds cleaning its disposable project
+  // after SIGTERM, plus reaping the interrupted and cleanup process groups.
+  const isolatedDatabaseStopGraceMs = Math.max(graceMs, 90_000);
   let env: NodeJS.ProcessEnv = {};
-  const managedChildren = new Set<Child>();
+  const managedChildren = new Map<Child, number>();
   let lock: ProjectLock | undefined;
   let adopted = false;
   let cleaning = false;
@@ -167,7 +170,7 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     signalCode = code;
     controller.abort();
     log('[brac-app:dev] Stopping the local session…');
-    if (!cleaning) void Promise.all([...managedChildren].map((child) => child.stop(graceMs)))
+    if (!cleaning) void Promise.all([...managedChildren].map(([child, stopGraceMs]) => child.stop(stopGraceMs)))
       .catch(() => { cleanupFailed = true; });
   }
   const onInterrupt = () => requestStop(130);
@@ -186,7 +189,8 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     validateProvider(env);
   };
 
-  function startChild(command: string, args: readonly string[], visible: boolean, childEnv = env): Child {
+  function startChild(command: string, args: readonly string[], visible: boolean, childEnv = env,
+    signalStopGraceMs = graceMs): Child {
     signal.throwIfAborted();
     const buffers = { stdout: '', stderr: '' };
     const child = spawn(command, args, {
@@ -203,15 +207,15 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
         if (buffers[stream].length > 64 * 1024) buffers[stream] = '';
       } } : {})
     });
-    managedChildren.add(child);
+    managedChildren.set(child, signalStopGraceMs);
     return child;
   }
 
   async function execute(command: string, args: readonly string[], settings: {
-    label?: string; visible?: boolean; allowFailure?: boolean; env?: NodeJS.ProcessEnv;
+    label?: string; visible?: boolean; allowFailure?: boolean; env?: NodeJS.ProcessEnv; signalStopGraceMs?: number;
   } = {}): Promise<ProcessResult> {
     if (settings.label) log(`[brac-app:dev] ${settings.label}`);
-    const child = startChild(command, args, settings.visible ?? false, settings.env);
+    const child = startChild(command, args, settings.visible ?? false, settings.env, settings.signalStopGraceMs);
     const result = await child.result;
     await child.stop(graceMs);
     managedChildren.delete(child);
@@ -229,9 +233,10 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
   );
   // Use the npm executable that launched this command, without an extra shell.
   const npmFile = process.env.npm_execpath;
-  const npm = (script: string, label: string, visible = true) => execute(
+  const npm = (script: string, label: string, visible = true, signalStopGraceMs = graceMs) => execute(
     npmFile ? process.execPath : 'npm', [...(npmFile ? [npmFile] : []), 'run', script], {
-      label, visible, env: { ...env, ...(['test:unit', 'test:integration'].includes(script) ? { NODE_ENV: 'test' } : {}) }
+      label, visible, signalStopGraceMs,
+      env: { ...env, ...(['test:unit', 'test:db:isolated', 'test:integration'].includes(script) ? { NODE_ENV: 'test' } : {}) }
     }
   );
 
@@ -267,6 +272,8 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     lock = await (options.acquireLock ?? (() => acquireProjectLock(PROJECT_ID)))();
     signal.throwIfAborted();
     await npm('test:unit', 'Running all unit tests…');
+    await npm('test:db:isolated', 'Running database tests in a disposable local project…', true,
+      isolatedDatabaseStopGraceMs);
 
     let values = await status();
     const reuse = values !== null && await healthy(values);
@@ -297,7 +304,6 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     }
     await supabase(['migration', 'up', '--local'], 'Applying pending local migrations without resetting saves…');
     await npm('fixtures:users:local', 'Ensuring local pilot accounts exist…', false);
-    await npm('test:db', 'Running database tests…');
     await npm('test:integration', 'Running RPC integration tests…');
 
     log('[brac-app:dev] Starting the settlement simulation worker…');
@@ -342,7 +348,7 @@ export async function runDevelopment(options: LauncherOptions = {}): Promise<num
     }
   } finally {
     cleaning = true;
-    try { await Promise.all([...managedChildren].map((child) => child.stop(graceMs))); }
+    try { await Promise.all([...managedChildren].map(([child, stopGraceMs]) => child.stop(stopGraceMs))); }
     catch { cleanupFailed = true; log('[brac-app:dev] Could not terminate a managed process group.'); }
     if (adopted) {
       log('[brac-app:dev] Stopping this project’s Supabase stack and retaining its data…');

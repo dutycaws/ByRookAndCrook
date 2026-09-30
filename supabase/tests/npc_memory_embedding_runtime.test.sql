@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(27);
+select plan(33);
 insert into auth.users(id,email,role,aud) values ('19900000-0000-4000-8000-000000000001','embedding-runtime@test','authenticated','authenticated');
 set local role authenticated; set local request.jwt.claim.role='authenticated'; set local request.jwt.claim.sub='19900000-0000-4000-8000-000000000001';
 select public.create_tavern();
@@ -16,7 +16,7 @@ reset role;
 insert into private.world_npc_dialogue_turns(id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until,result,completed_at)
 select '19900000-0000-4001-8000-000000000001',save_id,instance_id,npc_id,version_id,'19900000-0000-4000-8000-000000000001','Canonical source for embedding',0,revision,1,'completed',clock_timestamp(),'{"reply":"Canonical reply"}',clock_timestamp() from pg_temp.f;
 select private.world_npc_memory_register_source('dialogue_turn','19900000-0000-4001-8000-000000000001');
-select is((select count(*) from private.world_npc_memory_outbox where processor_kind='embedding' and processor_version='npc-embedding-runtime-v3'),0::bigint,'new authoritative source performs no provider work in its gameplay transaction');
+select is((select count(*) from private.world_npc_memory_outbox where source_id='19900000-0000-4001-8000-000000000001' and processor_kind='embedding' and processor_version='npc-embedding-runtime-v3'),0::bigint,'new authoritative source performs no provider work in its gameplay transaction');
 set local role authenticated; set local request.jwt.claim.role='authenticated';
 select throws_ok($$select public.world_npc_memory_embedding_schedule(1)$$,'42501',null,'embedding scheduler is service-only');
 reset role;
@@ -41,7 +41,7 @@ select lives_ok($$select public.world_npc_memory_embedding_profile_activate('199
 select is((select public.world_npc_memory_embedding_accept((claim->>'id')::uuid,(claim->>'fence')::uuid,'19900000-0000-4000-8000-000000000101',plan->>'inputHash','runtime-model',3,'[1,0,0]'::extensions.vector,'request-1','{"promptTokens":4,"totalTokens":4}'::jsonb)->>'status' from pg_temp.claim cross join pg_temp.plan),'reused','completed replay remains exact after its profile is inactive');
 select public.world_npc_memory_embedding_profile_activate('19900000-0000-4000-8000-000000000101');
 reset role;
-select is((select count(*) from private.world_npc_memory_artifacts where artifact_kind='embedding' and processor_version='npc-embedding-runtime-v3'),1::bigint,'replay creates no duplicate embedding artifact');
+select is((select count(*) from private.world_npc_memory_artifacts where source_ids=array['19900000-0000-4001-8000-000000000001'::uuid] and artifact_kind='embedding' and processor_version='npc-embedding-runtime-v3'),1::bigint,'replay creates no duplicate embedding artifact');
 set local role service_role; set local request.jwt.claim.role='service_role';
 select throws_ok(format('select public.world_npc_memory_embedding_accept(%L,%L,%L,%L,%L,3,%L::extensions.vector,%L,%L::jsonb)',(select claim->>'id' from pg_temp.claim),(select claim->>'fence' from pg_temp.claim),'19900000-0000-4000-8000-000000000101',(select plan->>'inputHash' from pg_temp.plan),'runtime-model','[0,1,0]','request-1','{"promptTokens":4,"totalTokens":4}'),'PT409',null,'divergent replay cannot replace an accepted vector');
 reset role;
@@ -54,6 +54,7 @@ grant select on pg_temp.generic_payload to service_role;
 set local role service_role; set local request.jwt.claim.role='service_role';
 select public.world_npc_memory_embedding_schedule(1);
 create temporary table pg_temp.failure_claim as select public.world_npc_memory_claim('embedding','npc-embedding-runtime-v3') claim;
+select is((select claim->>'sourceId' from pg_temp.failure_claim),'19900000-0000-4001-8000-000000000002','failure claim belongs to its registered fixture source');
 create temporary table pg_temp.failure_plan as select public.world_npc_memory_embedding_plan((claim->>'id')::uuid,(claim->>'fence')::uuid) plan from pg_temp.failure_claim;
 select throws_ok(format('select public.world_npc_memory_complete(%L,%L,%L::jsonb,null)',(select claim->>'id' from pg_temp.failure_claim),(select claim->>'fence' from pg_temp.failure_claim),(select payload::text from pg_temp.generic_payload)),'PT409','Embedding work requires receipt-gated completion','generic completion cannot bypass the receipt-gated embedding path');
 select is((select public.world_npc_memory_embedding_accept((claim->>'id')::uuid,(claim->>'fence')::uuid,'19900000-0000-4000-8000-000000000101',plan->>'inputHash',null,null,null,null,'{}'::jsonb,'provider_timeout')->>'status' from pg_temp.failure_claim cross join pg_temp.failure_plan),'failed','provider failure is durable without an artifact');
@@ -65,9 +66,10 @@ insert into private.world_npc_dialogue_turns(id,save_id,instance_id,npc_id,versi
 select id,save_id,instance_id,npc_id,version_id,'19900000-0000-4000-8000-000000000001',message,seq,revision,1,'completed',clock_timestamp(),'{}',clock_timestamp() from pg_temp.f cross join (values
  ('19900000-0000-4001-8000-000000000003'::uuid,'Mutable source',2),('19900000-0000-4001-8000-000000000004'::uuid,'Lease source',3)
 ) q(id,message,seq);
-select private.world_npc_memory_register_source('dialogue_turn',id) from (values ('19900000-0000-4001-8000-000000000003'::uuid),('19900000-0000-4001-8000-000000000004'::uuid)) q(id);
+select private.world_npc_memory_register_source('dialogue_turn',id) from (values ('19900000-0000-4001-8000-000000000003'::uuid),('19900000-0000-4001-8000-000000000004'::uuid)) q(id) order by id;
 set local role service_role; set local request.jwt.claim.role='service_role'; select public.world_npc_memory_embedding_schedule(2);
 create temporary table pg_temp.mut_claim as select public.world_npc_memory_claim('embedding','npc-embedding-runtime-v3') claim;
+select is((select claim->>'sourceId' from pg_temp.mut_claim),'19900000-0000-4001-8000-000000000003','mutation claim belongs to its registered fixture source');
 create temporary table pg_temp.mut_plan as select public.world_npc_memory_embedding_plan((claim->>'id')::uuid,(claim->>'fence')::uuid) plan from pg_temp.mut_claim;
 reset role; update private.world_npc_dialogue_turns set message='Mutated after plan' where id='19900000-0000-4001-8000-000000000003';
 set local role service_role; set local request.jwt.claim.role='service_role';
@@ -75,16 +77,23 @@ select throws_ok(format('select public.world_npc_memory_embedding_accept(%L,%L,%
 reset role; select ok(not exists(select 1 from private.world_npc_memory_artifacts where source_ids=array['19900000-0000-4001-8000-000000000003'::uuid]) and exists(select 1 from private.world_npc_memory_outbox where source_id='19900000-0000-4001-8000-000000000003' and status='processing'),'source mutation creates no artifact and leaves job nonterminal');
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.lease_claim as select public.world_npc_memory_claim('embedding','npc-embedding-runtime-v3') claim;
+select is((select claim->>'sourceId' from pg_temp.lease_claim),'19900000-0000-4001-8000-000000000004','lease claim belongs to its registered fixture source');
 create temporary table pg_temp.lease_plan as select public.world_npc_memory_embedding_plan((claim->>'id')::uuid,(claim->>'fence')::uuid) plan from pg_temp.lease_claim;
 reset role; update private.world_npc_memory_outbox set lease_until=clock_timestamp()-interval '1 second' where id=(select (claim->>'id')::uuid from pg_temp.lease_claim);
 set local role service_role; set local request.jwt.claim.role='service_role';
 select throws_ok(format('select public.world_npc_memory_embedding_accept(%L,%L,%L,%L,null,null,null,null,%L::jsonb,%L)',(select claim->>'id' from pg_temp.lease_claim),(select claim->>'fence' from pg_temp.lease_claim),'19900000-0000-4000-8000-000000000101',(select plan->>'inputHash' from pg_temp.lease_plan),'{}','provider_timeout'),'PT409',null,'expired lease rejects late embedding completion');
+create temporary table pg_temp.expired_retry_claim as select public.world_npc_memory_claim('embedding','npc-embedding-runtime-v3') claim;
+select is((select claim->>'sourceId' from pg_temp.expired_retry_claim),'19900000-0000-4001-8000-000000000004','expired lease reclaim belongs to its fixture source');
+create temporary table pg_temp.expired_retry_plan as select public.world_npc_memory_embedding_plan((claim->>'id')::uuid,(claim->>'fence')::uuid) plan from pg_temp.expired_retry_claim;
+create temporary table pg_temp.expired_retry_result as select public.world_npc_memory_embedding_accept((claim->>'id')::uuid,(claim->>'fence')::uuid,'19900000-0000-4000-8000-000000000101',plan->>'inputHash',null,null,null,null,'{}'::jsonb,'provider_timeout') result from pg_temp.expired_retry_claim cross join pg_temp.expired_retry_plan;
 reset role;
+select ok((select result->>'status'='failed' and not exists(select 1 from private.world_npc_memory_artifacts where source_ids=array['19900000-0000-4001-8000-000000000004'::uuid]) from pg_temp.expired_retry_result),'reclaimed expired work can fail without creating an artifact');
 insert into private.world_npc_dialogue_turns(id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until,result,completed_at)
 select '19900000-0000-4001-8000-000000000005',save_id,instance_id,npc_id,version_id,'19900000-0000-4000-8000-000000000001','Profile switch source',4,revision,1,'completed',clock_timestamp(),'{}',clock_timestamp() from pg_temp.f;
 select private.world_npc_memory_register_source('dialogue_turn','19900000-0000-4001-8000-000000000005');
 set local role service_role; set local request.jwt.claim.role='service_role'; select public.world_npc_memory_embedding_schedule(1);
 create temporary table pg_temp.switch_claim as select public.world_npc_memory_claim('embedding','npc-embedding-runtime-v3') claim;
+select is((select claim->>'sourceId' from pg_temp.switch_claim),'19900000-0000-4001-8000-000000000005','profile-switch claim belongs to its registered fixture source');
 create temporary table pg_temp.switch_plan as select public.world_npc_memory_embedding_plan((claim->>'id')::uuid,(claim->>'fence')::uuid) plan from pg_temp.switch_claim;
 select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.switch_claim;
 select public.world_npc_memory_embedding_mark_dispatched((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.switch_claim;

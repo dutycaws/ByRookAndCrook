@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(29);
+select plan(37);
 
 select has_function('public','world_npc_memory_embedding_prepare_dispatch',array['uuid','uuid'],'embedding receipt prepare RPC exists');
 select has_function('public','world_npc_memory_embedding_mark_dispatched',array['uuid','uuid'],'embedding receipt mark RPC exists');
@@ -41,11 +41,12 @@ select private.world_npc_memory_register_source('dialogue_turn',id) from (values
  ('20000000-0000-4001-8000-000000000001'::uuid),('20000000-0000-4001-8000-000000000002'::uuid),
  ('20000000-0000-4001-8000-000000000003'::uuid),('20000000-0000-4001-8000-000000000004'::uuid),
  ('20000000-0000-4001-8000-000000000005'::uuid),('20000000-0000-4001-8000-000000000006'::uuid)
-) v(id);
+) v(id) order by id;
 set local role service_role; set local request.jwt.claim.role='service_role';
 select public.world_npc_memory_embedding_schedule(6);
 
 create temporary table pg_temp.c1 as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c1),'20000000-0000-4001-8000-000000000001','first receipt claim belongs to its fixture source');
 create temporary table pg_temp.r1 as select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) receipt from pg_temp.c1;
 reset role;
 select is((select receipt->>'directive' from pg_temp.r1),'dispatch_authorized','prepare creates one durable dispatch authorization');
@@ -71,6 +72,7 @@ select throws_ok(format('update private.world_npc_memory_embedding_dispatches se
 
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.c2 as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c2),'20000000-0000-4001-8000-000000000002','prepared-receipt claim belongs to its fixture source');
 select is((select public.world_npc_memory_embedding_recover_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid)->>'directive' from pg_temp.c2),'prepare_required','recovery has an explicit no-receipt directive');
 create temporary table pg_temp.r2 as select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) receipt from pg_temp.c2;
 select is((select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid)->>'directive' from pg_temp.c2),'fail_only','a repeated prepare cannot authorize a second provider call');
@@ -80,19 +82,23 @@ reset role;
 update private.world_npc_memory_outbox set lease_until=clock_timestamp()-interval '1 second' where id=(select (claim->>'id')::uuid from pg_temp.c2);
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.c2_reclaimed as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c2_reclaimed),'20000000-0000-4001-8000-000000000002','reclaimed prepared-receipt claim remains on its fixture source');
 select is((select public.world_npc_memory_embedding_recover_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid)->>'directive' from pg_temp.c2_reclaimed),'fail_only','reclaimed prepared receipt never authorizes resend');
 select is((select public.world_npc_memory_embedding_recover_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid)->>'reason' from pg_temp.c2_reclaimed),'prior_fence_receipt_exists','reclaimed receipt has a deterministic prior-fence reason');
 
 create temporary table pg_temp.c3 as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c3),'20000000-0000-4001-8000-000000000003','dispatched-receipt claim belongs to its fixture source');
 select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.c3;
 select public.world_npc_memory_embedding_mark_dispatched((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.c3;
 reset role;
 update private.world_npc_memory_outbox set lease_until=clock_timestamp()-interval '1 second' where id=(select (claim->>'id')::uuid from pg_temp.c3);
 set local role service_role; set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.c3_reclaimed as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c3_reclaimed),'20000000-0000-4001-8000-000000000003','reclaimed dispatched-receipt claim remains on its fixture source');
 select is((select public.world_npc_memory_embedding_recover_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid)->>'directive' from pg_temp.c3_reclaimed),'fail_only','reclaimed dispatched receipt never authorizes resend');
 
 create temporary table pg_temp.c4 as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c4),'20000000-0000-4001-8000-000000000004','profile-change claim belongs to its fixture source');
 select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.c4;
 create temporary table pg_temp.p4 as select public.world_npc_memory_embedding_plan((claim->>'id')::uuid,(claim->>'fence')::uuid) plan from pg_temp.c4;
 reset role;
@@ -117,6 +123,7 @@ update private.world_npc_memory_outbox set status='failed',lease_until=null,erro
 set local role service_role; set local request.jwt.claim.role='service_role';
 
 create temporary table pg_temp.c5 as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c5),'20000000-0000-4001-8000-000000000005','source-mutation claim belongs to its fixture source');
 select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.c5;
 reset role;
 update private.world_npc_dialogue_turns set message='source changed after receipt preparation'
@@ -125,6 +132,7 @@ set local role service_role; set local request.jwt.claim.role='service_role';
 select throws_ok(format('select public.world_npc_memory_embedding_mark_dispatched(%L,%L)',(select claim->>'id' from pg_temp.c5),(select claim->>'fence' from pg_temp.c5)),'PT409',null,'source mutation rejects a stale receipt dispatch');
 
 create temporary table pg_temp.c6 as select public.world_npc_memory_claim('embedding','npc-embedding-receipt-v1') claim;
+select is((select claim->>'sourceId' from pg_temp.c6),'20000000-0000-4001-8000-000000000006','expired-lease claim belongs to its fixture source');
 select public.world_npc_memory_embedding_prepare_dispatch((claim->>'id')::uuid,(claim->>'fence')::uuid) from pg_temp.c6;
 reset role;
 update private.world_npc_memory_outbox set lease_until=clock_timestamp()-interval '1 second'
