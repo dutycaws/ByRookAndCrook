@@ -281,7 +281,7 @@
   .scene-actor { padding: 0; border: 0; background: transparent; transition: transform 120ms linear; }
   button.scene-actor { cursor: pointer; }
   .scene-actor-static { pointer-events: none; }
-  .scene-actor-visual { position: absolute; inset: 0; display: block; animation: scene-actor-arrive 450ms ease-out both; }
+  .scene-actor-visual { position: absolute; inset: 0; display: block; pointer-events: none; animation: scene-actor-arrive 450ms ease-out both; }
   .scene-actor img { position: absolute; display: block; object-fit: contain; object-position: center bottom; pointer-events: none; }
   .scene-actor:focus-visible { outline: 3px solid #f3c95f; outline-offset: 4px; }
   .scene-actor.selected::after { content: ''; position: absolute; inset: 7%; border: 2px solid #f3c95f; border-radius: 50%; box-shadow: 0 0 18px #f3c95f99; }

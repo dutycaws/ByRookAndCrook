@@ -49,6 +49,7 @@
   let artSubview = $state<ArtSubview>('sprites');
   let previewSubview = $state<PreviewSubview>('scene');
   let reviewSubview = $state<ReviewSubview>('submission');
+  let hydrated = $state(false);
   let sectionNavHost: HTMLElement;
   const activeSection = $derived((sectionIds.includes((page.state as AuthoringPageState).authoringSection as SectionId)
     ? (page.state as AuthoringPageState).authoringSection
@@ -77,6 +78,7 @@
 
   onMount(() => {
     sectionNavHost.addEventListener('click', navigateWithinStudio);
+    hydrated = true;
     return () => sectionNavHost.removeEventListener('click', navigateWithinStudio);
   });
 </script>
@@ -121,8 +123,8 @@
     <div class="workspace-region-heading" hidden={activeSection !== 'sheet'}><span class="workspace-step">01</span><div><p class="eyebrow">Shape the companion</p><h2>Author the draft</h2><p>The details below are the canonical source for this companion. Clear writing gives scenes, dialogue, and consequences a shared foundation.</p></div></div>
     <nav class="workspace-local-nav" aria-label="Artwork workspace" hidden={activeSection !== 'art'}>
       <div>
-        <button type="button" aria-pressed={artSubview === 'sprites'} aria-controls="art-sprites-panel" onclick={() => artSubview = 'sprites'}>Character sprites</button>
-        <button type="button" aria-pressed={artSubview === 'setting'} aria-controls="art-setting-panel" onclick={() => artSubview = 'setting'}>Meeting setting</button>
+        <button type="button" disabled={!hydrated} aria-pressed={artSubview === 'sprites'} aria-controls="art-sprites-panel" onclick={() => artSubview = 'sprites'}>Character sprites</button>
+        <button type="button" disabled={!hydrated} aria-pressed={artSubview === 'setting'} aria-controls="art-setting-panel" onclick={() => artSubview = 'setting'}>Meeting setting</button>
       </div>
     </nav>
     <NpcSheetEditor sheet={detail.draft.sheet} revision={detail.draft.revision} editable={detail.capabilities.canEdit} message={form?.message} conflict={form?.conflict} relatedNpcs={detail.eligibleNpcs.map((npc) => ({ id: npc.npcId, name: npc.name }))} showSheet={activeSection === 'sheet'} showArtwork={activeSection === 'art' && artSubview === 'sprites'}>
@@ -139,9 +141,9 @@
   <div class="authoring-section preview-section" hidden={activeSection !== 'preview'}>
     <nav class="workspace-local-nav" aria-label="Preview workspace">
       <div>
-        <button type="button" aria-pressed={previewSubview === 'scene'} aria-controls="preview-scene-panel" onclick={() => previewSubview = 'scene'}>Scene</button>
-        <button type="button" aria-pressed={previewSubview === 'assistance'} aria-controls="preview-assistance-panel" onclick={() => previewSubview = 'assistance'}>Assistance</button>
-        <button type="button" aria-pressed={previewSubview === 'sandbox'} aria-controls="preview-sandbox-panel" onclick={() => previewSubview = 'sandbox'}>Voice sandbox</button>
+        <button type="button" disabled={!hydrated} aria-pressed={previewSubview === 'scene'} aria-controls="preview-scene-panel" onclick={() => previewSubview = 'scene'}>Scene</button>
+        <button type="button" disabled={!hydrated} aria-pressed={previewSubview === 'assistance'} aria-controls="preview-assistance-panel" onclick={() => previewSubview = 'assistance'}>Assistance</button>
+        <button type="button" disabled={!hydrated} aria-pressed={previewSubview === 'sandbox'} aria-controls="preview-sandbox-panel" onclick={() => previewSubview = 'sandbox'}>Voice sandbox</button>
       </div>
     </nav>
     <div id="preview-scene-panel" role="region" aria-label="Scene preview" hidden={previewSubview !== 'scene'}><AuthoringScenePreview
@@ -156,8 +158,8 @@
   <div class="workspace-columns review-columns authoring-section" hidden={activeSection !== 'review'}>
     <nav class="workspace-local-nav workspace-local-nav-wide" aria-label="Review workspace">
       <div>
-        <button type="button" aria-pressed={reviewSubview === 'submission'} aria-controls="review-submission-panel" onclick={() => reviewSubview = 'submission'}>Submission & history</button>
-        <button type="button" aria-pressed={reviewSubview === 'retirement'} aria-controls="review-retirement-panel" onclick={() => reviewSubview = 'retirement'}>Retirement</button>
+        <button type="button" disabled={!hydrated} aria-pressed={reviewSubview === 'submission'} aria-controls="review-submission-panel" onclick={() => reviewSubview = 'submission'}>Submission & history</button>
+        <button type="button" disabled={!hydrated} aria-pressed={reviewSubview === 'retirement'} aria-controls="review-retirement-panel" onclick={() => reviewSubview = 'retirement'}>Retirement</button>
       </div>
     </nav>
     <div id="review-submission-panel" role="region" aria-label="Submission and history" hidden={reviewSubview !== 'submission'}><HistoryPanel revision={detail.draft.revision} versions={detail.versions} preflight={detail.preflight} capability={detail.capabilities} /></div>

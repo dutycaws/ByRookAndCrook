@@ -42,6 +42,18 @@ describe('scene composition contract', () => {
     ]);
   });
 
+  it('keeps authored Bar hit regions disjoint regardless of resident rendering order', () => {
+    const actors = getSceneComposition('bar').actors;
+    for (const [index, actor] of actors.entries()) {
+      for (const other of actors.slice(index + 1)) {
+        const left = actor.hitBounds;
+        const right = other.hitBounds;
+        expect(left.x + left.width <= right.x || right.x + right.width <= left.x
+          || left.y + left.height <= right.y || right.y + right.height <= left.y).toBe(true);
+      }
+    }
+  });
+
   it('only exposes actor controls when a scene supplies a selection callback', () => {
     expect(isSceneActorInteractive(undefined)).toBe(false);
     expect(isSceneActorInteractive(null)).toBe(false);

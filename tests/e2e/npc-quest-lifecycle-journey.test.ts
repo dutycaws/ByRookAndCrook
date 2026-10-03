@@ -24,7 +24,7 @@ async function expectCompleted(
 /**
  * A full authored campaign is intentionally traversed before a successor is
  * requested. The fixture uses the public day-close boundary for normal days,
- * then the service-only resolver with a fixed draw for the terminal moments.
+ * then the internal resolver with a fixed draw for the terminal moments.
  */
 async function authoredLiraToGeneratedSuccessor() {
   const fixture = await createBrewedQuestLifecycleFixture();
@@ -78,6 +78,7 @@ test('Lira completes authored milestones before a generated successor remains pl
 
     await login(page, fixture);
     await page.goto('/bar');
+    await page.getByRole('button', { name: /^Speak with Lira Nightwind:/ }).click();
     await expect(page.getByText('Lira Nightwind', { exact: true }).first()).toBeVisible();
   } finally {
     await cleanup(fixture);

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { execFileSync } from 'node:child_process';
 import type { Database } from '../../src/lib/database.types';
+import { parseSnapshot } from '../../src/lib/game/contracts';
 import { createTestPlayer } from './local-supabase';
 import { createBrewedTavern } from './brewed-tavern';
 
@@ -19,19 +20,19 @@ const promotedNpcName = 'Mara Roadward';
 const provisionName = 'Road provisions';
 const provisionKey = 'road-provisions';
 
-function sourceResident(context: ProceduralContext): string {
+function sourceResident(context: ProceduralContext): string | undefined {
   const entry = Object.entries(context.capabilities).find(([, capability]) =>
     capability.allowedWorldEffects.includes('create_entity')
     && capability.allowedTargetKinds.includes('npc')
     && capability.allowedTargetKinds.includes('item')
   );
-  if (!entry) throw new Error('The deterministic playable fixture needs one resident authorized for NPC and item creation.');
-  return entry[0];
+  return entry?.[0];
 }
 
 /** A text-only fixture: it has no asset, storage, or external-provider dependency. */
-function deterministicProposal(context: ProceduralContext) {
+function deterministicProposal(context: ProceduralContext, unlockProvision = true) {
   const residentId = sourceResident(context);
+  if (!residentId) throw new Error('The deterministic playable fixture needs one resident authorized for NPC and item creation.');
   return {
     version: 'procedural-world-v1',
     commands: [
@@ -54,7 +55,7 @@ function deterministicProposal(context: ProceduralContext) {
                   appearance: { physicalAppearance: 'A weathered traveler with observant eyes and a practical bearing.', attire: 'A green cloak, sturdy boots, and a well-kept travel satchel.', notableFeatures: 'A folded route map marked with careful charcoal notes.', mood: 'Cautiously hopeful after reaching the tavern.' }
                 }
               }
-    ]
+    ].filter((command) => command.operation !== 'gameplay_unlock' || unlockProvision)
   };
 }
 
@@ -91,9 +92,9 @@ function uuid(value: string, label: string): string {
 }
 
 /**
- * This is intentionally a service-only resolver invocation, not a fixture
- * insert. It gives the lifecycle journey a stable outcome draw while still
- * exercising the same database resolver that records terminal events and
+ * This is intentionally an internal resolver invocation as the local database
+ * owner, not a fixture insert. It gives the lifecycle journey a stable outcome
+ * draw while still exercising the same database resolver that records terminal events and
  * queues transitions in production.
  */
 function resolveQuestStep(questId: string, closingDay: number, draw: number): string {
@@ -101,7 +102,7 @@ function resolveQuestStep(questId: string, closingDay: number, draw: number): st
     throw new Error('Lifecycle resolver requires a safe closing day and a draw from 0 through 99.');
   }
   return uuid(queryLocalPostgres(
-    `set role service_role; select (private.world_resolve_quest_step('${uuid(questId, 'Quest ID')}'::uuid,${closingDay},${draw})).id;`
+    `select (private.world_resolve_quest_step('${uuid(questId, 'Quest ID')}'::uuid,${closingDay},${draw})).id;`
   ), 'Resolved quest event ID');
 }
 
@@ -179,7 +180,7 @@ export function deterministicQuestTransitionProvider(branch: QuestTransitionBran
  * boundary and keeps every drain at four serial claims; worker retry semantics
  * are covered in its focused unit suite.
  */
-async function drainFixtureClaims(service: RpcClient, settlementId: string): Promise<number> {
+async function drainFixtureClaims(service: RpcClient, settlementId: string, unlockProvision = true): Promise<number> {
   let claims = 0;
   for (let index = 0; index < 4; index += 1) {
     const claimed = await service.rpc('world_settlement_claim', { p_settlement_id: settlementId });
@@ -188,8 +189,9 @@ async function drainFixtureClaims(service: RpcClient, settlementId: string): Pro
     if (claim.status && !claim.jobId) break;
     if (!claim.settlementId || !claim.jobId || !claim.fence) throw new Error('Malformed local settlement claim.');
     claims += 1;
-    if (claim.kind === 'procedural_world') {
-      const proposal = deterministicProposal(claim.jobInputSnapshot as ProceduralContext);
+    const proceduralContext = claim.kind === 'procedural_world' ? claim.jobInputSnapshot as ProceduralContext : null;
+    if (proceduralContext && sourceResident(proceduralContext)) {
+      const proposal = deterministicProposal(proceduralContext, unlockProvision);
       const committed = await service.rpc('world_settlement_commit_procedural_world', {
         p_settlement_id: claim.settlementId, p_job_id: claim.jobId, p_fence: claim.fence, p_proposal: proposal
       });
@@ -211,8 +213,10 @@ async function drainFixtureClaims(service: RpcClient, settlementId: string): Pro
 
 async function snapshot(client: SupabaseClient<Database>) {
   const result = await client.rpc('get_tavern_snapshot');
-  if (result.error || !result.data) throw result.error ?? new Error('Missing tavern snapshot.');
-  return result.data as unknown as { save: { id: string; revision: number; day: number } };
+  if (result.error) throw result.error;
+  const current = parseSnapshot(result.data);
+  if (!current) throw new Error('Missing tavern snapshot.');
+  return current;
 }
 
 function fundFixtureSave(saveId: string) {
@@ -298,22 +302,36 @@ export async function createBrewedQuestLifecycleFixture() {
   return { ...player, liraInstanceId: uuid(lira.instanceId, 'Lira instance ID') };
 }
 
-/** Close a normal playable day, then drain only ordinary settlement jobs. */
+/** Close a playable day and drain background work, leaving Lira's transition for the journey. */
 export async function closeQuestLifecycleDay(fixture: QuestLifecycleFixture) {
   const current = await snapshot(fixture.client);
+  const supplies = await fixture.client.rpc('world_generated_shop_projection', { p_save_id: fixture.saveId });
+  assertRpc(supplies, 'Could not load generated supplies before closing the lifecycle day');
+  const provisionExists = (supplies.data as { catalog?: Array<{ itemKey?: string }> })?.catalog
+    ?.some((item) => item.itemKey === provisionKey) ?? false;
   const closed = await fixture.client.rpc('advance_tavern_day', {
-    p_save_id: fixture.saveId, p_action_id: actionId(current.save.day, 9), p_expected_revision: current.save.revision
+    p_save_id: fixture.saveId, p_action_id: actionId(current.save.currentDay, 9), p_expected_revision: current.save.revision
   });
   assertRpc(closed, 'Could not close the public tavern day');
   const settlementId = (closed.data as { worldSettlement?: { settlementId?: string } })?.worldSettlement?.settlementId;
   if (!settlementId) throw new Error('Day close did not return an ordinary settlement.');
   for (let pass = 0; pass < 3; pass += 1) {
-    if (await drainFixtureClaims(fixture.admin as unknown as RpcClient, settlementId) === 0) break;
+    // Supply unlocks require a new canonical item; later days reuse the provision.
+    if (await drainFixtureClaims(fixture.admin as unknown as RpcClient, settlementId, !provisionExists) === 0) break;
   }
-  return { closingDay: current.save.day, settlementId };
+  const backgroundTransitions = JSON.parse(queryLocalPostgres(
+    `select coalesce(jsonb_agg(jsonb_build_object('terminalEventId',terminal_event_id,'nextAuthoredMilestone',frozen_context->'nextAuthoredMilestone') order by id),'[]'::jsonb)
+     from private.world_quest_transitions where save_id='${uuid(fixture.saveId, 'Save ID')}'::uuid
+     and instance_id<>'${uuid(fixture.liraInstanceId, 'Lira instance ID')}'::uuid and status='awaiting';`
+  )) as Array<{ terminalEventId: string; nextAuthoredMilestone: unknown }>;
+  for (const transition of backgroundTransitions) {
+    await runQuestLifecycleTransition(fixture, transition.terminalEventId,
+      transition.nextAuthoredMilestone ? 'next_authored_milestone' : 'departure');
+  }
+  return { closingDay: current.save.currentDay, settlementId };
 }
 
-/** Resolve exactly the active quest for this resident using the real service function. */
+/** Resolve exactly the active quest for this resident using the real internal function. */
 export function resolveActiveQuestForLifecycle(fixture: QuestLifecycleFixture, closingDay: number, draw = 0) {
   return resolveQuestStep(activeQuestId(fixture.saveId, fixture.liraInstanceId), closingDay, draw);
 }

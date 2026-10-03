@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createTestPlayer } from '../helpers/local-supabase';
+import { PROMPT_KEYS } from '../../src/lib/server/prompt-registry/contracts';
+
+async function expectCompletePromptRegistry(page: Page) {
+  await expect(page.locator('.prompt-list a')).toHaveCount(PROMPT_KEYS.length);
+  await expect(page.locator('.prompt-list a > span:first-child > small')).toHaveText([...PROMPT_KEYS].sort());
+}
 
 async function createPromptManager() {
   const player = await createTestPlayer('prompt-registry-manager');
@@ -49,6 +55,10 @@ test('a prompt manager sees all registered prompts, their workflow outline, and 
     await expect(page.getByRole('link', { name: 'Prompt registry' })).toBeVisible();
     await page.getByRole('link', { name: 'Prompt registry' }).click();
     await expect(page).toHaveURL(/\/admin\/prompts/);
+    // Client-side navigation leaves the mobile account details menu open.
+    // Close it through its real summary control so it does not cover the
+    // privileged workspace switcher below the sticky header.
+    if ((page.viewportSize()?.width ?? 1280) < 900) await page.getByLabel('Keeper menu').click();
     await expect(page.getByRole('heading', { name: 'Prompt registry' })).toBeVisible();
     const workspaceNav = page.getByRole('navigation', { name: 'Privileged workspaces' });
     if ((page.viewportSize()?.width ?? 1280) < 900) await workspaceNav.locator('summary').click();
@@ -56,7 +66,7 @@ test('a prompt manager sees all registered prompts, their workflow outline, and 
     await expect(workspaceNav.locator('a:visible')).toContainText('Prompt registry');
     await expect(workspaceNav.getByRole('link', { name: /Creator studio/ })).toHaveCount(0);
     await expect(workspaceNav.getByRole('link', { name: /Review desk/ })).toHaveCount(0);
-    await expect(page.locator('.prompt-list a')).toHaveCount(26);
+    await expectCompletePromptRegistry(page);
     await expect(page.locator('.prompt-list')).toContainText('dialogue.investigate');
     await expect(page.locator('.prompt-list')).toContainText('image.runtime_art');
     await openRegistrySection(page, 'workflow');
@@ -90,7 +100,7 @@ test('administrators retain prompt-registry access while an ordinary keeper rece
     await signIn(page, admin);
     await page.goto('/admin/prompts');
     await expect(page.getByRole('heading', { name: 'Prompt registry' })).toBeVisible();
-    await expect(page.locator('.prompt-list a')).toHaveCount(26);
+    await expectCompletePromptRegistry(page);
 
     const context = await browser.newContext();
     try {

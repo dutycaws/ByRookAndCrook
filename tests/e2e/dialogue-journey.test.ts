@@ -58,6 +58,10 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     const residents = barResidents(page);
     await expect(residents).toHaveCount(2);
     await expect(residents.nth(0)).toHaveAttribute('aria-pressed', 'true');
+    // Save-specific UUID ordering can make either guest the default selection.
+    const lira = page.getByRole('button', { name: /Speak with Lira Nightwind:/ });
+    await lira.click();
+    await expect(lira).toHaveAttribute('aria-pressed', 'true');
     const invalid = await page.request.post('/api/dialogue', {headers:{origin:new URL(page.url()).origin}, data:{message:'Missing command fields'}});
     expect(invalid.status()).toBe(400);
     expect((await page.request.post('/api/dialogue', {headers:{origin:'https://foreign.example'},data:{}})).status()).toBe(403);
@@ -87,12 +91,14 @@ test('dialogue recovers a lost result, consumes hospitality once, and carries a 
     await expect(page.getByRole('button',{name:/Plain No added intent/})).toHaveAttribute('aria-pressed','true');
     await expect(page.getByLabel('Offer hospitality')).toHaveValue('');
     await page.reload();
+    await lira.click();
     await expect(page.locator('.npc-exchange')).toHaveCount(1);
     await expect(page.locator('.npc-exchange')).toContainText('I agree. I will scout on my next outing, then try diplomacy on the following one.');
     await page.getByRole('button',{name:'Close and begin next day'}).click();
     await expect(page.getByRole('region', { name: 'The night is settling' })).toBeVisible();
     await finishQueuedSettlement(player, completedStock.save.id);
     await page.reload();
+    await lira.click();
     await expect(page.getByText('The common room · Day 2',{exact:true})).toBeVisible();
     await expect(page.locator('.npc-intention')).toContainText('Done: Prepare · scouting');
     await expect(page.locator('.npc-intention')).toContainText('Next outing: Attempt the objective · diplomacy');

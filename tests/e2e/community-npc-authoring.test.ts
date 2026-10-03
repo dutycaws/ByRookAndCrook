@@ -353,6 +353,7 @@ test('creator workspace stays within the mobile viewport at 375px', async ({ pag
 
 test('fixture assistance and a draft-pinned sandbox persist, then become preserved after an applied revision', async ({ page }) => {
   const player = await createAuthor();
+  let releaseHydration: (() => void) | undefined;
   try {
     const npcId = await createDraft(player, `Fixture Courier ${crypto.randomUUID().slice(0, 6)}`);
     await completeAssistanceFixture(player, npcId, 0);
@@ -364,8 +365,17 @@ test('fixture assistance and a draft-pinned sandbox persist, then become preserv
     await sendSandboxFixture(player, sandboxId, 'What would help?', 'A dry map and a promise not to rush the crossing would help more than bravado.');
 
     await signIn(page, player);
-    await page.goto(`/authoring/npcs/${npcId}?section=preview`);
+    // The server-rendered navigation must stay disabled until its handlers mount.
+    // Hold the app entry module for both Vite and built SvelteKit deployments.
+    const hydration = new Promise<void>((resolve) => { releaseHydration = resolve; });
+    await page.route(/\/(?:generated\/client\/app\.js|_app\/immutable\/entry\/app\.[^/]+\.js)(?:\?|$)/, async (route) => {
+      await hydration;
+      await route.continue();
+    });
+    await page.goto(`/authoring/npcs/${npcId}?section=preview`, { waitUntil: 'domcontentloaded' });
     const previewWorkspace = page.getByRole('navigation', { name: 'Preview workspace' });
+    await expect(previewWorkspace.getByRole('button', { name: 'Assistance' })).toBeDisabled();
+    releaseHydration!();
     await previewWorkspace.getByRole('button', { name: 'Assistance' }).click();
     await expect(page.getByRole('heading', { name: 'Suggestion ready' })).toBeVisible();
     await expect(page.locator('.assistance-comparison strong').filter({ hasText: 'Current' }).first()).toBeVisible();
@@ -389,6 +399,7 @@ test('fixture assistance and a draft-pinned sandbox persist, then become preserv
     await expect(page.getByText('Earlier sandbox transcripts (1)')).toBeVisible();
     await expect(page.locator('.preserved-sandboxes')).toContainText('A dry map and a promise not to rush the crossing');
   } finally {
+    releaseHydration?.();
     await player.admin.auth.admin.deleteUser(player.userId);
   }
 });

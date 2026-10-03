@@ -20,7 +20,11 @@ export default defineConfig({
     command: 'npm run dev',
     // Dialogue journeys intercept provider-bound HTTP requests with test-only fixtures.
     // This non-secret sentinel enables the form in CI without granting provider access.
-    env: { OPENAI_API_KEY: 'unused-playwright-fixture-sentinel', NPC_PROVIDER: 'openai' },
+    env: {
+      OPENAI_API_KEY: 'unused-playwright-fixture-sentinel', NPC_PROVIDER: 'openai',
+      // Evolving-world fixtures drain their own queues through deterministic providers.
+      WORLD_SETTLEMENT_WORKER_MODE: 'external'
+    },
     url: `${process.env.APP_URL ?? 'http://127.0.0.1:3000'}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
