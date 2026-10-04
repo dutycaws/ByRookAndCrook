@@ -55,6 +55,14 @@ export type DialogueAiStage = (typeof DIALOGUE_AI_STAGES)[number];
 export type WorldSettlementAiStage = (typeof WORLD_SETTLEMENT_AI_STAGES)[number];
 export type AiStage = DialogueAiStage | WorldSettlementAiStage;
 
+export type AiFailureDiagnostic = Readonly<{
+  stage: 'memory_context' | 'prompt_registry' | 'quest_transition_proposer' | 'quest_transition_critic' | 'quest_transition_repair' | 'quest_transition_final_critic' | 'quest_transition_validate' | 'quest_transition_commit';
+  errorClass: 'transition_validation' | 'settlement_provider' | 'ordinary_error' | 'unknown';
+  reasonCode: 'scope_invalid' | 'coverage_incomplete' | 'manifest_invalid' | 'evidence_projection_invalid' | 'counter_unavailable' | 'counter_result_invalid' | 'counter_budget_exceeded' | 'artifact_budget_exceeded' | 'memory_checkpoint_failed' | 'memory_context_malformed' | 'provider_unavailable' | 'provider_timeout' | 'provider_malformed' | 'provider_failed' | 'provider_payload_contract_invalid' | 'provider_request_budget_exceeded' | 'provider_preflight_http_error' | 'provider_preflight_json_invalid' | 'provider_preflight_count_invalid' | 'provider_input_budget_exceeded' | 'provider_response_http_error' | 'provider_response_json_invalid' | 'provider_response_incomplete' | 'provider_response_unexpected_status' | 'provider_response_refusal' | 'provider_output_missing' | 'provider_output_schema_invalid' | 'provider_output_outer_json_invalid' | 'provider_output_inner_json_invalid' | 'provider_quest_proposal_shape' | 'provider_quest_terminal_event' | 'provider_quest_authored_milestone' | 'provider_quest_successor_bounds' | 'provider_quest_departure_safety' | 'provider_output_semantic_invalid' | 'prompt_registry_failed' | 'proposal_invalid' | 'critic_rejected' | 'repair_invalid' | 'repair_rejected' | 'transition_validation_invalid' | 'commit_failed' | 'unclassified';
+  inputTokens?: number;
+  maxTokens?: number;
+}>;
+
 export type AiObservabilityEvent = Readonly<{
   version: typeof AI_OBSERVABILITY_VERSION;
   occurredAt: string;
@@ -67,6 +75,7 @@ export type AiObservabilityEvent = Readonly<{
   model?: string;
   tokenUsage?: AiTokenUsage;
   memoryContext?: AiMemoryContextMeasurements;
+  failureDiagnostic?: AiFailureDiagnostic;
   errorCode?: string;
 }>;
 
@@ -83,6 +92,7 @@ export type AiObservabilityInput = Readonly<{
   model?: string;
   tokenUsage?: AiTokenUsage;
   memoryContext?: AiMemoryContextMeasurements;
+  failureDiagnostic?: unknown;
   errorCode?: unknown;
 }>;
 
@@ -94,6 +104,9 @@ const opaqueId = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const stageName = /^[a-z][a-z0-9_:-]{0,79}$/;
 const modelName = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const memoryContextReuse = new Set<AiMemoryContextMeasurements['reuse']>(['fresh', 'cache_hit', 'replayed']);
+const failureStages = new Set<AiFailureDiagnostic['stage']>(['memory_context','prompt_registry','quest_transition_proposer','quest_transition_critic','quest_transition_repair','quest_transition_final_critic','quest_transition_validate','quest_transition_commit']);
+const failureClasses = new Set<AiFailureDiagnostic['errorClass']>(['transition_validation','settlement_provider','ordinary_error','unknown']);
+const failureReasons = new Set<AiFailureDiagnostic['reasonCode']>(['scope_invalid','coverage_incomplete','manifest_invalid','evidence_projection_invalid','counter_unavailable','counter_result_invalid','counter_budget_exceeded','artifact_budget_exceeded','memory_checkpoint_failed','memory_context_malformed','provider_unavailable','provider_timeout','provider_malformed','provider_failed','provider_payload_contract_invalid','provider_request_budget_exceeded','provider_preflight_http_error','provider_preflight_json_invalid','provider_preflight_count_invalid','provider_input_budget_exceeded','provider_response_http_error','provider_response_json_invalid','provider_response_incomplete','provider_response_unexpected_status','provider_response_refusal','provider_output_missing','provider_output_schema_invalid','provider_output_outer_json_invalid','provider_output_inner_json_invalid','provider_quest_proposal_shape','provider_quest_terminal_event','provider_quest_authored_milestone','provider_quest_successor_bounds','provider_quest_departure_safety','provider_output_semantic_invalid','prompt_registry_failed','proposal_invalid','critic_rejected','repair_invalid','repair_rejected','transition_validation_invalid','commit_failed','unclassified']);
 const permittedErrors = new Set([
   'provider_unavailable', 'provider_timeout', 'provider_malformed', 'provider_failed',
   'worker_failed', 'claim_malformed', 'lease_unavailable', 'lease_lost', 'commit_unknown',
@@ -158,6 +171,26 @@ function memoryContextMeasurements(value: unknown): AiMemoryContextMeasurements 
   return measured;
 }
 
+function failureDiagnostic(value: unknown): AiFailureDiagnostic | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate);
+  if (keys.some((key) => !['stage','errorClass','reasonCode','inputTokens','maxTokens'].includes(key))
+    || !failureStages.has(candidate.stage as AiFailureDiagnostic['stage'])
+    || !failureClasses.has(candidate.errorClass as AiFailureDiagnostic['errorClass'])
+    || !failureReasons.has(candidate.reasonCode as AiFailureDiagnostic['reasonCode'])) return undefined;
+  const hasInputTokens = candidate.inputTokens !== undefined;
+  const hasMaxTokens = candidate.maxTokens !== undefined;
+  if (hasInputTokens !== hasMaxTokens || (hasInputTokens && (candidate.reasonCode !== 'counter_budget_exceeded'
+    || !finiteInteger(candidate.inputTokens, 0, 10_000_000) || !finiteInteger(candidate.maxTokens, 0, 10_000_000)))) return undefined;
+  return {
+    stage: candidate.stage as AiFailureDiagnostic['stage'],
+    errorClass: candidate.errorClass as AiFailureDiagnostic['errorClass'],
+    reasonCode: candidate.reasonCode as AiFailureDiagnostic['reasonCode'],
+    ...(hasInputTokens ? { inputTokens: candidate.inputTokens as number, maxTokens: candidate.maxTokens as number } : {})
+  };
+}
+
 /**
  * Never forward raw error text. Known error codes survive; every other cause
  * becomes a single safe bucket that cannot leak a provider response or secret.
@@ -182,6 +215,7 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
   if (input.model !== undefined && !modelName.test(input.model)) return null;
   if (input.tokenUsage !== undefined && !tokenUsage(input.tokenUsage)) return null;
   if (input.memoryContext !== undefined && !memoryContextMeasurements(input.memoryContext)) return null;
+  if (input.failureDiagnostic !== undefined && (!failureDiagnostic(input.failureDiagnostic) || input.status !== 'started' || input.stage !== 'quest_transition_fallback')) return null;
   // Model identity and usage belong solely to a completed provider invocation.
   // This prevents checkpoint reuse and database commit events from looking like
   // billable model calls in dashboards.
@@ -211,6 +245,8 @@ export function createAiObservabilityEvent(input: AiObservabilityInput, now: () 
   if (usage) (event as { tokenUsage?: AiTokenUsage }).tokenUsage = usage;
   const memoryContext = memoryContextMeasurements(input.memoryContext);
   if (memoryContext) (event as { memoryContext?: AiMemoryContextMeasurements }).memoryContext = memoryContext;
+  const failure = failureDiagnostic(input.failureDiagnostic);
+  if (failure) (event as { failureDiagnostic?: AiFailureDiagnostic }).failureDiagnostic = failure;
   const errorCode = sanitizeAiErrorCode(input.errorCode);
   if (errorCode) (event as { errorCode?: string }).errorCode = errorCode;
   return event;

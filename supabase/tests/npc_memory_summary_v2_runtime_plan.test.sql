@@ -40,7 +40,7 @@ select throws_ok($$select public.world_npc_memory_summary_plan_v2((select (claim
 select set_config('test.malformed_set',pg_temp.new_set('runtime-plan-malformed')::text,true);
 set local role service_role; set local request.jwt.claim.role='service_role'; create temporary table pg_temp.malformed_claim as select public.world_npc_memory_claim('summary','npc-memory-summary-v2') claim; reset role;
 alter table private.world_npc_memory_outbox disable trigger world_npc_memory_summary_job_pin;
-update private.world_npc_memory_outbox set prompt_release_id=(select prior_release_id from private.prompt_releases where id=(select release_id from private.prompt_registry_active_release)) where id=(select (claim->>'id')::uuid from pg_temp.malformed_claim);
+update private.world_npc_memory_outbox set prompt_release_id=(select id from private.prompt_releases where label='NPC memory summary prompt baseline') where id=(select (claim->>'id')::uuid from pg_temp.malformed_claim);
 alter table private.world_npc_memory_outbox enable trigger world_npc_memory_summary_job_pin;
 set local role service_role; set local request.jwt.claim.role='service_role'; select throws_ok($$select public.world_npc_memory_summary_plan_v2((select (claim->>'id')::uuid from pg_temp.malformed_claim),(select (claim->>'fence')::uuid from pg_temp.malformed_claim))$$,'PT409',null,'v2 job with a legal but v2-incomplete prompt release cannot plan'); reset role;
 

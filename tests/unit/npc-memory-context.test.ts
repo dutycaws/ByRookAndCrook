@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { runDialogue, type DialogueRuntimeOptions } from '../../src/lib/server/dialogue/orchestrator';
+import { publicDialogueWindow, runDialogue, type DialogueRuntimeOptions } from '../../src/lib/server/dialogue/orchestrator';
 import type { DialogueProvider } from '../../src/lib/server/dialogue/provider';
 import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
-import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, utf8Bytes } from '$lib/server/npc-memory/context';
+import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, sha256Hex, utf8Bytes } from '$lib/server/npc-memory/context';
+import { isDuplicateMemoryEvidence } from '../../src/lib/server/dialogue/context';
 import { clearProjectionCache } from '$lib/server/npc-memory/projection-cache';
 
 const npcId='11111111-1111-4111-8111-111111111111';
@@ -18,17 +19,29 @@ const rpcResult=(data:unknown)=>({abortSignal:async()=>({data,error:null})});
 afterEach(() => clearProjectionCache());
 
 describe('NPC memory dialogue context',()=>{
+  it('deduplicates identical memory evidence across query wording and preserves distinct evidence',()=>{
+    const first={category:'memories',query:'original search',sourceIds:[memoryId,rootId,sourceId],contentVersion:'npc-memory-evidence-v4',data:memory};
+    const repeated={...first,query:'different search wording'};
+    const distinct={...first,data:evidence({items:[...memory.items,{...memory.items[0],id:'88888888-8888-4888-8888-888888888888',recordRootId:'99999999-9999-4999-8999-999999999999',text:'A separate record.',quote:'A separate record.'}]})};
+    const differentProvenance={...repeated,sourceIds:[memoryId,rootId,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']};
+
+    expect(isDuplicateMemoryEvidence([first],repeated)).toBe(true);
+    expect(isDuplicateMemoryEvidence([first],distinct)).toBe(false);
+    expect(isDuplicateMemoryEvidence([first],differentProvenance)).toBe(false);
+  });
+
   it('retrieves a speech-safe source-backed memory view at the turn cutoff and freezes it for all later stages',async()=>{
     const calls:Array<{name:string;args?:Record<string,unknown>}>=[];
     const order:string[]=[]; let contextCounts=0;
     const payloads:Record<string,any>={};
+    const frozenArtifacts:any[]=[];
     const events:unknown[]=[];
     const client={rpc(name:string,args?:Record<string,unknown>) {
       calls.push({name,args}); order.push(`rpc:${name}:${String(args?.p_stage??'')}`);
       if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
       if(name==='npc_dialogue_context') return rpcResult({instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[],evolvingProfile:'private cognition must never reach speech'});
       if(name==='npc_memory_evidence_retrieve_for_actor') return rpcResult(memory);
-      if(name==='npc_dialogue_checkpoint') return rpcResult(null);
+      if(name==='npc_dialogue_checkpoint') {if(String(args?.p_stage).startsWith('frozen_context:')) frozenArtifacts.push((args?.p_value as any)?.value);return rpcResult(null);}
       if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
       throw new Error(`Unexpected RPC ${name}`);
     }} as any;
@@ -46,6 +59,8 @@ describe('NPC memory dialogue context',()=>{
 
     expect(calls).toContainEqual({name:'npc_memory_evidence_retrieve_for_actor',args:expect.objectContaining({p_actor:'44444444-4444-4444-8444-444444444444',p_instance_id:instanceId,p_query:'What about your promise?',p_limit:12,p_cutoff_ledger_sequence:7,p_view:'speech'})});
     expect(contextCounts).toBe(2);
+    expect(frozenArtifacts[0].projectionVersion).toBe('npc-dialogue-projections-v3');
+    expect(Object.hasOwn(frozenArtifacts[0].payload.projections,'public')).toBe(false);
     expect(order.indexOf('rpc:npc_dialogue_checkpoint:frozen_context:0')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('rpc:npc_dialogue_checkpoint:frozen_context:0')).toBeLessThan(order.indexOf('generate:investigate'));
     for (const payload of [payloads.investigate,payloads.deliberate,payloads.speak,payloads.review]) {
@@ -60,6 +75,9 @@ describe('NPC memory dialogue context',()=>{
     expect(JSON.stringify(payloads.deliberate)).toContain('private cognition must never reach speech');
     expect(JSON.stringify(payloads.speak)).not.toContain('private cognition must never reach speech');
     expect(JSON.stringify(payloads.review)).not.toContain('private cognition must never reach speech');
+    const derivedPublic=publicDialogueWindow(payloads.investigate);
+    expect(payloads.speak.base).toEqual(derivedPublic.base);
+    expect(payloads.speak.context).toEqual(derivedPublic.context);
     expect(JSON.stringify(payloads.speak)).not.toContain('privateCognition');
     expect(JSON.stringify(payloads.review)).not.toContain('privateCognition');
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({memoryContext:expect.objectContaining({selectedRecordCount:1,sourceRecordCount:3,coverageGapCount:0,reuse:'fresh'})})]));
@@ -120,6 +138,111 @@ describe('NPC memory dialogue context',()=>{
     expect(countCalls).toBe(0);
     expect(artifact.revision).toBe(0);
     expect(stages).toContain('frozen_context');
+  });
+  it('normalizes a cached keeper promise checkpoint before completion while preserving NPC promises',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:8_000,tier:'routine',sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const original={memories:[
+      {kind:'promise',text:'I will scout tomorrow.',quote:'I will scout tomorrow.',speaker:'keeper',priorCommitmentId:null,commitmentStatus:'unresolved'},
+      {kind:'promise',text:'I will bring supplies.',quote:'I will bring supplies.',speaker:'npc',priorCommitmentId:null,commitmentStatus:'unresolved'}
+    ]};
+    const stages:Array<{stage:string;value:any}> = [];
+    const cached=(value:any)=>({value,artifactHash:artifact.hash});
+    const checkpoints={
+      'frozen_context:0':{value:artifact},
+      investigate0:cached({kind:'informational',needsMore:false,remember:true,requests:[]}),
+      context0:{value:[],sourceArtifact:{revision:0,hash:artifact.hash}},
+      decision:cached({stance:'respond',reaction:0,subject:'quest',evidence:'',intention:null}),
+      speak:cached({text:'I will bring supplies.'}),
+      review:cached({ok:true,issues:[]}),
+      remember:cached(original)
+    };
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints,content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_checkpoint') {stages.push({stage:String(args?.p_stage),value:args?.p_value});return rpcResult(null);}
+      if(name==='npc_dialogue_complete') return rpcResult({status:'completed'});
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){throw new Error('must not recount a frozen artifact');},async generate(){throw new Error('cached stages should not invoke the provider');}};
+
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'I will scout tomorrow. A cached promise needs normalization.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).resolves.toMatchObject({status:'completed'});
+    const remembered=stages.find(item=>item.stage==='remember')?.value?.value;
+    expect(remembered).toEqual({memories:[
+      {kind:'keeper_claim',text:'I will scout tomorrow.',quote:'I will scout tomorrow.',speaker:'keeper',priorCommitmentId:null,commitmentStatus:null},
+      original.memories[1]
+    ]});
+  });
+  it('counts one canonical v2 projection and keeps v1 replay hash and stored public projection unchanged',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[],sharedContext:'x'.repeat(18_000),evolvingProfile:'private v1 cognition marker'};
+    const privateProjection={base,context:[],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
+    const {evolvingProfile:_privateProfile,...publicBase}=base;
+    const legacyPublic={...publicDialogueWindow(privateProjection),base:{...publicBase,name:'stored-v1-public'}};
+    const payloadBase={targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}};
+    const v1Payload={...payloadBase,projections:{private:privateProjection,public:legacyPublic}};
+    const v2Payload={...payloadBase,projections:{private:privateProjection}};
+    const deterministicTokens=(text:string)=>Math.ceil(text.length/4);
+    const oldTwoViewCount=deterministicTokens(canonicalNpcMemoryContextPayload({sources:[],requiredSourceIds:[],payload:v1Payload}));
+    const canonicalPrivateCount=deterministicTokens(canonicalNpcMemoryContextPayload({sources:[],requiredSourceIds:[],payload:v2Payload}));
+    expect(oldTwoViewCount).toBeGreaterThan(8000);
+    expect(canonicalPrivateCount).toBeLessThanOrEqual(8000);
+    expect(()=>assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:8000,tier:'routine',sources:[],requiredSourceIds:[],payload:v1Payload,tokenCount:oldTwoViewCount,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0})).toThrow();
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v2',maxBytes:64*1024,maxTokens:8000,tier:'routine',sources:[],requiredSourceIds:[],payload:v2Payload,tokenCount:canonicalPrivateCount,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const checkpoints:Record<string,any>={ 'frozen_context:0':{value:assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:8000,tier:'routine',sources:[],requiredSourceIds:[],payload:v1Payload,tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0})} };
+    const speechPayloads:any[]=[];
+    const client={rpc(name:string) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints,content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_checkpoint'||name==='npc_dialogue_complete') return rpcResult(name==='npc_dialogue_complete'?{status:'completed'}:null);
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){throw new Error('must not recount');},async generate(stage,payload) {
+      if(stage==='speak') speechPayloads.push(payload);
+      const value=stage==='investigate'?{kind:'informational',needsMore:false,remember:false,requests:[]}:stage==='speak'?{text:'A reply.'}:{ok:true,issues:[]};
+      return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+    }};
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'Continue.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).resolves.toMatchObject({status:'completed'});
+    const replayed=checkpoints['frozen_context:0'].value as any;
+    expect(replayed.canonicalJson).toBe(canonicalNpcMemoryContextPayload({sources:[],requiredSourceIds:[],payload:v1Payload}));
+    expect(replayed.hash).toBe(sha256Hex(replayed.canonicalJson));
+    expect(speechPayloads[0].base.name).toBe('stored-v1-public');
+    expect(JSON.stringify(speechPayloads[0])).not.toContain('private v1 cognition marker');
+    expect(artifact.payload.projections).toEqual({private:privateProjection});
+    checkpoints['frozen_context:0'].value={...replayed,hash:'tampered-hash'};
+    checkpoints.memory={value:{category:'memories'}};
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'Continue.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).rejects.toMatchObject({code:'CONTEXT_BUDGET'});
+  });
+  it('regenerates an invalid cached promise correction instead of completing it',async()=>{
+    const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const projection={base,context:[{category:'memories',query:'older query',sourceIds:['memory-1','turn-1'],contentVersion:'npc-memory-v1',data:memory}],coverage:{version:'npc-context-v1' as const,omittedExchanges:0,omittedResults:0}};
+    const artifact=assembleNpcMemoryContext({policyVersion:'npc-context-routine-v1',projectionVersion:'npc-dialogue-projections-v1',maxBytes:64*1024,maxTokens:8_000,tier:'routine',sources:[],requiredSourceIds:[],payload:{projections:{private:projection,public:projection},targetTokens:8000,baseProvenance:{contentVersion:'npc-v1',profileRevision:null}},tokenCount:1,tokenizerId:'fixture-counter',counterId:'fixture-counter',counterDurationMs:1,model:'fixture',cutoffSequence:99,view:'speech',revision:0});
+    const cached=(value:any)=>({value,artifactHash:artifact.hash});
+    const checkpoints={
+      'frozen_context:0':{value:artifact},
+      investigate0:cached({kind:'informational',needsMore:false,remember:true,requests:[]}),
+      context0:{value:[],sourceArtifact:{revision:0,hash:artifact.hash}},
+      decision:cached({stance:'respond',reaction:0,subject:'quest',evidence:'',intention:null}),
+      speak:cached({text:'I will scout tomorrow.'}),
+      review:cached({ok:true,issues:[]}),
+      remember:cached({memories:[{kind:'promise',text:'I will scout tomorrow.',quote:'I will scout tomorrow.',speaker:'npc',priorCommitmentId:'55555555-5555-4555-8555-555555555555',commitmentStatus:'unresolved'}]})
+    };
+    let completed=false; let rememberCalls=0; const rememberCheckpoints:unknown[]=[];
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints,content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_checkpoint') {if(args?.p_stage==='remember') rememberCheckpoints.push(args.p_value);return rpcResult(null);}
+      if(name==='npc_dialogue_complete') {completed=true;return rpcResult({status:'completed'});}
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){throw new Error('must not recount a frozen artifact');},async generate(stage){
+      if(stage!=='remember') throw new Error('only the invalid remember checkpoint should be regenerated');
+      rememberCalls++;
+      return {value:{memories:[{kind:'promise',text:'I will scout tomorrow.',quote:'I will scout tomorrow.',speaker:'npc',priorCommitmentId:null,commitmentStatus:'unresolved'}]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+    }};
+
+    await expect(runDialogue(client,'44444444-4444-4444-8444-444444444444',{turnId,npcId,message:'Replace an invalid cached correction.',expectedConversationSequence:99,interactionVersion:'dialogue-v2'},provider,{rounds:1,promptRegistry:fixturePromptRegistry()})).resolves.toMatchObject({status:'completed'});
+    expect(rememberCalls).toBe(1);
+    expect(completed).toBe(true);
+    expect(rememberCheckpoints[0]).toBeNull();
+    expect(rememberCheckpoints.at(-1)).toMatchObject({value:{memories:[{kind:'promise',priorCommitmentId:null,commitmentStatus:'unresolved'}]}});
   });
   it('recovers a pre-freeze evidence checkpoint by creating revision one exactly once',async()=>{
     const base={instanceId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};

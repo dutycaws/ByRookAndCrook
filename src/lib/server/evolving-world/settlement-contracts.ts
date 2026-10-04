@@ -65,13 +65,39 @@ export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'social_enco
 
 export type ProviderUsage = { input: number; output: number };
 export type ProviderResult = { value: unknown; model: string; usage: ProviderUsage; durationMs: number; promptVersion: string };
+export type SettlementProviderDiagnosticReason =
+  | 'provider_payload_contract_invalid'
+  | 'provider_request_budget_exceeded'
+  | 'provider_preflight_http_error'
+  | 'provider_preflight_json_invalid'
+  | 'provider_preflight_count_invalid'
+  | 'provider_input_budget_exceeded'
+  | 'provider_response_http_error'
+  | 'provider_response_json_invalid'
+  | 'provider_response_incomplete'
+  | 'provider_response_unexpected_status'
+  | 'provider_response_refusal'
+  | 'provider_output_missing'
+  | 'provider_output_schema_invalid'
+  | 'provider_output_outer_json_invalid'
+  | 'provider_output_inner_json_invalid'
+  | 'provider_quest_proposal_shape'
+  | 'provider_quest_terminal_event'
+  | 'provider_quest_authored_milestone'
+  | 'provider_quest_successor_bounds'
+  | 'provider_quest_departure_safety'
+  | 'provider_output_semantic_invalid';
 export interface SettlementProvider {
   generate(stage: ProviderStage, payload: unknown, signal: AbortSignal, prompt: import('$lib/server/prompt-registry').PromptSnapshot): Promise<ProviderResult>;
   countMemoryContext?(canonicalContext: string, signal: AbortSignal): Promise<{model:string;counterId:string;inputTokens:number;durationMs:number}>;
 }
 
 export class SettlementProviderError extends Error {
-  constructor(public readonly code: 'provider_unavailable' | 'provider_timeout' | 'provider_malformed' | 'provider_failed', message: string) {
+  constructor(
+    public readonly code: 'provider_unavailable' | 'provider_timeout' | 'provider_malformed' | 'provider_failed',
+    message: string,
+    public readonly diagnosticReason?: SettlementProviderDiagnosticReason
+  ) {
     super(message); this.name = 'SettlementProviderError';
   }
 }

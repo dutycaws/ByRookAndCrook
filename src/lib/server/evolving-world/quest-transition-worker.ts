@@ -4,7 +4,7 @@ import {
   validateQuestTransitionProposal,
   type QuestTransitionValidationContext
 } from '$lib/game/evolving-world';
-import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
+import { emitAiObservability, type AiFailureDiagnostic, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import { SETTLEMENT_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
 import { type PromptRegistryService } from '$lib/server/prompt-registry/service';
 import {
@@ -77,7 +77,12 @@ function isLeaseError(error: unknown): boolean {
 }
 /** A model answer that fails its closed contract is not a retryable provider outage. */
 class TransitionValidationError extends Error {
-  constructor(message: string) { super(message); this.name = 'TransitionValidationError'; }
+  constructor(message: string, readonly reasonCode: AiFailureDiagnostic['reasonCode'] = 'unclassified', readonly tokenBudget?: { inputTokens: number; maxTokens: number }) { super(message); this.name = 'TransitionValidationError'; }
+}
+function failureDiagnostic(cause: unknown, stage: AiFailureDiagnostic['stage']): AiFailureDiagnostic {
+  if (cause instanceof TransitionValidationError) return { stage, errorClass: 'transition_validation', reasonCode: cause.reasonCode, ...(cause.tokenBudget ?? {}) };
+  if (cause instanceof SettlementProviderError) return { stage, errorClass: 'settlement_provider', reasonCode: cause.diagnosticReason ?? cause.code };
+  return { stage, errorClass: cause instanceof Error ? 'ordinary_error' : 'unknown', reasonCode: 'unclassified' };
 }
 function errorCode(cause: unknown): string {
   if (cause instanceof TransitionValidationError) return 'validation_rejected';
@@ -191,6 +196,61 @@ function freeze<T>(value: T): T {
  * model stage an explicit, replayable evidence dossier without re-querying a
  * mutable memory index on a later settlement attempt.
  */
+const TRANSITION_EVIDENCE_PROJECTION_VERSION = 'npc-transition-evidence-v2';
+const TRANSITION_EVIDENCE_SEMANTICS = 'A bundle selectedItemRef points to the matching full item by id. bundleMemberDictionary stores each exact canonical member object once; memberRefs expand in order and preserve repeated occurrences. Include the selected item once alongside expanded members when reasoning about coverage. channelRanks, fusedScore, and selectionReasons are retrieval ranking metadata, not facts.';
+const LEGACY_TRANSITION_EVIDENCE_PROJECTION_VERSION = 'npc-transition-evidence-v1';
+const LEGACY_TRANSITION_EVIDENCE_SEMANTICS = 'A bundle selectedItemRef points to the matching full item by id; include that selected item once alongside the literal bundle members when reasoning about coverage. channelRanks, fusedScore, and selectionReasons are retrieval ranking metadata, not facts.';
+function projectTransitionEvidence(evidence: Record<string, unknown>, projectionVersion = TRANSITION_EVIDENCE_PROJECTION_VERSION): Record<string, unknown> | null {
+  if (!Array.isArray(evidence.items) || !Array.isArray(evidence.bundles)) return null;
+  if (projectionVersion !== TRANSITION_EVIDENCE_PROJECTION_VERSION && projectionVersion !== LEGACY_TRANSITION_EVIDENCE_PROJECTION_VERSION) return null;
+  const items = evidence.items as unknown[];
+  const itemById = new Map<string, Record<string, unknown>>();
+  for (const item of items) {
+    if (!object(item) || typeof item.id !== 'string' || itemById.has(item.id)) return null;
+    itemById.set(item.id, item);
+  }
+  const bundles: Record<string, unknown>[] = [];
+  const memberDictionary: Record<string, unknown>[] = [];
+  const memberRefByCanonical = new Map<string, number>();
+  for (const value of evidence.bundles as unknown[]) {
+    if (!object(value) || typeof value.selectedId !== 'string' || !Array.isArray(value.members)) return null;
+    const selected = itemById.get(value.selectedId);
+    const selectedFacts = selected ? Object.fromEntries(Object.entries(selected).filter(([key]) => !['channelRanks', 'fusedScore', 'selectionReasons'].includes(key))) : null;
+    const matches = selectedFacts ? value.members.map((member, index) => ({ member, index })).filter(({ member }) => object(member) && canonical(member) === canonical(selectedFacts)) : [];
+    if (matches.length > 1) return null;
+    const match = matches[0];
+    const members = match ? value.members.filter((_member, index) => index !== match.index) : value.members;
+    if (projectionVersion === LEGACY_TRANSITION_EVIDENCE_PROJECTION_VERSION) {
+      bundles.push({
+        ...value,
+        selectedItemRef: match ? value.selectedId : null,
+        members
+      });
+      continue;
+    }
+    const memberRefs: number[] = [];
+    for (const member of members) {
+      if (!object(member)) return null;
+      // Canonical full payload keys deduplicate only semantically exact JSON
+      // objects. IDs alone are insufficient because a single ID can carry
+      // distinct evidence variants.
+      const key = canonical(member);
+      let reference = memberRefByCanonical.get(key);
+      if (reference === undefined) {
+        reference = memberDictionary.length;
+        memberRefByCanonical.set(key, reference);
+        memberDictionary.push(member);
+      }
+      memberRefs.push(reference);
+    }
+    const { members: _members, ...bundle } = value;
+    bundles.push({ ...bundle, selectedItemRef: match ? value.selectedId : null, memberRefs });
+  }
+  return projectionVersion === LEGACY_TRANSITION_EVIDENCE_PROJECTION_VERSION
+    ? { ...evidence, transitionProjectionVersion: projectionVersion, bundles }
+    : { ...evidence, transitionProjectionVersion: projectionVersion, bundleMemberDictionary: memberDictionary, bundles };
+}
+
 function memoryDossier(claim: QuestTransitionClaim, memoryContext?: Record<string, unknown>): QuestTransitionMemoryDossier {
   // The historical terminal snapshot remains authoritative context; v4
   // evidence is a separately frozen, source-manifested attachment.  The
@@ -202,6 +262,7 @@ function memoryDossier(claim: QuestTransitionClaim, memoryContext?: Record<strin
     tier: memoryContext?.tier,
     policyVersion: attachment.policyVersion,
     projectionVersion: attachment.projectionVersion,
+    ...(attachment.projectionVersion === TRANSITION_EVIDENCE_PROJECTION_VERSION ? { projectionSemantics: TRANSITION_EVIDENCE_SEMANTICS } : attachment.projectionVersion === LEGACY_TRANSITION_EVIDENCE_PROJECTION_VERSION ? { projectionSemantics: LEGACY_TRANSITION_EVIDENCE_SEMANTICS } : {}),
     sourceManifest: attachment.sourceManifest,
     coverage: attachment.coverage,
     payload: attachment.payload,
@@ -239,7 +300,11 @@ function validMemoryContext(value: unknown): value is Record<string, unknown> {
   const tier=value.tier==='ordinary' ? TRANSITION_CONTEXT_TIERS.ordinary : value.tier==='rich' ? TRANSITION_CONTEXT_TIERS.rich : null;
   const attachment=value.attachment as Partial<NpcMemoryContextArtifact> | undefined;
   const normalizedManifest=Array.isArray(manifest) ? manifest.map((source:any)=>({id:source?.sourceId,version:source?.sourceVersion,hash:source?.sourceHash,kind:source?.sourceKind,ledgerSequence:source?.ledgerSequence})) : [];
-  const expectedAttachmentPayload={evidence,querySemantic:value.querySemantic,cutoffLedgerSequence:value.cutoffLedgerSequence};
+  const attachmentEvidence = attachment?.projectionVersion === TRANSITION_EVIDENCE_PROJECTION_VERSION || attachment?.projectionVersion === LEGACY_TRANSITION_EVIDENCE_PROJECTION_VERSION
+    ? projectTransitionEvidence(evidence, attachment.projectionVersion)
+    : attachment?.projectionVersion === 'npc-memory-evidence-v4' ? evidence : null;
+  if (!attachmentEvidence) return false;
+  const expectedAttachmentPayload={evidence:attachmentEvidence,querySemantic:value.querySemantic,cutoffLedgerSequence:value.cutoffLedgerSequence};
   if (!Array.isArray(manifest) || !tier || !attachment || attachment.tier!==tier.tier || attachment.overallMaxBytes!==tier.overallMaxBytes || attachment.overallMaxTokens!==tier.overallMaxTokens
     || !Number.isSafeInteger(evidence.cutoffLedgerSequence) || evidence.cutoffLedgerSequence!==value.cutoffLedgerSequence
     || attachment.cutoffSequence!==value.cutoffLedgerSequence || attachment.view!=='transition'
@@ -254,7 +319,7 @@ function validMemoryContext(value: unknown): value is Record<string, unknown> {
     && Number.isSafeInteger(budget.inputTokens) && (budget.inputTokens as number)>=0 && (budget.inputTokens as number)<=tier.maxTokens
     && typeof budget.model==='string' && typeof budget.counterId==='string';
 }
-async function captureMemoryContext(client: SettlementWorkerClient, claim: QuestTransitionClaim, runtime: QuestTransitionRuntime, signal: AbortSignal): Promise<Record<string,unknown> | null> {
+async function captureMemoryContext(client: SettlementWorkerClient, claim: QuestTransitionClaim, runtime: QuestTransitionRuntime, provider: SettlementProvider, signal: AbortSignal): Promise<Record<string,unknown> | null> {
   const replay=checkpoint(claim,'memory_context');
   if (replay) {
     const expectedTier = transitionContextTier(claim.frozenContext).tier;
@@ -262,7 +327,7 @@ async function captureMemoryContext(client: SettlementWorkerClient, claim: Quest
   }
   const scope=await rpc(client,'world_quest_transition_memory_scope',{p_transition_id:claim.transitionId,p_fence:claim.fence});
   if (!object(scope) || !uuid.test(String(scope.actorId)) || !uuid.test(String(scope.instanceId)) || !Number.isSafeInteger(scope.cutoffLedgerSequence)) {
-    throw new TransitionValidationError('Transition memory scope is unavailable.');
+    throw new TransitionValidationError('Transition memory scope is unavailable.', 'scope_invalid');
   }
   const evidenceClient: NpcMemoryEvidenceClient={rpc:async(name,args)=>{
     const result=await client.rpc(name,args);
@@ -274,19 +339,22 @@ async function captureMemoryContext(client: SettlementWorkerClient, claim: Quest
   const result=await retrieveNpcMemoryEvidence(evidenceClient,{actorId:scope.actorId as string,instanceId:scope.instanceId as string,view:'transition',cutoffLedgerSequence:scope.cutoffLedgerSequence as number,
     query:`Quest transition ${claim.terminalEventId}`,knownRefs:[claim.terminalEventId],budget:{limit:tier.limit,candidateLimit:tier.candidateLimit,fallbackLimit:16},signal},embedding);
   const raw=result.evidence as Record<string,unknown>;
-  if (!object(raw.coverage) || raw.coverage.complete!==true) throw new TransitionValidationError('Transition evidence coverage is incomplete.');
+  if (!object(raw.coverage) || raw.coverage.complete!==true) throw new TransitionValidationError('Transition evidence coverage is incomplete.', 'coverage_incomplete');
   const manifest=Array.isArray(raw.sourceManifest)?raw.sourceManifest:[];
   const sources=manifest.map((source:any)=>({id:source.sourceId,version:source.sourceVersion,hash:source.sourceHash,kind:source.sourceKind,ledgerSequence:source.ledgerSequence}));
-  if (!sources.every(source=>typeof source.id==='string'&&Number.isSafeInteger(source.version)&&typeof source.hash==='string'&&typeof source.kind==='string'&&Number.isSafeInteger(source.ledgerSequence))) throw new TransitionValidationError('Transition evidence manifest is invalid.');
-  const attachmentPayload={evidence:raw,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence};
+  if (!sources.every(source=>typeof source.id==='string'&&Number.isSafeInteger(source.version)&&typeof source.hash==='string'&&typeof source.kind==='string'&&Number.isSafeInteger(source.ledgerSequence))) throw new TransitionValidationError('Transition evidence manifest is invalid.', 'manifest_invalid');
+  const projectedEvidence=projectTransitionEvidence(raw);
+  if (!projectedEvidence) throw new TransitionValidationError('Transition evidence projection is invalid.', 'evidence_projection_invalid');
+  const attachmentPayload={evidence:projectedEvidence,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence};
   const canonicalEvidence=canonicalNpcMemoryContextPayload({sources,requiredSourceIds:sources.map(source=>source.id),payload:attachmentPayload});
-  const counter=runtime.countMemoryContext ?? (runtime.provider as { countMemoryContext?: QuestTransitionRuntime['countMemoryContext'] } | undefined)?.countMemoryContext;
-  if (!counter) throw new TransitionValidationError('Transition evidence token counter is unavailable.');
+  const counter=runtime.countMemoryContext ?? provider.countMemoryContext;
+  if (!counter) throw new TransitionValidationError('Transition evidence token counter is unavailable.', 'counter_unavailable');
   const counted=await counter(canonicalEvidence,signal);
-  if (!string(counted.model,120)||!string(counted.counterId,120)||!Number.isSafeInteger(counted.inputTokens)||counted.inputTokens<0||counted.inputTokens>tier.maxTokens||!Number.isSafeInteger(counted.durationMs)||counted.durationMs<0) throw new TransitionValidationError('Transition evidence token count is invalid.');
-  const attachment=assembleNpcMemoryContext({policyVersion:'npc-transition-evidence-v1',projectionVersion:'npc-memory-evidence-v4',maxBytes:tier.maxBytes,maxTokens:tier.maxTokens,tier:tier.tier,overallMaxBytes:tier.overallMaxBytes,overallMaxTokens:tier.overallMaxTokens,sources,requiredSourceIds:sources.map(source=>source.id),payload:attachmentPayload,tokenCount:counted.inputTokens,tokenizerId:counted.counterId,counterId:counted.counterId,counterDurationMs:counted.durationMs,model:counted.model,cutoffSequence:scope.cutoffLedgerSequence as number,view:'transition'});
+  if (!string(counted.model,120)||!string(counted.counterId,120)||!Number.isSafeInteger(counted.inputTokens)||counted.inputTokens<0||!Number.isSafeInteger(counted.durationMs)||counted.durationMs<0) throw new TransitionValidationError('Transition evidence token count is invalid.', 'counter_result_invalid');
+  if (counted.inputTokens>tier.maxTokens) throw new TransitionValidationError('Transition evidence token count is invalid.', 'counter_budget_exceeded', { inputTokens: counted.inputTokens, maxTokens: tier.maxTokens });
+  const attachment=assembleNpcMemoryContext({policyVersion:'npc-transition-evidence-v1',projectionVersion:TRANSITION_EVIDENCE_PROJECTION_VERSION,maxBytes:tier.maxBytes,maxTokens:tier.maxTokens,tier:tier.tier,overallMaxBytes:tier.overallMaxBytes,overallMaxTokens:tier.overallMaxTokens,sources,requiredSourceIds:sources.map(source=>source.id),payload:attachmentPayload,tokenCount:counted.inputTokens,tokenizerId:counted.counterId,counterId:counted.counterId,counterDurationMs:counted.durationMs,model:counted.model,cutoffSequence:scope.cutoffLedgerSequence as number,view:'transition'});
   const payload={tier:tier.tier,evidence:raw,querySemantic:result.querySemantic,cutoffLedgerSequence:scope.cutoffLedgerSequence,sourceManifest:manifest,manifestHash:createHash('sha256').update(canonical(manifest)).digest('hex'),contextFingerprint:createHash('sha256').update(canonical(raw)).digest('hex'),attachment,budget:{utf8Bytes:attachment.utf8Bytes,inputTokens:counted.inputTokens,model:counted.model,counterId:counted.counterId,durationMs:counted.durationMs}};
-  if (utf8Bytes(payload)>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition memory artifact exceeds its byte budget.');
+  if (utf8Bytes(payload)>MEMORY_CONTEXT_BYTES) throw new TransitionValidationError('Transition memory artifact exceeds its byte budget.', 'artifact_budget_exceeded');
   await rpc(client,'world_quest_transition_checkpoint',{p_transition_id:claim.transitionId,p_fence:claim.fence,p_stage:'memory_context',p_payload:payload});
   return payload;
 }
@@ -347,19 +415,22 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
   const observability = runtime.observability;
   const correlationId = `quest-transition:${claim.transitionId}`;
   let calls = 0;
+  let failureStage: AiFailureDiagnostic['stage'] = 'memory_context';
   try {
     // Capture before any model work. Reclaims replay memory_context exactly and
     // therefore never touch retrieval, profile lookup, or embedding again.
     if (!await guard.beat()) return {status:'lease_lost'};
-    const captured=await captureMemoryContext(client,claim,runtime,controller.signal);
+    const captured=await captureMemoryContext(client,claim,runtime,provider,controller.signal);
     if (captured===null) throw new TransitionValidationError('Transition memory context is malformed.');
     const dossier = memoryDossier(claim,Object.keys(captured).length ? captured : undefined);
     const freshMemoryContext = dossierMeasurements(dossier, checkpoint(claim,'memory_context') ? 'replayed' : 'fresh');
     const replayedMemoryContext = dossierMeasurements(dossier, 'replayed');
     const registry = runtime.promptRegistry;
+    failureStage = 'prompt_registry';
     if (!registry) throw new Error('Prompt registry is required for quest transition execution');
     const release = await registry.resolveForWork('quest_transition', claim.transitionId);
     const generate = async (stage: QuestTransitionProviderStage, payload: unknown): Promise<ProviderResult> => {
+      failureStage = stage;
       const prompt = releaseTextPrompt(release, SETTLEMENT_PROMPT_KEY[stage]);
       if (calls >= SETTLEMENT_PROVIDER_CALL_BUDGETS.quest_transition.maximum) throw new SettlementProviderError('provider_failed', 'Quest transition model-call budget exhausted.');
       if (!guard.canCall() || !await guard.beat()) throw new SettlementProviderError('provider_timeout', 'Quest transition lease was lost.');
@@ -417,6 +488,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
       decision = parseQuestTransitionCriticDecision(final);
       if (!decision || decision.decision !== 'accept') throw new TransitionValidationError('Repaired quest transition was rejected.');
     }
+    failureStage = 'quest_transition_validate';
     await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_validate', status: 'started', attempt: claim.attempt });
     if (validateQuestTransitionProposal(proposal, context).length > 0) {
       await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_validate', status: 'failed', attempt: claim.attempt, errorCode: 'validation_rejected' });
@@ -424,6 +496,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
     }
     await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_validate', status: 'completed', attempt: claim.attempt });
     if (!guard.canCall()) return { status: 'lease_lost', errorCode: 'lease_lost' };
+    failureStage = 'quest_transition_commit';
     await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_commit', status: 'started', attempt: claim.attempt });
     const result = await rpc(client, 'world_quest_transition_commit', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_proposal: proposal });
     const kind = committed(result, claim);
@@ -433,7 +506,7 @@ export async function runQuestTransitionClaim(client: SettlementWorkerClient, ra
   } catch (cause) {
     if (guard.lost || isLeaseError(cause)) return { status: 'lease_lost', errorCode: errorCode(cause) };
     const failure = timedOut ? 'provider_timeout' : errorCode(cause);
-    await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_fallback', status: 'started', attempt: claim.attempt, errorCode: failure });
+    await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_fallback', status: 'started', attempt: claim.attempt, errorCode: failure, failureDiagnostic: failureDiagnostic(cause, failureStage) });
     try {
       await rpc(client, 'world_quest_transition_fail', { p_transition_id: claim.transitionId, p_fence: claim.fence, p_failure_code: failure });
       await emitAiObservability(observability, { correlationId, workflow: 'world_settlement', stage: 'quest_transition_fallback', status: 'completed', attempt: claim.attempt, errorCode: failure });

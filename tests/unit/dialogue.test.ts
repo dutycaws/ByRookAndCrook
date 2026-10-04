@@ -2,11 +2,35 @@ import { describe,it,expect } from 'vitest';
 import { mergeEnvironment } from '../../scripts/environment-merge';
 import { parseInput,runDialogue,validateDecision } from '../../src/lib/server/dialogue/orchestrator';
 import { createProvider, type DialogueProvider } from '../../src/lib/server/dialogue/provider';
+import { matchesSchema, normalizeRememberOutput, schemas } from '../../src/lib/server/dialogue/schemas';
 import { fixturePromptRegistry, fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
 const npcId='11111111-1111-4111-8111-111111111111';
 const turnId='22222222-2222-4222-8222-222222222222';
 const promptRegistry = fixturePromptRegistry();
+
+describe('remember output normalization', () => {
+  it('normalizes keeper promises and preserves NPC promises and source wording', () => {
+    const keeper = { kind:'promise', text:'I will scout tomorrow.', quote:'I will scout tomorrow.', speaker:'keeper', priorCommitmentId:null, commitmentStatus:'unresolved' };
+    const npc = { kind:'promise', text:'I will bring supplies.', quote:'I will bring supplies.', speaker:'npc', priorCommitmentId:null, commitmentStatus:'unresolved' };
+    const output = normalizeRememberOutput({ memories:[keeper,npc] }) as { memories: unknown[] };
+
+    expect(output.memories).toEqual([
+      { ...keeper, kind:'keeper_claim', commitmentStatus:null, priorCommitmentId:null },
+      npc
+    ]);
+  });
+
+  it('accepts only SQL-valid new-promise, correction, and ordinary-record metadata pairs', () => {
+    const base = { kind:'promise', text:'I will scout tomorrow.', quote:'I will scout tomorrow.', speaker:'npc', priorCommitmentId:null, commitmentStatus:'unresolved' };
+    expect(matchesSchema({memories:[base]},schemas.remember)).toBe(true);
+    expect(matchesSchema({memories:[{...base,priorCommitmentId:crypto.randomUUID(),commitmentStatus:'withdrawn'}]},schemas.remember)).toBe(true);
+    expect(matchesSchema({memories:[{...base,kind:'npc_statement',priorCommitmentId:null,commitmentStatus:null}]},schemas.remember)).toBe(true);
+    expect(matchesSchema({memories:[{...base,priorCommitmentId:crypto.randomUUID(),commitmentStatus:'unresolved'}]},schemas.remember)).toBe(false);
+    expect(matchesSchema({memories:[{...base,priorCommitmentId:null,commitmentStatus:'disputed'}]},schemas.remember)).toBe(false);
+    expect(matchesSchema({memories:[{...base,priorCommitmentId:null,commitmentStatus:null}]},schemas.remember)).toBe(false);
+  });
+});
 
 function rpcResult(data: unknown) {
   return {
@@ -64,6 +88,94 @@ describe('dialogue boundaries',()=>{
     });
     expect(signals).toHaveLength(2);
     expect(signals[1]).not.toBe(signals[0]);
+  });
+
+  it('retries a newly generated Remember result whose NPC quote is not an exact source substring',async()=>{
+    const base={instanceId:npcId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const invalidQuote='I will scout at sunrise.';
+    const exactQuote='I will scout at dawn.';
+    const reply=exactQuote;
+    const rememberWrites:unknown[]=[]; const rememberPayloads:any[]=[];
+    const checkpoints:Record<string,any>={};
+    let rememberCalls=0; let completionCalls=0;
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{...checkpoints},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(args?.p_category==='base' ? base : {});
+      if(name==='npc_memory_evidence_retrieve_for_actor') return rpcResult(emptyEvidence());
+      if(name==='npc_dialogue_checkpoint') {if(args?.p_stage==='remember') rememberWrites.push(args.p_value);if(args?.p_value===null) delete checkpoints[String(args.p_stage)];else checkpoints[String(args?.p_stage)]=args?.p_value;return rpcResult(null);}
+      if(name==='npc_dialogue_complete') {completionCalls++;return rpcResult({status:'completed',reply});}
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(stage,payload){
+      if(stage==='investigate') return {value:{kind:'informational',needsMore:false,remember:true,requests:[]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      if(stage==='speak') return {value:{text:reply},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      if(stage==='review') return {value:{ok:true,issues:[]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      if(stage==='remember') {
+        rememberCalls++; rememberPayloads.push(payload);
+        const quote=rememberCalls===1 ? invalidQuote : exactQuote;
+        return {value:{memories:[{kind:'promise',text:exactQuote,quote,speaker:'npc',priorCommitmentId:null,commitmentStatus:'unresolved'}]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      }
+      throw new Error(`Unexpected provider stage ${stage}`);
+    }};
+
+    await expect(runDialogue(client,'33333333-3333-4333-8333-333333333333',{
+      turnId:'66666666-6666-4666-8666-666666666666',npcId,message:'Please scout at dawn.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
+    },provider,{rounds:1,promptRegistry,observability:()=>{}})).resolves.toMatchObject({status:'completed'});
+    expect(rememberCalls).toBe(2);
+    expect(rememberPayloads[1]).toMatchObject({quoteValidationFeedback:[{memoryIndex:0,source:'npc',code:'quote_not_in_source'}]});
+    expect(completionCalls).toBe(1);
+    expect(rememberWrites.some(value=>JSON.stringify(value).includes(invalidQuote))).toBe(false);
+    expect(rememberWrites.at(-1)).toMatchObject({quoteRepairAttempted:true,value:{memories:[{quote:exactQuote}]} });
+
+    checkpoints.remember={...checkpoints.remember,value:{...checkpoints.remember.value,memories:[{...checkpoints.remember.value.memories[0],quote:invalidQuote}]}};
+    delete checkpoints.remember.quoteRepairAttempted;
+    await expect(runDialogue(client,'33333333-3333-4333-8333-333333333333',{
+      turnId:'66666666-6666-4666-8666-666666666666',npcId,message:'Please scout at dawn.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
+    },provider,{rounds:1,promptRegistry,observability:()=>{}})).resolves.toMatchObject({status:'completed'});
+    expect(rememberCalls).toBe(3);
+    expect(rememberPayloads[2]).toMatchObject({quoteValidationFeedback:[{memoryIndex:0,source:'npc',code:'quote_not_in_source'}]});
+    expect(completionCalls).toBe(2);
+  });
+
+  it('fails without completing when the single Remember quote repair retry is invalid',async()=>{
+    const base={instanceId:npcId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[]};
+    const invalidQuote='I will scout at sunrise.';
+    const checkpoints:Record<string,any>={};
+    let rememberCalls=0; let completionCalls=0;
+    const client={rpc(name:string,args?:Record<string,unknown>) {
+      if(name==='npc_dialogue_begin') return rpcResult({status:'processing',fence:'fence-1',checkpoints:{...checkpoints},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_context') return rpcResult(args?.p_category==='base' ? base : {});
+      if(name==='npc_memory_evidence_retrieve_for_actor') return rpcResult(emptyEvidence());
+      if(name==='npc_dialogue_checkpoint') {if(args?.p_value===null) delete checkpoints[String(args.p_stage)]; else checkpoints[String(args?.p_stage)]=args?.p_value;return rpcResult(null);}
+      if(name==='npc_dialogue_complete') {completionCalls++;return rpcResult({status:'completed'});}
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const provider:DialogueProvider={async countContext(){return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(stage){
+      if(stage==='investigate') return {value:{kind:'informational',needsMore:false,remember:true,requests:[]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      if(stage==='speak') return {value:{text:'I will scout at dawn.'},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      if(stage==='review') return {value:{ok:true,issues:[]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+      if(stage==='remember') {rememberCalls++;return {value:{memories:[{kind:'promise',text:'I will scout at dawn.',quote:invalidQuote,speaker:'npc',priorCommitmentId:null,commitmentStatus:'unresolved'}]},usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};}
+      throw new Error(`Unexpected provider stage ${stage}`);
+    }};
+
+    await expect(runDialogue(client,'33333333-3333-4333-8333-333333333333',{
+      turnId:'77777777-7777-4777-8777-777777777777',npcId,message:'Please scout at dawn.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
+    },provider,{rounds:1,promptRegistry})).rejects.toMatchObject({code:'STRUCTURE'});
+    expect(rememberCalls).toBe(2);
+    expect(completionCalls).toBe(0);
+
+    await expect(runDialogue(client,'33333333-3333-4333-8333-333333333333',{
+      turnId:'77777777-7777-4777-8777-777777777777',npcId,message:'Please scout at dawn.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
+    },provider,{rounds:1,promptRegistry})).rejects.toMatchObject({code:'STRUCTURE'});
+    expect(rememberCalls).toBe(2);
+    expect(completionCalls).toBe(0);
+
+    checkpoints.remember={...checkpoints.remember,artifactHash:'a-previous-artifact'};
+    await expect(runDialogue(client,'33333333-3333-4333-8333-333333333333',{
+      turnId:'77777777-7777-4777-8777-777777777777',npcId,message:'Please scout at dawn.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
+    },provider,{rounds:1,promptRegistry})).rejects.toMatchObject({code:'STRUCTURE'});
+    expect(rememberCalls).toBe(2);
+    expect(completionCalls).toBe(0);
   });
 
   it('preserves custom environment configuration and multiline values',()=>{

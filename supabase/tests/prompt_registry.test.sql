@@ -109,5 +109,37 @@ create trigger prompt_registry_pin_release before insert on prompt_pin_fixture f
 insert into prompt_pin_fixture default values;
 select is((select prompt_release_id::text from prompt_pin_fixture),current_setting('test.restored_release'),'future durable work pins the active release');
 
+select set_config('test.quest_transition_contract_release',(
+  select id::text from private.prompt_releases where label='Quest transition inner JSON contract'
+),true);
+select set_config('test.quest_transition_contract_prior',(
+  select prior_release_id::text from private.prompt_releases where id=current_setting('test.quest_transition_contract_release')::uuid
+),true);
+select is((select prior_release_id::text from private.prompt_releases where id=current_setting('test.active_release')::uuid),current_setting('test.quest_transition_contract_release'),'instruction deduplication preserves the inner JSON contract release as its parent');
+select is((select label from private.prompt_releases where id=current_setting('test.quest_transition_contract_prior')::uuid),'NPC memory summary v2 prompt baseline','new release preserves the previous active release as its parent');
+select ok(
+  (select content_hash='a50617e613842c190d0d57270b141ac38331c8be09738bee404f7fa9f0917f09'
+   from private.prompt_release_entries entry join private.prompt_revisions revision on revision.id=entry.revision_id
+   where entry.release_id=current_setting('test.quest_transition_contract_release')::uuid and entry.prompt_key='quest_transition.proposer')
+  and (select content_hash='6ed88a71e481576d7df1ca36497a874f3c225bbab87bc9816c855ff1f2b910ff'
+   from private.prompt_release_entries entry join private.prompt_revisions revision on revision.id=entry.revision_id
+   where entry.release_id=current_setting('test.quest_transition_contract_release')::uuid and entry.prompt_key='quest_transition.repair'),
+  'proposer and repair revisions match the source contract hashes'
+);
+select is(
+  (select count(*) from private.prompt_release_entries current_entry
+   join private.prompt_release_entries prior_entry on prior_entry.release_id=current_setting('test.quest_transition_contract_prior')::uuid and prior_entry.prompt_key=current_entry.prompt_key
+   where current_entry.release_id=current_setting('test.quest_transition_contract_release')::uuid
+     and current_entry.prompt_key not in ('quest_transition.proposer','quest_transition.repair')
+     and current_entry.revision_id=prior_entry.revision_id),
+  (select count(*)-2 from private.prompt_registry_manifest),
+  'all unchanged prompt entries carry forward by revision identity'
+);
+select ok(
+  (select count(*)=32 from private.prompt_release_entries where release_id=(select id from private.prompt_releases where release_number=6))
+  and exists(select 1 from private.prompt_releases where release_number=6),
+  'release 6 remains an intact immutable snapshot for work already pinned there'
+);
+
 select * from finish();
 rollback;

@@ -71,6 +71,16 @@ describe('AI observability boundary', () => {
     expect(sink).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts only closed failure diagnostics and rejects raw or extra fields', () => {
+    const base = { correlationId: 'transition:failure', workflow: 'world_settlement' as const, stage: 'quest_transition_fallback', status: 'started' as const, attempt: 1, errorCode: 'validation_rejected' };
+    expect(createAiObservabilityEvent({ ...base, failureDiagnostic: { stage: 'memory_context', errorClass: 'transition_validation', reasonCode: 'counter_budget_exceeded', inputTokens: 16_001, maxTokens: 16_000 } }))
+      .toMatchObject({ failureDiagnostic: { stage: 'memory_context', errorClass: 'transition_validation', reasonCode: 'counter_budget_exceeded', inputTokens: 16_001, maxTokens: 16_000 } });
+    expect(createAiObservabilityEvent({ ...base, failureDiagnostic: { stage: 'memory_context', errorClass: 'transition_validation', reasonCode: 'counter_budget_exceeded', inputTokens: 16_001, maxTokens: 16_000, providerText: 'do not log' } } as any)).toBeNull();
+    expect(createAiObservabilityEvent({ ...base, failureDiagnostic: { stage: 'memory_context', errorClass: 'transition_validation', reasonCode: 'counter_budget_exceeded', inputTokens: 16_001, maxTokens: 16_000, payload: { evidence: 'private' } } } as any)).toBeNull();
+    expect(createAiObservabilityEvent({ ...base, failureDiagnostic: { stage: 'memory_context', errorClass: 'settlement_provider', reasonCode: 'provider_malformed', message: 'raw response' } } as any)).toBeNull();
+    expect(createAiObservabilityEvent({ ...base, failureDiagnostic: { stage: 'memory_context', errorClass: 'transition_validation', reasonCode: 'counter_budget_exceeded', inputTokens: -1, maxTokens: 16_000 } } as any)).toBeNull();
+  });
+
   it('allows only the fixed canon and news operational labels', () => {
     for (const stage of ['canon_proposer','canon_critic','canon_repair','canon_final_critic','canon_validate','canon_commit','news_aggregate','news_commit','safe_fallback']) {
       expect(createAiObservabilityEvent({correlationId:'settlement:one:job:two',workflow:'world_settlement',stage,status:'completed',attempt:1})).not.toBeNull();

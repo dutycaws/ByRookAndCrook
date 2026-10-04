@@ -12,7 +12,7 @@ select is((select count(*) from private.prompt_registry_manifest where prompt_ke
 select is((select contract_hash from private.prompt_registry_manifest where prompt_key='npc_memory.summary.v2'),'f279a108f11e212c77e4876521e9ee47092171b6d2a820d83a245d57a3c64e03','v2 manifest uses the canonical TS contract hash');
 select is((select content_hash from private.prompt_revisions where prompt_key='npc_memory.summary.v2' and revision_number=1),'c713a47206e9df5906d8fe01736bfbf386c5b35f215feca213b2896c8f0a4718','v2 prompt body hash is canonical');
 select set_config('test.active_release',(select release_id::text from private.prompt_registry_active_release),true);
-select set_config('test.prior_release',(select prior_release_id::text from private.prompt_releases where id=current_setting('test.active_release')::uuid),true);
+select set_config('test.prior_release',(select id::text from private.prompt_releases where label='NPC memory summary prompt baseline'),true);
 set local role service_role;
 set local request.jwt.claim.role='service_role';
 select ok(not ((public.prompt_registry_service_resolve(current_setting('test.prior_release')::uuid)->'prompts') ? 'npc_memory.summary.v2'),'historical v1 release legally omits v2');

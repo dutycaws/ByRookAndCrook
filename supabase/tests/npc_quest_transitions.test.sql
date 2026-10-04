@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(44);
+select plan(70);
 
 select has_function('public','world_quest_transition_claim',array['uuid'],'service transition claim exists');
 select has_function('public','world_quest_transition_claim_next',array[]::text[],'service transition queue claim exists');
@@ -20,6 +20,46 @@ create temporary table pg_temp.prepared as select * from private.world_resolve_q
 create temporary table pg_temp.terminal as select * from private.world_resolve_quest_step((select quest_id from pg_temp.prepared),5,0);
 update public.tavern_saves set current_day=6,world_phase='settling' where id='72000000-0000-4000-8000-000000000011';
 create temporary table pg_temp.claimed as select public.world_quest_transition_claim((select id from pg_temp.terminal)) result;
+select is(
+  (select result->'frozenContext'->'versionSheet'->'durableGoal' from pg_temp.claimed),
+  (select version.sheet#>'{campaign,durableGoal}' from private.npc_versions version
+   where version.id=(select (result->'frozenContext'->'quest'->>'versionId')::uuid from pg_temp.claimed)),
+  'authored transition preserves the exact durable goal from its pinned NPC version');
+select is(
+  (select result->>'contextFingerprint' from pg_temp.claimed),
+  (select encode(extensions.digest(private.world_canonical_json(result->'frozenContext'),'sha256'),'hex') from pg_temp.claimed),
+  'transition fingerprint covers the complete author-sheet projection');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->>'id' from pg_temp.claimed),'secure-road','frozen next milestone uses the next authored entry ID');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->>'title' from pg_temp.claimed),'Secure the road','frozen next milestone retains its authored title');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->>'outcome' from pg_temp.claimed),'Break the bandit hold over the old road without risking travelers.','frozen next milestone retains its authored outcome');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->>'motivation' from pg_temp.claimed),'Millhaven needs a safe road more than a heroic tale.','frozen next milestone retains its authored motivation');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->'constraints' from pg_temp.claimed),'["Protect travelers","Avoid harming civilians"]'::jsonb,'frozen next milestone retains authored constraints');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->'allowedTargets' from pg_temp.claimed),'["old-road","bandit-camp"]'::jsonb,'frozen next milestone retains authored targets');
+select is((select result->'frozenContext'->'nextAuthoredMilestone'->>'difficulty' from pg_temp.claimed),'3','frozen next milestone retains authored difficulty');
+select is(
+  (select result->'frozenContext'->'capabilityEnvelope'->>'allowGeneratedSuccessor' from pg_temp.claimed),
+  (select case when result->'frozenContext'->'capabilityEnvelope'->'allowedWorldEffects' ? 'create_quest' then 'true' else 'false' end from pg_temp.claimed),
+  'missing successor flag follows the frozen create_quest capability'
+);
+create temporary table pg_temp.final_milestone_context as
+select private.world_quest_transition_context(jsonb_populate_record(quest,'{"authored_milestone_index":1}'::jsonb),event_row) context
+from private.world_quests quest cross join pg_temp.terminal terminal_row
+join private.world_quest_events event_row on event_row.id=terminal_row.id
+where quest.id=terminal_row.quest_id;
+select is((select context->'nextAuthoredMilestone' from pg_temp.final_milestone_context),'null'::jsonb,'final authored milestone freezes no next milestone instead of repeating itself');
+select is(
+  (select context->'versionSheet'->'durableGoal' from pg_temp.final_milestone_context),
+  (select version.sheet#>'{campaign,durableGoal}' from private.npc_versions version
+   where version.id=(select (context->'quest'->>'versionId')::uuid from pg_temp.final_milestone_context)),
+  'successor transition preserves the exact durable goal from its pinned NPC version');
+select throws_ok($$select private.world_quest_transition_next_authored_milestone('{"campaign":{"milestones":[null,{"id":"incomplete","title":"Next","outcome":"Outcome","motivation":"Reason","allowedTargets":[],"difficulty":1}]}}'::jsonb,0)$$,'23514',null,'missing authored constraints fail closed instead of disappearing through SQL null semantics');
+select is(private.world_quest_transition_capability_flags('{"allowedWorldEffects":["create_quest"]}'::jsonb,'["create_quest"]'::jsonb)->>'allowGeneratedSuccessor','true','legacy create_quest enables generated successors when the flag is absent');
+select is(private.world_quest_transition_capability_flags('{"allowedWorldEffects":[]}'::jsonb,'[]'::jsonb)->>'allowGeneratedSuccessor','false','missing successor flag without create_quest stays disabled');
+select is(private.world_quest_transition_capability_flags('{"allowGeneratedSuccessor":false,"allowedWorldEffects":["create_quest"]}'::jsonb,'["create_quest"]'::jsonb)->>'allowGeneratedSuccessor','false','explicit successor false overrides legacy create_quest');
+select is(private.world_quest_transition_capability_flags('{"allowGeneratedSuccessor":true,"allowedWorldEffects":[]}'::jsonb,'[]'::jsonb)->>'allowGeneratedSuccessor','true','explicit successor true remains enabled');
+select is(private.world_quest_transition_capability_flags('{"allowedWorldEffects":["create_quest"]}'::jsonb,'["create_quest"]'::jsonb)->>'allowDeparture','false','create_quest does not imply departure');
+select is(private.world_quest_transition_capability_flags('{"allowDeparture":false,"allowedWorldEffects":["create_quest"]}'::jsonb,'["create_quest"]'::jsonb)->>'allowDeparture','false','explicit departure false remains disabled');
+select is(private.world_quest_transition_capability_flags('{"allowDeparture":true,"allowedWorldEffects":[]}'::jsonb,'[]'::jsonb)->>'allowDeparture','true','explicit departure true remains enabled');
 select ok((select result ? 'fence' and result ? 'frozenContext' from pg_temp.claimed),'claim returns a fenced immutable context');
 select is((select (result->>'attempt')::integer from pg_temp.claimed),1,'claim exposes its fenced attempt number');
 select throws_ok($$select public.world_quest_transition_heartbeat((select (result->>'transitionId')::uuid from pg_temp.claimed),'00000000-0000-4000-8000-000000000001')$$,'PT409',null,'stale fence cannot heartbeat');
@@ -43,6 +83,12 @@ create temporary table pg_temp.clean_reclaimed as select public.world_quest_tran
 select is((select result->'checkpoints' from pg_temp.clean_reclaimed),'[]'::jsonb,'validation rejection does not replay an invalid model checkpoint');
 create temporary table pg_temp.committed as select public.world_quest_transition_commit((select (result->>'transitionId')::uuid from pg_temp.clean_reclaimed),(select (result->>'fence')::uuid from pg_temp.clean_reclaimed),jsonb_build_object('version','quest-transition-v1','kind','next_authored_milestone','terminalEventId',(select id::text from pg_temp.terminal),'milestoneId','secure-road','plan','[{"action":"prepare","approach":"scouting"},{"action":"attempt","approach":"scouting"}]'::jsonb)) result;
 select is((select state from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),'active','a successor committed while settling is active for that opening');
+select is((select title from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),'Secure the road','clean commit creates the exact authored milestone title');
+select is((select objective from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),'Break the bandit hold over the old road without risking travelers.','clean commit creates the authored milestone objective');
+select is((select motivation from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),'Millhaven needs a safe road more than a heroic tale.','clean commit creates the authored milestone motivation');
+select is((select constraints from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),array['Protect travelers','Avoid harming civilians']::text[],'clean commit creates the authored milestone constraints');
+select is((select target_refs from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),array['old-road','bandit-camp']::text[],'clean commit creates the authored milestone targets');
+select is((select difficulty from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),3,'clean commit creates the authored milestone difficulty');
 select is((select scheduled_for_day from private.world_quests where id=((select result->>'questId' from pg_temp.committed)::uuid)),8,'a deferred successor starts on its later eligible opening');
 select ok(private.world_quest_transition_public_digest('72000000-0000-4000-8000-000000000011',5) like '%Secure the road%','next authored milestone is available to the overnight public digest');
 select is((select public.world_quest_transition_commit((select (result->>'transitionId')::uuid from pg_temp.clean_reclaimed),'00000000-0000-4000-8000-000000000001','{}'::jsonb)),(select result from pg_temp.committed),'completed transition returns its committed receipt on retry');

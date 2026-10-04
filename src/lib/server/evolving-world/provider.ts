@@ -1,5 +1,5 @@
 import type { PromptSnapshot } from '$lib/server/prompt-registry';
-import { parseFrozenCanonEventProposal, promptVersionForProviderStage, SettlementProviderError, type ProviderResult, type ProviderStage, type SettlementProvider } from './settlement-contracts';
+import { parseFrozenCanonEventProposal, promptVersionForProviderStage, SettlementProviderError, type ProviderResult, type ProviderStage, type SettlementProvider, type SettlementProviderDiagnosticReason } from './settlement-contracts';
 import { parseFrozenSocialEncounterContext, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, type FrozenSocialEncounterContext } from '$lib/game/evolving-world/social-encounter-contracts';
 import { parseFrozenProceduralWorldContext, parseProceduralWorldCriticDecision, parseProceduralWorldProposal, PROCEDURAL_WORLD_CRITIC_CODES, PROCEDURAL_WORLD_CRITIC_PATHS, type FrozenProceduralWorldContext } from '$lib/game/evolving-world/procedural-world-contracts';
 import { parseQuestTransitionCriticDecision, parseQuestTransitionProposal, QUEST_TRANSITION_CRITIC_CODES, QUEST_TRANSITION_CRITIC_PATHS, type QuestTransitionValidationContext } from '$lib/game/evolving-world/quest-transition-contracts';
@@ -48,8 +48,50 @@ const questTransitionCriticStages = new Set<ProviderStage>(['quest_transition_cr
 const creativeStages = new Set<ProviderStage>(['proposer','repair','canon_proposer','canon_repair','social_encounter_proposer','social_encounter_repair','procedural_world_proposer','procedural_world_repair','quest_transition_proposer','quest_transition_repair']);
 const criticStages = new Set<ProviderStage>(['critic','final_critic','canon_critic','canon_final_critic']);
 function schema(stage: ProviderStage) { return stage === 'digest' ? digestSchema : stage === 'social_encounter_final_critic' ? socialFinalCriticSchema : stage === 'procedural_world_final_critic' ? proceduralFinalCriticSchema : stage === 'quest_transition_final_critic' ? questTransitionFinalCriticSchema : socialCriticStages.has(stage) ? socialCriticSchema : proceduralCriticStages.has(stage) ? proceduralCriticSchema : questTransitionCriticStages.has(stage) ? questTransitionCriticSchema : criticStages.has(stage) ? criticSchema : canonProposalStages.has(stage) ? canonEventSchema : socialProposalStages.has(stage) ? socialProposalSchema : proceduralProposalStages.has(stage) ? proceduralProposalSchema : questTransitionProposalStages.has(stage) ? questTransitionProposalSchema : proposalSchema; }
-function outputText(result: any): string { return result.output?.filter((item:any)=>item.type==='message').flatMap((item:any)=>item.content ?? []).filter((item:any)=>item.type==='output_text').map((item:any)=>item.text).join('') ?? ''; }
+function outputText(result: any): string {
+  if (!Array.isArray(result?.output)) return '';
+  return result.output.filter((item:any)=>item?.type==='message' && Array.isArray(item.content))
+    .flatMap((item:any)=>item.content).filter((item:any)=>item?.type==='output_text' && typeof item.text==='string')
+    .map((item:any)=>item.text).join('');
+}
+function hasRefusal(result: any): boolean {
+  return Array.isArray(result?.output) && result.output.some((item:any)=>item?.type==='message' && Array.isArray(item.content)
+    && item.content.some((part:any)=>part?.type==='refusal'));
+}
+function matchesSchema(value: unknown, spec: any): boolean {
+  if (!plainObject(spec) || typeof spec.type !== 'string') return false;
+  if (Array.isArray(spec.enum) && !spec.enum.some((candidate: unknown)=>candidate === value)) return false;
+  if (spec.type === 'string') {
+    if (typeof value !== 'string' || (spec.minLength !== undefined && typeof spec.minLength !== 'number') || (spec.maxLength !== undefined && typeof spec.maxLength !== 'number')) return false;
+    return (spec.minLength === undefined || [...value].length >= spec.minLength)
+      && (spec.maxLength === undefined || [...value].length <= spec.maxLength);
+  }
+  if (spec.type === 'array') {
+    if (!Array.isArray(value) || (spec.minItems !== undefined && typeof spec.minItems !== 'number') || (spec.maxItems !== undefined && typeof spec.maxItems !== 'number')) return false;
+    return (spec.minItems === undefined || value.length >= spec.minItems)
+      && (spec.maxItems === undefined || value.length <= spec.maxItems)
+      && value.every((item)=>matchesSchema(item,spec.items));
+  }
+  if (spec.type === 'object') {
+    const properties=spec.properties;
+    if (!plainObject(value) || !plainObject(properties) || !Array.isArray(spec.required)) return false;
+    if (!spec.required.every((key: unknown)=>typeof key==='string' && key in value)) return false;
+    if (spec.additionalProperties === false && Object.keys(value).some((key)=>!(key in properties))) return false;
+    return Object.entries(value).every(([key,item])=>!(key in properties) || matchesSchema(item,properties[key]));
+  }
+  return false;
+}
 function tokenProjection(body: Record<string,unknown>) { return {model:body.model,input:body.input,text:body.text}; }
+function questProposalDiagnosticReason(code: string): SettlementProviderDiagnosticReason | undefined {
+  switch (code) {
+    case 'proposal_shape': return 'provider_quest_proposal_shape';
+    case 'terminal_event': return 'provider_quest_terminal_event';
+    case 'authored_milestone': return 'provider_quest_authored_milestone';
+    case 'successor_bounds': return 'provider_quest_successor_bounds';
+    case 'departure_safety': return 'provider_quest_departure_safety';
+    default: return undefined;
+  }
+}
 function exactPayload(value: unknown, keys: string[]): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype
     && Object.keys(value).length === keys.length && keys.every((key) => key in value);
@@ -181,18 +223,18 @@ export function createSettlementProvider(config: Record<string, string | undefin
     if (!prompt || prompt.promptType !== 'text_system') throw new SettlementProviderError('provider_unavailable', 'The pinned settlement prompt is unavailable.');
     const socialContext=(socialProposalStages.has(stage) || socialCriticStages.has(stage)) ? parseSocialPayload(stage, payload) : null;
     if ((socialProposalStages.has(stage) || socialCriticStages.has(stage)) && !socialContext) {
-      throw new SettlementProviderError('provider_malformed', 'The social encounter provider payload did not match the frozen contract.');
+      throw new SettlementProviderError('provider_malformed', 'The social encounter provider payload did not match the frozen contract.', 'provider_payload_contract_invalid');
     }
     const proceduralContext=(proceduralProposalStages.has(stage) || proceduralCriticStages.has(stage)) ? parseProceduralPayload(stage, payload) : null;
     if ((proceduralProposalStages.has(stage) || proceduralCriticStages.has(stage)) && !proceduralContext) {
-      throw new SettlementProviderError('provider_malformed', 'The procedural world provider payload did not match the frozen contract.');
+      throw new SettlementProviderError('provider_malformed', 'The procedural world provider payload did not match the frozen contract.', 'provider_payload_contract_invalid');
     }
     const questTransitionContextValue=(questTransitionProposalStages.has(stage) || questTransitionCriticStages.has(stage)) ? parseQuestTransitionPayload(stage, payload) : null;
-    if ((questTransitionProposalStages.has(stage) || questTransitionCriticStages.has(stage)) && !questTransitionContextValue) throw new SettlementProviderError('provider_malformed', 'The quest transition provider payload did not match the frozen contract.');
+    if ((questTransitionProposalStages.has(stage) || questTransitionCriticStages.has(stage)) && !questTransitionContextValue) throw new SettlementProviderError('provider_malformed', 'The quest transition provider payload did not match the frozen contract.', 'provider_payload_contract_invalid');
     const body={ model, store:false, max_output_tokens:SETTLEMENT_OUTPUT_RESERVE, reasoning:{effort:creativeStages.has(stage) ? 'low' : 'none'},
       input:[{role:'system',content:prompt.body},{role:'user',content:JSON.stringify(payload)}],
       text:{format:{type:'json_schema',name:`world_${stage}`,strict:true,schema:schema(stage)}} };
-    if (new TextEncoder().encode(JSON.stringify(body)).byteLength>SETTLEMENT_REQUEST_BYTES) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its UTF-8 transport budget.');
+    if (new TextEncoder().encode(JSON.stringify(body)).byteLength>SETTLEMENT_REQUEST_BYTES) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its UTF-8 transport budget.','provider_request_budget_exceeded');
     const capacity=Number(config.NPC_MODEL_INPUT_CAPACITY);
     if(!Number.isSafeInteger(capacity)||capacity<SETTLEMENT_OUTPUT_RESERVE) throw new SettlementProviderError('provider_unavailable','The settlement model capacity is not configured.');
     let counted: Response;
@@ -202,32 +244,52 @@ export function createSettlementProvider(config: Record<string, string | undefin
       if (signal.aborted) throw new SettlementProviderError('provider_timeout', 'The settlement provider timed out.');
       throw new SettlementProviderError('provider_failed', cause instanceof Error ? cause.message : 'The settlement provider failed.');
     }
-    if (!counted.ok) throw new SettlementProviderError(counted.status === 401 || counted.status === 403 ? 'provider_unavailable' : 'provider_failed', `The settlement token preflight failed (${counted.status}).`);
-    let tokenBody:any; try { tokenBody=await counted.json(); } catch { throw new SettlementProviderError('provider_malformed','The settlement token preflight was malformed.'); }
-    if(!Number.isSafeInteger(tokenBody?.input_tokens)||tokenBody.input_tokens<0||tokenBody.input_tokens>SETTLEMENT_INPUT_TOKENS||tokenBody.input_tokens+SETTLEMENT_OUTPUT_RESERVE>capacity) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its model input budget.');
+    if (!counted.ok) throw new SettlementProviderError(counted.status === 401 || counted.status === 403 ? 'provider_unavailable' : 'provider_failed', `The settlement token preflight failed (${counted.status}).`, 'provider_preflight_http_error');
+    let tokenBody:any; try { tokenBody=await counted.json(); } catch { throw new SettlementProviderError('provider_malformed','The settlement token preflight was malformed.','provider_preflight_json_invalid'); }
+    if(!Number.isSafeInteger(tokenBody?.input_tokens)||tokenBody.input_tokens<0) throw new SettlementProviderError('provider_malformed','The settlement token preflight was malformed.','provider_preflight_count_invalid');
+    if(tokenBody.input_tokens>SETTLEMENT_INPUT_TOKENS||tokenBody.input_tokens+SETTLEMENT_OUTPUT_RESERVE>capacity) throw new SettlementProviderError('provider_malformed','The settlement request exceeds its model input budget.','provider_input_budget_exceeded');
     let response: Response;
     try { response=await fetch('https://api.openai.com/v1/responses',{method:'POST',signal,headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body)}); }
     catch (cause) { if(signal.aborted) throw new SettlementProviderError('provider_timeout','The settlement provider timed out.'); throw new SettlementProviderError('provider_failed',cause instanceof Error?cause.message:'The settlement provider failed.'); }
-    if (!response.ok) throw new SettlementProviderError(response.status === 401 || response.status === 403 ? 'provider_unavailable' : 'provider_failed', `The settlement provider failed (${response.status}).`);
-    let result:any; try { result = await response.json(); } catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned unreadable output.'); }
-    if (result.status !== 'completed') throw new SettlementProviderError('provider_failed','The settlement provider did not complete.');
+    if (!response.ok) throw new SettlementProviderError(response.status === 401 || response.status === 403 ? 'provider_unavailable' : 'provider_failed', `The settlement provider failed (${response.status}).`, 'provider_response_http_error');
+    let result:any; try { result = await response.json(); } catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned unreadable output.','provider_response_json_invalid'); }
+    if (result?.status !== 'completed') throw new SettlementProviderError('provider_failed','The settlement provider did not complete.', result?.status === 'incomplete' ? 'provider_response_incomplete' : 'provider_response_unexpected_status');
+    const refused=hasRefusal(result);
+    const text = outputText(result);
+    if (!text.trim()) throw new SettlementProviderError('provider_malformed',refused ? 'The settlement provider refused the structured output.' : 'The settlement provider returned no structured output.',refused ? 'provider_response_refusal' : 'provider_output_missing');
+    let structured: any;
+    try { structured = JSON.parse(text); }
+    catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned malformed structured output.','provider_output_outer_json_invalid'); }
+    const schemaValid=matchesSchema(structured,schema(stage));
+    const nestedJsonKey=canonProposalStages.has(stage) ? 'eventJson'
+      : socialProposalStages.has(stage)||proceduralProposalStages.has(stage)||questTransitionProposalStages.has(stage)||stage==='proposer'||stage==='repair' ? 'proposalJson' : null;
+    let nestedPayload: unknown;
+    if (nestedJsonKey) {
+      try { nestedPayload=JSON.parse(structured?.[nestedJsonKey]); }
+      catch {
+        const hasExpectedString=plainObject(structured) && typeof structured[nestedJsonKey] === 'string';
+        throw new SettlementProviderError('provider_malformed',hasExpectedString ? 'The settlement provider returned invalid JSON inside its structured output.' : 'The settlement provider output did not match its declared schema.',hasExpectedString ? 'provider_output_inner_json_invalid' : 'provider_output_schema_invalid');
+      }
+    }
+    let value: unknown;
+    let semanticDiagnosticReason: SettlementProviderDiagnosticReason | undefined;
     try {
-      const structured = JSON.parse(outputText(result));
-      const value = canonProposalStages.has(stage)
-        ? parseFrozenCanonEventProposal(JSON.parse(structured?.eventJson), payload)
+      value = canonProposalStages.has(stage)
+        ? parseFrozenCanonEventProposal(nestedPayload, payload)
         : socialProposalStages.has(stage)
           ? (() => {
-            const parsed=parseSocialEncounterProposal(JSON.parse(structured?.proposalJson), socialContext!);
+            const parsed=parseSocialEncounterProposal(nestedPayload, socialContext!);
             return parsed.ok ? parsed.value : null;
           })()
         : proceduralProposalStages.has(stage)
           ? (() => {
-            const parsed=parseProceduralWorldProposal(JSON.parse(structured?.proposalJson), proceduralContext!);
+            const parsed=parseProceduralWorldProposal(nestedPayload, proceduralContext!);
             return parsed.ok ? parsed.value : null;
           })()
         : questTransitionProposalStages.has(stage)
           ? (() => {
-            const parsed=parseQuestTransitionProposal(JSON.parse(structured?.proposalJson), questTransitionContextValue!);
+            const parsed=parseQuestTransitionProposal(nestedPayload, questTransitionContextValue!);
+            if (!parsed.ok) semanticDiagnosticReason=questProposalDiagnosticReason(parsed.issues[0]?.code ?? '');
             return parsed.ok ? parsed.value : null;
           })()
         : socialCriticStages.has(stage)
@@ -246,14 +308,15 @@ export function createSettlementProvider(config: Record<string, string | undefin
             return stage === 'quest_transition_final_critic' && decision?.decision === 'repair' ? null : decision;
           })()
         : stage === 'proposer' || stage === 'repair'
-          ? JSON.parse(structured?.proposalJson)
+          ? nestedPayload
           : structured;
-      if (value === null) throw new SettlementProviderError('provider_malformed', 'The provider output did not match the frozen world contract.');
+    } catch {
+      throw new SettlementProviderError('provider_malformed','The settlement provider output failed world-contract validation.',schemaValid ? 'provider_output_semantic_invalid' : 'provider_output_schema_invalid');
+    }
+    if (value === null) throw new SettlementProviderError('provider_malformed', 'The provider output did not match the frozen world contract.',semanticDiagnosticReason ?? (schemaValid ? 'provider_output_semantic_invalid' : 'provider_output_schema_invalid'));
       // Durable checkpoints retain their established semantic version. The
       // immutable release/revision provenance is recorded separately in the
       // registry ledger, so old replay readers remain compatible.
-      return { value, model, usage:{input:result.usage?.input_tokens ?? 0, output:result.usage?.output_tokens ?? 0}, durationMs:Math.round(performance.now()-started), promptVersion:promptVersionForProviderStage(stage) };
-    }
-    catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned malformed structured output.'); }
+    return { value, model, usage:{input:result.usage?.input_tokens ?? 0, output:result.usage?.output_tokens ?? 0}, durationMs:Math.round(performance.now()-started), promptVersion:promptVersionForProviderStage(stage) };
   } };
 }

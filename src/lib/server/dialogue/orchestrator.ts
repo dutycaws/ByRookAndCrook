@@ -2,10 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '$lib/database.types';
 import { hasExecutableSteps, type Decision, type DialogueInput } from '$lib/game/dialogue';
 import { ProviderContextBudgetError, type DialogueProvider } from './provider';
-import { ContextBudgetError, describePayload, evidenceKey, prepareContext, requirePayloadBudget, stagePayload, utf8Bytes, type ContextWindow } from './context';
+import { ContextBudgetError, describePayload, evidenceKey, isDuplicateMemoryEvidence, prepareContext, requirePayloadBudget, stagePayload, utf8Bytes, type ContextWindow } from './context';
 import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, sha256Hex, utf8Bytes as artifactUtf8Bytes, ContextAssemblyConfigurationError, InsufficientNpcMemoryContextError, type NpcMemoryContextArtifact } from '$lib/server/npc-memory/context';
 import { getProjectionArtifact, invalidateProjectionInstance, putProjectionArtifact } from '$lib/server/npc-memory/projection-cache';
-import { matchesSchema, schemas, type Stage } from './schemas';
+import { matchesSchema, normalizeRememberOutput, rememberQuoteIssues, schemas, type RememberQuoteIssue, type Stage } from './schemas';
 import { emitAiObservability, type AiObservabilitySink } from '$lib/server/observability/ai-events';
 import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-registry/runtime';
 import type { PromptRegistryService } from '$lib/server/prompt-registry/service';
@@ -52,8 +52,11 @@ type MemoryRetrieval = {
 type FrozenDialogueArtifact = NpcMemoryContextArtifact & Readonly<{
   revision: number;
   model: string;
-  payload: Readonly<{ projections: { private: ContextWindow; public: ContextWindow }; baseProvenance: { contentVersion: string; profileRevision: number | null } }>;
+  payload: Readonly<{ projections: { private: ContextWindow; public?: ContextWindow }; baseProvenance: { contentVersion: string; profileRevision: number | null } }>;
 }>;
+const LEGACY_PROJECTION_VERSION='npc-dialogue-projections-v1';
+const PRE_ADMISSION_PROJECTION_VERSION='npc-dialogue-projections-v2';
+const CANONICAL_PROJECTION_VERSION='npc-dialogue-projections-v3';
 const FROZEN_CONTEXT_STAGE='frozen_context';
 const frozenContextRevisionStage=(revision:number)=>`${FROZEN_CONTEXT_STAGE}:${revision}`;
 
@@ -89,12 +92,27 @@ function memorySourceIds(retrieval: MemoryRetrieval): string[] {
 function frozenArtifact(value: unknown, expected?: { cutoffSequence: number; contentVersion: string }): FrozenDialogueArtifact | null {
   if (!value || typeof value!=='object') return null;
   const artifact=value as Partial<FrozenDialogueArtifact>;
+  const projections=(artifact.payload as any)?.projections;
+  const isLegacyProjection=artifact.projectionVersion===LEGACY_PROJECTION_VERSION;
+  const hasValidProjections=!!projections?.private && (isLegacyProjection ? !!projections.public : [PRE_ADMISSION_PROJECTION_VERSION,CANONICAL_PROJECTION_VERSION].includes(String(artifact.projectionVersion)) && !Object.hasOwn(projections,'public'));
   const tier=artifact.tier==='routine' ? dialogueContextTier(false) : artifact.tier==='consequential' ? dialogueContextTier(true) : null;
   const provenance=(artifact.payload as any)?.baseProvenance;
+  const admission=(artifact.payload as any)?.admission;
+  if (artifact.projectionVersion===CANONICAL_PROJECTION_VERSION) {
+    const keys=admission && typeof admission==='object' && !Array.isArray(admission) ? Object.keys(admission).sort().join(',') : '';
+    const validReason=admission?.reason==='routine' && tier?.tier==='routine' && keys==='reason,tier'
+      || admission?.reason==='semantic_consequential' && tier?.tier==='consequential' && keys==='reason,tier'
+      || admission?.reason==='complete_evidence_overflow' && tier?.tier==='consequential' && keys==='reason,routineTokens,tier'
+        && Number.isSafeInteger(admission.routineTokens) && admission.routineTokens>dialogueContextTier(false).maxTokens && admission.routineTokens<=dialogueContextTier(true).maxTokens;
+    const coverage=projections?.private?.coverage;
+    if (admission?.reason==='complete_evidence_overflow' && (coverage?.version!=='npc-context-v1' || coverage.omittedExchanges!==0 || coverage.omittedResults!==0)) return null;
+    if (admission?.reason==='complete_evidence_overflow' && (!Array.isArray(projections?.private?.context) || projections.private.context.some((item:any)=>item?.category==='memories' && (!memoryRetrieval(item.data).coverage.complete || !memoryRetrieval(item.data).coverage.sourceFallback.complete)))) return null;
+    if (!validReason || admission.tier!==tier?.tier || (artifact.payload as any).targetTokens!==tier?.maxTokens) return null;
+  } else if (admission!==undefined) return null;
   if (!Number.isSafeInteger(artifact.revision) || artifact.revision! < 0 || typeof artifact.canonicalJson!=='string'
     || typeof artifact.hash!=='string' || !Number.isSafeInteger(artifact.tokens) || !Number.isSafeInteger(artifact.utf8Bytes)
-    || artifact.tokens! < 0 || artifact.utf8Bytes! < 0 || !artifact.payload || typeof artifact.payload!=='object' || !(artifact.payload as any).projections?.private || !(artifact.payload as any).projections?.public
-    || !tier || (tier.tier==='routine' ? artifact.policyVersion!=='npc-context-routine-v1' : artifact.policyVersion!=='npc-context-consequential-v1') || artifact.projectionVersion!=='npc-dialogue-projections-v1'
+    || artifact.tokens! < 0 || artifact.utf8Bytes! < 0 || !artifact.payload || typeof artifact.payload!=='object' || !hasValidProjections
+    || !tier || (tier.tier==='routine' ? artifact.policyVersion!=='npc-context-routine-v1' : artifact.policyVersion!=='npc-context-consequential-v1')
     || typeof artifact.tokenizer!=='string' || !artifact.tokenizer || typeof artifact.counterId!=='string' || !artifact.counterId || artifact.tokenizer!==artifact.counterId
     || typeof artifact.model!=='string' || !artifact.model || !Number.isSafeInteger(artifact.counterDurationMs) || artifact.counterDurationMs! < 0
     || !Number.isSafeInteger(artifact.cutoffSequence) || artifact.cutoffSequence! < 0 || artifact.view!=='speech'
@@ -136,6 +154,13 @@ export function publicDialogueWindow(window: ContextWindow): ContextWindow {
     // Beliefs are private character interpretation, never public evidence.
     context:window.context.filter(item=>item.category!=='beliefs')
   }) as ContextWindow;
+}
+function publicWindowForArtifact(artifact: FrozenDialogueArtifact): ContextWindow {
+  // v1 hashes include the historical public projection. Preserve it exactly
+  // during replay; only v2 derives the public view from its canonical private source.
+  return artifact.projectionVersion===LEGACY_PROJECTION_VERSION
+    ? artifact.payload.projections.public!
+    : publicDialogueWindow(artifact.payload.projections.private);
 }
 export function parseInput(value:unknown): DialogueInput {
   const v=value as DialogueInput;
@@ -211,16 +236,66 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   let contextWasReplayed=false;
   let cacheHit=false;
   let frozenTelemetry: FrozenDialogueArtifact | null=null;
-  async function generate(name:string,stage:Stage,payload:unknown):Promise<any> {
-    if(checkpoints[name] && (name.startsWith('investigate') || checkpoints[name].artifactHash===frozenTelemetry?.hash)) return checkpoints[name].value;
+  async function generate(name:string,stage:Stage,payload:unknown,rememberRetry?:{previousOutput:unknown;issues:RememberQuoteIssue[]}):Promise<any> {
+    if(checkpoints[name] && (name.startsWith('investigate') || checkpoints[name].artifactHash===frozenTelemetry?.hash)) {
+      const priorCheckpoint=checkpoints[name];
+      const value=priorCheckpoint.value;
+      if(stage==='remember') {
+        const normalized=normalizeRememberOutput(value);
+        if(matchesSchema(normalized,schemas.remember)) {
+          const sourcePayload=payload as {npc?:unknown};
+          const issues=rememberQuoteIssues(normalized,{keeper:input.message,npc:typeof sourcePayload?.npc==='string'?sourcePayload.npc:''});
+          if(issues.length) {
+            if(priorCheckpoint.quoteRepairAttempted===true) {
+              throw new DialogueError('The conversation could not be saved accurately. Please rephrase and try again.',503,'STRUCTURE');
+            }
+            const marker={quoteRepairAttempted:true,quoteValidationFeedback:issues,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
+            await checkpoint(name,marker);
+            checkpoints[name]=marker;
+            return generate(name,stage,payload,{previousOutput:normalized,issues});
+          }
+          if(normalized!==value) {
+            const recorded={...priorCheckpoint,value:normalized};
+            await checkpoint(name,recorded);
+            checkpoints[name]=recorded;
+          }
+          return normalized;
+        }
+        if(priorCheckpoint.quoteRepairAttempted===true && !rememberRetry) {
+          throw new DialogueError('The conversation could not be saved accurately. Please rephrase and try again.',503,'STRUCTURE');
+        }
+        if(priorCheckpoint.quoteRepairAttempted===true && rememberRetry) {
+          // This invocation is the one durable retry reserved by the marker.
+        } else {
+        // Old checkpoints may contain a promise/correction pair that the
+        // current contract rejects. Clear it and regenerate within the usual
+        // provider-call budget; never coerce a correction into a new promise.
+          await checkpoint(name,null);
+          checkpoints[name]=null;
+        }
+      } else {
+        return value;
+      }
+    }
+    // The retry marker belongs to the durable turn, even when this checkpoint
+    // no longer matches the current frozen artifact and cannot be reused.
+    if(stage==='remember' && checkpoints[name]?.quoteRepairAttempted===true && !rememberRetry) {
+      throw new DialogueError('The conversation could not be saved accurately. Please rephrase and try again.',503,'STRUCTURE');
+    }
     if(signal.aborted || calls>=Math.min(8,options.maxCalls??8)) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
-    requirePayloadBudget(payload);
+    const retryPayload=rememberRetry ? {
+      ...(payload && typeof payload==='object' && !Array.isArray(payload) ? payload as Record<string,unknown> : {input:payload}),
+      quoteValidationFeedback:rememberRetry.issues,
+      previousRememberOutput:rememberRetry.previousOutput,
+      quoteValidationInstruction:'Correct only the listed quote fields. Each quote must be an exact contiguous substring of the matching keeper or NPC source; preserve other valid memories and omit a memory whose quote cannot be made exact.'
+    } : payload;
+    requirePayloadBudget(retryPayload);
     await checkpoint('reserve',null); calls++;
     let out: Awaited<ReturnType<DialogueProvider['generate']>>;
     const prompt = releaseTextPrompt(promptRelease, DIALOGUE_PROMPT_KEY[stage]);
     try {
       await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'started' });
-      out=await provider.generate(stage,payload,signal,prompt);
+      out=await provider.generate(stage,retryPayload,signal,prompt);
     }
     catch (cause) {
       await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_failed' }).catch(()=>{});
@@ -231,14 +306,28 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'budget'});
       throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');
     }
+    if(stage==='remember') out={...out,value:normalizeRememberOutput(out.value)};
     if(!matchesSchema(out.value,schemas[stage])) {
       await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_malformed' }).catch(()=>{});
       await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'structure'});
       throw new DialogueError('A response stage was invalid. Please retry.',503,'STRUCTURE');
     }
+    if(stage==='remember') {
+      const sourcePayload=payload as {npc?:unknown};
+      const issues=rememberQuoteIssues(out.value,{keeper:input.message,npc:typeof sourcePayload?.npc==='string'?sourcePayload.npc:''});
+      if(issues.length) {
+        await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_malformed' }).catch(()=>{});
+        await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'structure'});
+        if(rememberRetry) throw new DialogueError('The conversation could not be saved accurately. Please rephrase and try again.',503,'STRUCTURE');
+        const marker={quoteRepairAttempted:true,quoteValidationFeedback:issues,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
+        await checkpoint(name,marker);
+        checkpoints[name]=marker;
+        return generate(name,stage,payload,{previousOutput:out.value,issues});
+      }
+    }
     await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'completed',model:out.model,durationMs:out.durationMs,inputTokens:out.usage.input,outputTokens:out.usage.output }).catch(()=>{});
-      await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage,memoryContext:memoryContextMeasurements(payload,contextWasReplayed?'replayed':cacheHit?'cache_hit':'fresh',out.preflight,frozenTelemetry)});
-    const recorded={...out,inputContext:describePayload(payload),...(frozenTelemetry?{artifactRevision:frozenTelemetry.revision,artifactHash:frozenTelemetry.hash}:{})};
+      await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage,memoryContext:memoryContextMeasurements(retryPayload,contextWasReplayed?'replayed':cacheHit?'cache_hit':'fresh',out.preflight,frozenTelemetry)});
+    const recorded={...out,inputContext:describePayload(retryPayload),...(frozenTelemetry?{artifactRevision:frozenTelemetry.revision,artifactHash:frozenTelemetry.hash}:{}),...(rememberRetry?{quoteRepairAttempted:true,quoteValidationFeedback:rememberRetry.issues}:{})};
     await checkpoint(name,recorded); checkpoints[name]=recorded;
     return out.value;
   }
@@ -303,30 +392,50 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       const privateWindow=prepareContext(base,context);
       const requiredMemory=context.filter(item=>item?.category==='memories');
       if (requiredMemory.some(item=>!privateWindow.context.some(candidate=>evidenceKey(candidate)===evidenceKey(item)))) throw new ContextBudgetError();
-      const publicWindow=publicDialogueWindow(privateWindow);
       const sources=sourceManifestFor(privateWindow.context);
-      const tier=dialogueContextTier(consequential);
-      const payload={projections:{private:privateWindow,public:publicWindow},targetTokens:tier.maxTokens,
-        baseProvenance:{contentVersion:immutableContentVersion,profileRevision:Number.isSafeInteger(base.profileRevision)?base.profileRevision as number:null}};
-      const policyVersion=consequential?'npc-context-consequential-v1':'npc-context-routine-v1';
-      const projectionVersion='npc-dialogue-projections-v1';
-      const scope=provider.contextIdentity ? {actorId:actor,instanceId:String(base.instanceId),view:'speech',cutoffSequence:input.expectedConversationSequence,policyVersion,projectionVersion,tier:tier.tier,identity:provider.contextIdentity,sources,payload} : null;
-      const cached=scope ? getProjectionArtifact(scope) as FrozenDialogueArtifact | undefined : undefined;
-      if(cached) {
-        cacheHit=true;
-        const next=Object.freeze({...cached,revision}) as FrozenDialogueArtifact;
-        await checkpoint(frozenContextRevisionStage(revision),{value:next}); checkpoints[frozenContextRevisionStage(revision)]={value:next};
-        await checkpoint(FROZEN_CONTEXT_STAGE,{value:{revision:next.revision,hash:next.hash}}); checkpoints[FROZEN_CONTEXT_STAGE]={value:{revision:next.revision,hash:next.hash}}; artifact=next; frozenTelemetry=next;
-        return next;
+      // Evidence admission is independent from semantic consequence: promoting
+      // the envelope must never enable deliberation or game effects.
+      let tier=dialogueContextTier(consequential);
+      let admission: {tier:'routine'|'consequential';reason:'routine'|'semantic_consequential'|'complete_evidence_overflow';routineTokens?:number}={tier:tier.tier,reason:consequential?'semantic_consequential':'routine'};
+      const projectionVersion=CANONICAL_PROJECTION_VERSION;
+      const payloadFor=()=>({projections:{private:privateWindow},targetTokens:tier.maxTokens,admission,
+        baseProvenance:{contentVersion:immutableContentVersion,profileRevision:Number.isSafeInteger(base.profileRevision)?base.profileRevision as number:null}});
+      const scopeFor=(payload:ReturnType<typeof payloadFor>)=>provider.contextIdentity ? {actorId:actor,instanceId:String(base.instanceId),view:'speech',cutoffSequence:input.expectedConversationSequence,policyVersion:policyFor(),projectionVersion,tier:tier.tier,identity:provider.contextIdentity,sources,payload} : null;
+      const policyFor=()=>tier.tier==='consequential'?'npc-context-consequential-v1':'npc-context-routine-v1';
+      const readCache=(scope:ReturnType<typeof scopeFor>)=>scope ? frozenArtifact(getProjectionArtifact(scope),{cutoffSequence:input.expectedConversationSequence,contentVersion:immutableContentVersion}) : null;
+      let payload=payloadFor();
+      let scope=scopeFor(payload);
+      let next=readCache(scope);
+      if (next) cacheHit=true;
+      else {
+        if(!provider.countContext) throw new ProviderContextBudgetError('The dialogue provider cannot verify frozen-context tokens.');
+        const count=async()=>{
+          const canonical=canonicalNpcMemoryContextPayload({sources,requiredSourceIds:sources.map(source=>source.id),payload});
+          try {
+            const counted=await provider.countContext!(canonical,signal);
+            if (!Number.isSafeInteger(counted.inputTokens) || counted.inputTokens<0 || typeof counted.counterId!=='string' || !counted.counterId || typeof counted.model!=='string' || !counted.model
+              || !Number.isSafeInteger(counted.durationMs) || counted.durationMs<0) throw new ProviderContextBudgetError('Frozen-context counting metadata is invalid.');
+            return counted;
+          } catch (cause) { throw new ProviderContextBudgetError(cause instanceof Error ? cause.message : 'Frozen-context counting is unavailable.'); }
+        };
+        let counted=await count();
+        if (!consequential && counted.inputTokens>tier.maxTokens && counted.inputTokens<=dialogueContextTier(true).maxTokens) {
+          if (privateWindow.coverage.omittedExchanges!==0 || privateWindow.coverage.omittedResults!==0) throw new ContextBudgetError();
+          if (context.filter(item=>item?.category==='memories').some(item=>!memoryRetrieval(item.data).coverage.sourceFallback.complete)) throw new ContextBudgetError();
+          tier=dialogueContextTier(true);
+          admission={tier:tier.tier,reason:'complete_evidence_overflow',routineTokens:counted.inputTokens};
+          payload=payloadFor(); scope=scopeFor(payload);
+          next=readCache(scope);
+          if (next) cacheHit=true;
+          else counted=await count(); // The promoted canonical envelope has changed.
+        }
+        if (!next) {
+          next=assembleNpcMemoryContext({policyVersion:policyFor(),projectionVersion,maxBytes:tier.maxBytes,maxTokens:tier.maxTokens,tier:tier.tier,sources,requiredSourceIds:sources.map(source=>source.id),payload,
+            tokenCount:counted.inputTokens,tokenizerId:counted.counterId,counterId:counted.counterId,counterDurationMs:counted.durationMs,model:counted.model,cutoffSequence:input.expectedConversationSequence,view:'speech',revision}) as FrozenDialogueArtifact;
+          if(scope) putProjectionArtifact(scope,next);
+        }
       }
-      if(!provider.countContext) throw new ProviderContextBudgetError('The dialogue provider cannot verify frozen-context tokens.');
-      const canonical=canonicalNpcMemoryContextPayload({sources,requiredSourceIds:sources.map(source=>source.id),payload});
-      let counted: Awaited<ReturnType<NonNullable<DialogueProvider['countContext']>>>;
-      try { counted=await provider.countContext(canonical,signal); }
-      catch (cause) { throw new ProviderContextBudgetError(cause instanceof Error ? cause.message : 'Frozen-context counting is unavailable.'); }
-      const next=assembleNpcMemoryContext({policyVersion,projectionVersion,maxBytes:tier.maxBytes,maxTokens:tier.maxTokens,tier:tier.tier,sources,requiredSourceIds:sources.map(source=>source.id),payload,
-        tokenCount:counted.inputTokens,tokenizerId:counted.counterId,counterId:counted.counterId,counterDurationMs:counted.durationMs,model:counted.model,cutoffSequence:input.expectedConversationSequence,view:'speech',revision}) as FrozenDialogueArtifact;
-      if(scope) putProjectionArtifact(scope,next);
+      next=Object.freeze({...next,revision}) as FrozenDialogueArtifact;
       await checkpoint(frozenContextRevisionStage(revision),{value:next});
       checkpoints[frozenContextRevisionStage(revision)]={value:next};
       await checkpoint(FROZEN_CONTEXT_STAGE,{value:{revision:next.revision,hash:next.hash}});
@@ -363,14 +472,19 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
             const collect=(v:any)=>{if(!v||typeof v!=='object')return;if(typeof v.id==='string')sourceIds.push(v.id);for(const child of Object.values(v))collect(child);};
             collect(data);
           }
-          evidence.push({category:request.category,query:request.query.slice(0,request.category==='memories'?400:200),sourceIds,contentVersion:request.category==='memories'?'npc-memory-evidence-v4':immutableContentVersion,data});
+          const candidate={category:request.category,query:request.query.slice(0,request.category==='memories'?400:200),sourceIds,contentVersion:request.category==='memories'?'npc-memory-evidence-v4':immutableContentVersion,data};
+          if(!isDuplicateMemoryEvidence([...context,...evidence],candidate)) evidence.push(candidate);
         }
         const evidenceCheckpoint={value:evidence,sourceArtifact:{revision:activeArtifact.revision,hash:activeArtifact.hash}};
         await checkpoint(evidenceName,evidenceCheckpoint);
         checkpoints[evidenceName]=evidenceCheckpoint;
       }
       for(const result of evidence)fetched.add(evidenceKey(result));
-      context.push(...evidence);
+      const retainedEvidence:typeof evidence=[];
+      for(const result of evidence) {
+        if(!isDuplicateMemoryEvidence([...context,...retainedEvidence],result)) retainedEvidence.push(result);
+      }
+      context.push(...retainedEvidence);
       const causativeHash=checkpoints[evidenceName]?.sourceArtifact?.hash ?? (activeArtifact.revision===0 ? activeArtifact.hash : null);
       const shouldAdvance=(evidence.length>0 || (consequential && activeArtifact.revision===0)) && causativeHash===activeArtifact.hash;
       if (shouldAdvance) activeArtifact=await freezeContext(activeArtifact.revision+1);
@@ -388,7 +502,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
         ...(frozenTelemetry?{artifactRevision:frozenTelemetry.revision,artifactHash:frozenTelemetry.hash}:{})});
     }
     const decisionContext={decision,effectiveIntention:decision.intention??window.base.intention};
-    const speechWindow=activeArtifact.payload.projections.public;
+    const speechWindow=publicWindowForArtifact(activeArtifact);
     let speech=await generate('speak','speak',stagePayload(speechWindow,decisionContext));
     let review=await generate('review','review',stagePayload(speechWindow,{...decisionContext,reply:speech.text}));
     if(!review.ok) {

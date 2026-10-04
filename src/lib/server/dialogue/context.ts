@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalJson } from '$lib/server/npc-memory/context';
 
 /** Whole records only: truncating an exchange can reverse a promise or remove a qualification. */
 export interface RecentExchange { id: string; keeper: string; npc: string }
@@ -14,6 +15,21 @@ export interface ContextWindow {
   base: ContextBase;
   context: ContextEvidence[];
   coverage: { version: 'npc-context-v1'; omittedExchanges: number; omittedResults: number };
+}
+
+/** Memory retrieval can return the same authorized records for different search wording. */
+export function isDuplicateMemoryEvidence(existing: ContextEvidence[], candidate: ContextEvidence): boolean {
+  if (candidate.category !== 'memories') return false;
+  const identity = canonicalJson({
+    data: candidate.data,
+    sourceIds: [...new Set(candidate.sourceIds)].sort(),
+    contentVersion: candidate.contentVersion
+  });
+  return existing.some(item => item.category === 'memories' && canonicalJson({
+    data: item.data,
+    sourceIds: [...new Set(item.sourceIds)].sort(),
+    contentVersion: item.contentVersion
+  }) === identity);
 }
 /** Frozen dialogue evidence is capped by transport bytes, never UTF-16 code units. */
 export const CONTEXT_LIMIT = 64 * 1024;

@@ -209,8 +209,9 @@ describe('npc memory worker', () => {
     const exact=assembleNpcMemoryContext(input);
     expect(exact.tokens).toBe(16_000);
     expect(assembleNpcMemoryContext({...input,maxBytes:exact.utf8Bytes}).utf8Bytes).toBe(exact.utf8Bytes);
-    expect(()=>assembleNpcMemoryContext({...input,maxBytes:exact.utf8Bytes-1})).toThrow('exceeds the frozen-context budget');
-    expect(()=>assembleNpcMemoryContext({...input,tokenCount:16_001})).toThrow('exceeds the frozen-context budget');
+    expect(()=>assembleNpcMemoryContext({...input,maxBytes:exact.utf8Bytes-1})).toThrow(`Authorized NPC memory evidence exceeds the frozen-context budget. Bytes: ${exact.utf8Bytes}/${exact.utf8Bytes-1}; tokens: 16000/16000.`);
+    expect(()=>assembleNpcMemoryContext({...input,tokenCount:16_001,tier:'consequential'})).toThrow('Authorized NPC memory evidence exceeds the frozen-context budget. Bytes: ');
+    expect(()=>assembleNpcMemoryContext({...input,tokenCount:16_001,tier:'consequential'})).toThrow('tokens: 16001/16000. Tier: consequential.');
   });
   const embeddingPlan = () => { const input={version:'npc-memory-embedding-input-v1',sourceKind:'dialogue_turn',sourceId,sourceVersion:1,sourceHash,ledgerSequence:2,envelope:{message:'x'}}, profile={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',processorVersion:'embed-v3',model:'embed',dimensions:2}, inputHash=sha256Hex(canonicalJson(input)); return {jobId:id,fence,profile,source:{kind:'dialogue_turn',id:sourceId,version:1,hash:sourceHash,ledgerSequence:2,disclosureClass:'npc_known'},input,inputText:canonicalJson(input),inputHash}; };
   const embeddingIdentityHash=(plan: ReturnType<typeof embeddingPlan>)=>sha256Hex(canonicalJson({jobId:id,fence,profileId:plan.profile.id,processorVersion:plan.profile.processorVersion,model:plan.profile.model,dimensions:plan.profile.dimensions,sourceKind:'dialogue_turn',sourceId,sourceVersion:1,sourceHash,inputHash:plan.inputHash}));

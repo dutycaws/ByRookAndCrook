@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QUEST_TRANSITION_CHECKPOINT_STAGE, QUEST_TRANSITION_PROVIDER_STAGES, SETTLEMENT_PROVIDER_CALL_BUDGETS, createSettlementProvider, promptVersionForProviderStage } from '../../src/lib/server/evolving-world';
+import { QUEST_TRANSITION_PROPOSAL_CONTRACT } from '../../src/lib/server/evolving-world/quest-transition-prompt-contract';
+import { SETTLEMENT_PROMPTS } from '../../src/lib/server/evolving-world/prompts';
 import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
 import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
 
@@ -31,6 +33,12 @@ function generate(stage: Parameters<ReturnType<typeof createSettlementProvider>[
 afterEach(() => vi.unstubAllGlobals());
 
 describe('quest transition provider stages', () => {
+  it('includes the same complete inner proposal contract in proposer and repair source prompts', () => {
+    for (const stage of ['quest_transition_proposer', 'quest_transition_repair'] as const) {
+      expect(SETTLEMENT_PROMPTS[stage].endsWith(QUEST_TRANSITION_PROPOSAL_CONTRACT)).toBe(true);
+    }
+  });
+
   it('uses the closed four-stage contract, prompt mapping, and release-pinned prompt keys', () => {
     expect(QUEST_TRANSITION_PROVIDER_STAGES).toEqual(['quest_transition_proposer', 'quest_transition_critic', 'quest_transition_repair', 'quest_transition_final_critic']);
     expect(QUEST_TRANSITION_CHECKPOINT_STAGE).toEqual({ quest_transition_proposer: 'proposer', quest_transition_critic: 'critic', quest_transition_repair: 'repair', quest_transition_final_critic: 'final_critic' });
@@ -131,5 +139,34 @@ describe('quest transition provider stages', () => {
     await expect(run(low-1)).resolves.toBeTruthy();
     await expect(run(low)).resolves.toBeTruthy();
     await expect(run(low+1)).rejects.toMatchObject({code:'provider_malformed'});
+  });
+
+  it.each([
+    ['preflight HTTP', 'provider_failed', 'provider_preflight_http_error', async () => new Response('private provider error', { status: 503 }), undefined],
+    ['preflight JSON', 'provider_malformed', 'provider_preflight_json_invalid', async () => new Response('{', { status: 200 }), undefined],
+    ['input budget', 'provider_malformed', 'provider_input_budget_exceeded', async () => new Response(JSON.stringify({ input_tokens: 80_000 }), { status: 200 }), undefined],
+    ['provider HTTP', 'provider_failed', 'provider_response_http_error', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => new Response('private provider error', { status: 503 })],
+    ['incomplete response', 'provider_failed', 'provider_response_incomplete', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => new Response(JSON.stringify({ status: 'incomplete', output: [] }), { status: 200 })],
+    ['unreadable response JSON', 'provider_malformed', 'provider_response_json_invalid', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => new Response('{', { status: 200 })],
+    ['refusal without text', 'provider_malformed', 'provider_response_refusal', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'PRIVATE REFUSAL TEXT' }] }] }), { status: 200 })],
+    ['missing output', 'provider_malformed', 'provider_output_missing', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => new Response(JSON.stringify({ status: 'completed', output: [] }), { status: 200 })],
+    ['outer JSON', 'provider_malformed', 'provider_output_outer_json_invalid', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '{' }] }] }), { status: 200 })],
+    ['schema envelope', 'provider_malformed', 'provider_output_schema_invalid', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => completed({})],
+    ['inner JSON', 'provider_malformed', 'provider_output_inner_json_invalid', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => completed({ proposalJson: '{' })],
+    ['semantic proposal', 'provider_malformed', 'provider_quest_terminal_event', async () => new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 }), async () => completed({ proposalJson: JSON.stringify({ ...proposal(), terminalEventId: 'wrong-terminal' }) })]
+  ] as const)('classifies the %s provider failure without changing its public code', async (_name, code, diagnosticReason, preflight, response) => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => String(url).endsWith('/input_tokens') ? preflight() : response!()));
+    await expect(generate('quest_transition_proposer', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier() }))
+      .rejects.toMatchObject({ code, diagnosticReason });
+  });
+
+  it('preserves accepted output when a refusal block accompanies valid output text', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => String(url).endsWith('/input_tokens')
+      ? new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 })
+      : new Response(JSON.stringify({ status: 'completed', output: [
+        { type: 'message', content: [{ type: 'refusal', refusal: 'PRIVATE REFUSAL TEXT' }, { type: 'output_text', text: JSON.stringify({ proposalJson: JSON.stringify(proposal()) }) }] }
+      ] }), { status: 200 })));
+    await expect(generate('quest_transition_proposer', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier() }))
+      .resolves.toMatchObject({ value: { kind: 'successor' } });
   });
 });

@@ -130,6 +130,11 @@ export function assembleNpcMemoryContext(input: SynchronousContextAssembly | Ver
   if (!Number.isSafeInteger(tokens) || tokens < 0) throw new ContextAssemblyConfigurationError('The configured tokenizer returned an invalid count.');
   if (input.counterDurationMs !== undefined && (!Number.isSafeInteger(input.counterDurationMs) || input.counterDurationMs < 0)) throw new ContextAssemblyConfigurationError('Verified NPC memory counter duration is invalid.');
   if (missing.length) throw new InsufficientNpcMemoryContextError(`Required NPC memory evidence is unavailable: ${missing.join(', ')}.`);
-  if (bytes > input.maxBytes || tokens > input.maxTokens) throw new InsufficientNpcMemoryContextError('Authorized NPC memory evidence exceeds the frozen-context budget.');
+  if (bytes > input.maxBytes || tokens > input.maxTokens) {
+    const tier = input.tier ? ` Tier: ${input.tier}.` : '';
+    throw new InsufficientNpcMemoryContextError(
+      `Authorized NPC memory evidence exceeds the frozen-context budget. Bytes: ${bytes}/${input.maxBytes}; tokens: ${tokens}/${input.maxTokens}.${tier}`
+    );
+  }
   return freeze({ policyVersion: input.policyVersion, projectionVersion: input.projectionVersion, tokenizer: tokenizerId, ...(input.model?{model:input.model}:{}), ...(input.counterId?{counterId:input.counterId}:{}), ...(input.counterDurationMs!==undefined?{counterDurationMs:input.counterDurationMs}:{}), ...(input.cutoffSequence!=null?{cutoffSequence:input.cutoffSequence}:{}), ...(input.view?{view:input.view}:{}), ...(input.revision!==undefined?{revision:input.revision}:{}), ...(input.tier?{tier:input.tier}:{}), ...(input.overallMaxBytes!==undefined?{overallMaxBytes:input.overallMaxBytes}:{}), ...(input.overallMaxTokens!==undefined?{overallMaxTokens:input.overallMaxTokens}:{}), sourceManifest: freeze(sourceManifest), coverage: freeze({ required, included, missing, complete: true }), payload: freeze({ ...input.payload }), canonicalJson: serialized, utf8Bytes: bytes, tokens, hash: sha256Hex(serialized) });
 }

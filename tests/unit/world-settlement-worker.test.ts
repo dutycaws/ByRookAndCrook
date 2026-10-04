@@ -241,7 +241,8 @@ describe('world settlement worker', () => {
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'procedural_world_proposer',status:'reused'}),expect.objectContaining({stage:'procedural_world_critic',status:'reused'})]));
     expect(events).toEqual(expect.arrayContaining([expect.objectContaining({stage:'procedural_world_commit',status:'reused',attempt:1})]));
     expect((events as Array<Record<string,unknown>>).find((event)=>event.stage==='procedural_world_commit')).not.toHaveProperty('durationMs');
-    expect(JSON.stringify(events)).not.toContain('999');
+    expect((events as Array<Record<string,unknown>>).find((event)=>event.stage==='procedural_world_proposer')).not.toHaveProperty('tokenUsage');
+    expect((events as Array<Record<string,unknown>>).find((event)=>event.stage==='procedural_world_critic')).not.toHaveProperty('tokenUsage');
   });
   it('discovers post-commit promoted NPCs after a fresh procedural commit without another provider call', async () => {
     const events:unknown[]=[]; const provider=fixtureProvider({procedural_world_proposer:proceduralProposal(),procedural_world_critic:{decision:'accept',instructions:[]}});

@@ -33,7 +33,7 @@
       await invalidateAll();
     } else {
       frozen=body.input;message=body.input.message;intentCardId=body.input.intentCardId??'';
-      offeringSelection=body.input.offeringKind ? `${body.input.offeringKind}:${body.input.offeringItemId}` : '';
+      offeringSelection=body.input.offering ? `${body.input.offering.kind}:${body.input.offering.itemId}` : '';
       canRetry=body.canRetry??body.status!=='processing';
       notice=body.status==='processing'?'Your conversation is still being completed. Check again shortly.'
         :canRetry?'The last reply was not completed. Retry the same message or cancel it.'
