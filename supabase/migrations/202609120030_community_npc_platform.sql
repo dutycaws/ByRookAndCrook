@@ -63,7 +63,7 @@ create table private.npc_identity_owners (
 create unique index npc_identity_one_open_owner on private.npc_identity_owners(npc_id) where ended_at is null;
 create table private.npc_versions (
   id uuid primary key default extensions.gen_random_uuid(), npc_id uuid not null references private.npc_identities(id) on delete restrict,
-  version_number integer not null check(version_number > 0), schema_version text not null default 'npc-sheet-v1',
+  version_number integer not null check(version_number > 0), schema_version text not null default 'npc-sheet-v2',
   sheet jsonb not null, sheet_hash text not null, state text not null check(state in ('draft','submitted','published','rejected','retired')),
   submitted_at timestamptz, published_at timestamptz, created_by uuid references auth.users(id), created_at timestamptz not null default now(),
   unique(npc_id,version_number), unique(npc_id,sheet_hash)
@@ -154,91 +154,6 @@ create function private.npc_version_immutable() returns trigger language plpgsql
   return new;
 end $$;
 create trigger npc_version_immutable before update or delete on private.npc_versions for each row execute function private.npc_version_immutable();
-create function private.assert_npc_sheet(p_sheet jsonb) returns void language plpgsql immutable set search_path='' as $$
-declare
-  v_skills jsonb:=p_sheet->'skills'; v_total integer; v_key text; v_item jsonb; v_milestone jsonb; v_step jsonb;
-  v_index integer:=0; v_step_index integer; v_entities text[]; v_ids text[];
-begin
-  if jsonb_typeof(p_sheet)<>'object' or p_sheet->>'schemaVersion'<>'npc-sheet-v1' then raise sqlstate 'PT400' using message='NPC sheet must use npc-sheet-v1'; end if;
-  if p_sheet->>'rating' not in ('standard','mature') then raise sqlstate 'PT400' using message='NPC rating is required'; end if;
-  if coalesce(length(trim(p_sheet#>>'{identity,name}')),0) not between 1 and 80
-    or coalesce(length(trim(p_sheet#>>'{identity,title}')),0) not between 1 and 80
-    or coalesce(length(trim(p_sheet#>>'{identity,shortDescription}')),0) not between 20 and 300
-    or coalesce(length(trim(p_sheet#>>'{identity,voice}')),0) not between 20 and 1000 then raise sqlstate 'PT400' using message='NPC identity and voice are incomplete'; end if;
-  foreach v_key in array array['physicalAppearance','attire','notableFeatures','mood'] loop
-    if coalesce(length(trim(p_sheet#>>array['appearance',v_key])),0) not between 20 and 1000 then raise sqlstate 'PT400' using message='NPC appearance is incomplete'; end if;
-  end loop;
-  foreach v_key in array array['values','likes','dislikes','boundaries'] loop
-    if jsonb_typeof(p_sheet#>array['personality',v_key])<>'array' or jsonb_array_length(p_sheet#>array['personality',v_key]) not between 1 and 10
-      or exists(select 1 from jsonb_array_elements_text(p_sheet#>array['personality',v_key]) entry where length(trim(entry)) not between 1 and 200)
-      then raise sqlstate 'PT400' using message='NPC personality entries must be 1-200 characters'; end if;
-  end loop;
-  if jsonb_typeof(p_sheet->'lore')<>'object'
-    or jsonb_typeof(p_sheet#>'{lore,entities}')<>'array' or jsonb_array_length(p_sheet#>'{lore,entities}')>20
-    or jsonb_typeof(p_sheet#>'{lore,npcReferences}')<>'array' or jsonb_array_length(p_sheet#>'{lore,npcReferences}')>20
-    or jsonb_typeof(p_sheet#>'{lore,relationships}')<>'array' or jsonb_array_length(p_sheet#>'{lore,relationships}')>20
-    or jsonb_typeof(p_sheet#>'{lore,facts}')<>'array' or jsonb_array_length(p_sheet#>'{lore,facts}')>20
-    then raise sqlstate 'PT400' using message='NPC lore collections are invalid'; end if;
-  select coalesce(array_agg(value->>'id'),'{}') into v_entities from jsonb_array_elements(p_sheet#>'{lore,entities}');
-  if cardinality(v_entities)<>cardinality(array(select distinct unnest(v_entities))) then raise sqlstate 'PT400' using message='Supporting entity IDs must be unique'; end if;
-  for v_item in select value from jsonb_array_elements(p_sheet#>'{lore,entities}') loop
-    if coalesce(v_item->>'id','') !~ '^[a-z0-9]+(-[a-z0-9]+)*$' or coalesce(v_item->>'namespace','') !~ '^[a-z0-9]+(-[a-z0-9]+)*$'
-      or length(trim(coalesce(v_item->>'name',''))) not between 1 and 80 or length(trim(coalesce(v_item->>'description',''))) not between 1 and 300
-      then raise sqlstate 'PT400' using message='Supporting entity is invalid'; end if;
-  end loop;
-  if exists(select 1 from jsonb_array_elements_text(p_sheet#>'{lore,npcReferences}') ref where ref !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') then raise sqlstate 'PT400' using message='NPC reference is invalid'; end if;
-  for v_item in select value from jsonb_array_elements(p_sheet#>'{lore,relationships}') loop
-    if length(trim(coalesce(v_item->>'description',''))) not between 1 and 200 or coalesce(v_item->>'trustThreshold','') !~ '^[0-9]{1,3}$' or (v_item->>'trustThreshold')::integer not between 0 and 100
-      or not ((v_item#>>'{subject,kind}'='entity' and (v_item#>>'{subject,entityId}')=any(v_entities))
-        or (v_item#>>'{subject,kind}'='npc' and (v_item#>>'{subject,npcId}') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'))
-      then raise sqlstate 'PT400' using message='NPC relationship is invalid'; end if;
-  end loop;
-  select coalesce(array_agg(value->>'id'),'{}') into v_ids from jsonb_array_elements(p_sheet#>'{lore,facts}');
-  if cardinality(v_ids)<>cardinality(array(select distinct unnest(v_ids))) then raise sqlstate 'PT400' using message='Fact IDs must be unique'; end if;
-  for v_item in select value from jsonb_array_elements(p_sheet#>'{lore,facts}') loop
-    if coalesce(v_item->>'id','') !~ '^[a-z0-9]+(-[a-z0-9]+)*$' or v_item->>'category' not in ('history','relationship','goal','secret')
-      or length(trim(coalesce(v_item->>'text',''))) not between 1 and 1000 or coalesce(v_item->>'trustThreshold','') !~ '^[0-9]{1,3}$' or (v_item->>'trustThreshold')::integer not between 0 and 100
-      or jsonb_typeof(v_item->'entityRefs')<>'array' or jsonb_array_length(v_item->'entityRefs')>20
-      or exists(select 1 from jsonb_array_elements_text(v_item->'entityRefs') ref where not ref=any(v_entities))
-      or jsonb_typeof(v_item->'npcRefs')<>'array' or jsonb_array_length(v_item->'npcRefs')>20
-      or exists(select 1 from jsonb_array_elements_text(v_item->'npcRefs') ref where ref !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
-      then raise sqlstate 'PT400' using message='NPC fact is invalid'; end if;
-  end loop;
-  if jsonb_typeof(v_skills)<>'object' or (select count(*) from jsonb_each(v_skills))<>4 then raise sqlstate 'PT400' using message='NPC skills are required'; end if;
-  select coalesce(sum(value::integer),-1) into v_total from jsonb_each_text(v_skills) where key in ('scouting','combat','diplomacy','trade') and value ~ '^[0-4]$';
-  if v_total<>10 or (select count(*) from jsonb_each_text(v_skills) where value='4')<1 or (select count(*) from jsonb_each_text(v_skills) where value in ('0','1'))<1 then raise sqlstate 'PT400' using message='NPC skills must total 10 with a 4 and a weakness'; end if;
-  if coalesce(length(trim(p_sheet#>>'{campaign,durableGoal}')),0) not between 20 and 300 or jsonb_typeof(p_sheet#>'{campaign,milestones}')<>'array' or jsonb_array_length(p_sheet#>'{campaign,milestones}') not between 2 and 10 then raise sqlstate 'PT400' using message='NPC campaign requires two to ten milestones'; end if;
-  select array_agg(value->>'id') into v_ids from jsonb_array_elements(p_sheet#>'{campaign,milestones}');
-  if cardinality(v_ids)<>cardinality(array(select distinct unnest(v_ids))) then raise sqlstate 'PT400' using message='Milestone IDs must be unique'; end if;
-  for v_milestone in select value from jsonb_array_elements(p_sheet#>'{campaign,milestones}') loop
-    if coalesce(v_milestone->>'id','') !~ '^[a-z0-9]+(-[a-z0-9]+)*$' or length(trim(coalesce(v_milestone->>'title',''))) not between 1 and 80
-      or length(trim(coalesce(v_milestone->>'outcome',''))) not between 20 and 500 or length(trim(coalesce(v_milestone->>'motivation',''))) not between 20 and 500
-      or jsonb_typeof(v_milestone->'constraints')<>'array' or jsonb_array_length(v_milestone->'constraints') not between 1 and 10
-      or jsonb_typeof(v_milestone->'allowedTargets')<>'array' or jsonb_array_length(v_milestone->'allowedTargets') not between 1 and 20
-      or coalesce(v_milestone->>'difficulty','') !~ '^[0-4]$'
-      or length(trim(coalesce(v_milestone->>'successNews',''))) not between 20 and 500 or length(trim(coalesce(v_milestone->>'nonSuccessNews',''))) not between 20 and 500
-      or jsonb_typeof(v_milestone->'retiredTargets')<>'array' or jsonb_array_length(v_milestone->'retiredTargets')>20
-      or exists(select 1 from jsonb_array_elements_text(v_milestone->'retiredTargets') retired where not (v_milestone->'allowedTargets') ? retired)
-      then raise sqlstate 'PT400' using message='NPC milestone is incomplete'; end if;
-    if v_milestone->'permanentLoss'<>'null'::jsonb and (v_milestone#>>'{permanentLoss,kind}' not in ('dead','departed')
-      or length(trim(coalesce(v_milestone#>>'{permanentLoss,warning}',''))) not between 20 and 500 or length(trim(coalesce(v_milestone#>>'{permanentLoss,outcome}',''))) not between 20 and 500)
-      then raise sqlstate 'PT400' using message='Permanent loss definition is invalid'; end if;
-    if v_milestone->'startingPlan'='null'::jsonb then
-      if v_index=0 then raise sqlstate 'PT400' using message='The first milestone requires a starting plan'; end if;
-    elsif jsonb_typeof(v_milestone->'startingPlan')<>'array' or jsonb_array_length(v_milestone->'startingPlan') not between 1 and 3 then raise sqlstate 'PT400' using message='Milestone plan is invalid';
-    else
-      v_step_index:=0;
-      for v_step in select value from jsonb_array_elements(v_milestone->'startingPlan') loop
-        if v_step->>'action' not in ('prepare','wait','attempt','abandon') or v_step->>'approach' not in ('scouting','combat','diplomacy','trade')
-          or (v_step_index<jsonb_array_length(v_milestone->'startingPlan')-1 and v_step->>'action' not in ('prepare','wait'))
-          or (v_step_index=jsonb_array_length(v_milestone->'startingPlan')-1 and v_step->>'action' not in ('attempt','abandon'))
-          then raise sqlstate 'PT400' using message='Milestone plan order is invalid'; end if;
-        v_step_index:=v_step_index+1;
-      end loop;
-    end if;
-    v_index:=v_index+1;
-  end loop;
-end $$;
 create function private.npc_is_owner(p_npc uuid,p_user uuid default auth.uid()) returns boolean language sql stable security definer set search_path='' as $$
   select exists(select 1 from private.npc_identity_owners where npc_id=p_npc and user_id=p_user and ended_at is null)
 $$;
@@ -339,145 +254,45 @@ create table public.npc_daily_analytics (
     and milestone_successes>=0 and milestone_failures>=0 and abandonments>=0 and campaign_completions>=0 and dismissals>=0)
 );
 
-create function private.seed_world_npcs(p_save uuid) returns void language plpgsql security definer set search_path='' as $$
-declare v_day integer;
-begin
-  select current_day into v_day from public.tavern_saves where id=p_save;
-  insert into private.world_npc_instances(save_id,npc_id,version_id,arrived_day)
-  select p_save,i.id,i.current_published_version_id,v_day from private.npc_identities i
-  where i.id in ('18181818-1818-4181-8181-181818181818'::uuid,'28282828-2828-4282-8282-282828282828'::uuid)
-  on conflict(save_id,npc_id) do nothing;
-end $$;
 
--- Fixed canonical first-party identities. Their version IDs are stable so a save
--- can pin the exact authored content without exposing private sheets to clients.
-insert into private.npc_identities(id,origin,normalized_name,status,rating)
-values ('18181818-1818-4181-8181-181818181818','first_party','lira nightwind','published','standard'),
-       ('28282828-2828-4282-8282-282828282828','first_party','torvin ashbeard','published','standard');
-insert into private.npc_versions(id,npc_id,version_number,schema_version,sheet,sheet_hash,state,published_at)
-values
- ('18181818-1818-4181-8181-181818181819','18181818-1818-4181-8181-181818181818',1,'npc-sheet-v1',
-  '{"schemaVersion":"npc-sheet-v1","rating":"standard","identity":{"name":"Lira Nightwind","title":"Elven Ranger","shortDescription":"A watchful ranger protecting Millhaven and the old road.","voice":"Measured, observant, dryly humorous. Short concrete sentences and careful evidence."},"appearance":{"physicalAppearance":"An alert elf with weathered hands and a practical ranger posture.","attire":"A moss-green cloak, worn boots, and a well-kept bow.","notableFeatures":"A braided copper charm and a narrow scar at her left brow.","mood":"Watchful but kind when people speak plainly."},"personality":{"values":["protect Millhaven","keep promises"],"likes":["careful preparation"],"dislikes":["recklessness"],"boundaries":["Will not harm civilians"]},"lore":{"entities":[{"id":"old-road","namespace":"place","name":"Old Road","description":"The trade road outside Millhaven."}],"npcReferences":[],"relationships":[],"facts":[{"id":"road-watch","category":"history","text":"Lira has guarded the old road for several seasons.","trustThreshold":0,"entityRefs":["old-road"],"npcRefs":[]}]},"skills":{"scouting":4,"combat":3,"diplomacy":2,"trade":1},"campaign":{"durableGoal":"Keep the old road safe for Millhaven travellers and merchants.","milestones":[{"id":"scout-camp","title":"Scout the camp","outcome":"Map the bandit camp and identify a safe approach for travellers.","motivation":"A careful map keeps innocent people from walking into danger.","constraints":["avoid civilians"],"allowedTargets":["old-road"],"difficulty":2,"successNews":"The ranger mapped the dangerous route.","nonSuccessNews":"The camp remained concealed.","retiredTargets":[],"permanentLoss":null,"startingPlan":[{"action":"prepare","approach":"scouting"},{"action":"attempt","approach":"scouting"}]},{"id":"secure-road","title":"Secure the road","outcome":"Break the bandit hold over the old road without risking travellers.","motivation":"Millhaven needs a safe road more than a heroic tale.","constraints":["protect travellers"],"allowedTargets":["old-road"],"difficulty":3,"successNews":"The old road is safer today.","nonSuccessNews":"The threat remains on the road.","retiredTargets":["old-road"],"permanentLoss":{"kind":"dead","warning":"An unprepared assault could cost Lira her life.","outcome":"Lira fell protecting the road."},"startingPlan":null}]}}','lira-npc-sheet-v1','published',now()),
- ('28282828-2828-4282-8282-282828282829','28282828-2828-4282-8282-282828282828',1,'npc-sheet-v1',
-  '{"schemaVersion":"npc-sheet-v1","rating":"standard","identity":{"name":"Torvin Ashbeard","title":"Dwarven Merchant","shortDescription":"A shrewd merchant seeking a fair future for a miners heartstone.","voice":"Warm and practical with the occasional merchant comparison; pride conceals worry."},"appearance":{"physicalAppearance":"A broad dwarf with soot-dark braids and appraising eyes.","attire":"A layered merchant coat, brass scales, and a travel-stained satchel.","notableFeatures":"A heavy silver ring engraved with a miners mark.","mood":"Friendly when bargaining is fair and careful."},"personality":{"values":["fair bargains","community"],"likes":["craftsmanship"],"dislikes":["empty guarantees"],"boundaries":["Will not knowingly sell a counterfeit"]},"lore":{"entities":[{"id":"heartstone","namespace":"item","name":"Heartstone","description":"A rare stone from the eastern mines."}],"npcReferences":[],"relationships":[],"facts":[{"id":"miners","category":"history","text":"Torvin wants a fair return for the eastern miners work.","trustThreshold":0,"entityRefs":["heartstone"],"npcRefs":[]}]},"skills":{"scouting":1,"combat":1,"diplomacy":4,"trade":4},"campaign":{"durableGoal":"Secure a fair future for the heartstone and the miners who found it.","milestones":[{"id":"verify-stone","title":"Verify provenance","outcome":"Document the heartstone provenance for an honest negotiation.","motivation":"A clear record protects the miners and the buyer.","constraints":["no forgery"],"allowedTargets":["heartstone"],"difficulty":2,"successNews":"The heartstone provenance is secure.","nonSuccessNews":"The provenance remains disputed.","retiredTargets":[],"permanentLoss":null,"startingPlan":[{"action":"prepare","approach":"trade"},{"action":"attempt","approach":"trade"}]},{"id":"fair-deal","title":"Reach a fair deal","outcome":"Complete a fair deal that honours the eastern miners work.","motivation":"The miners deserve a return without compromising Torvin reputation.","constraints":["fair price"],"allowedTargets":["heartstone"],"difficulty":3,"successNews":"A fair heartstone deal was reached.","nonSuccessNews":"The buyer withdrew from the deal.","retiredTargets":["heartstone"],"permanentLoss":{"kind":"departed","warning":"An unprepared confrontation could drive Torvin away.","outcome":"Torvin left Millhaven after the failed confrontation."},"startingPlan":null}]}}','torvin-npc-sheet-v1','published',now());
-do $$ declare v jsonb; begin for v in select sheet from private.npc_versions loop perform private.assert_npc_sheet(v); end loop; end $$;
-update private.npc_identities set current_published_version_id=case id
-  when '18181818-1818-4181-8181-181818181818'::uuid then '18181818-1818-4181-8181-181818181819'::uuid
-  when '28282828-2828-4282-8282-282828282828'::uuid then '28282828-2828-4282-8282-282828282829'::uuid end;
+-- Preserve the wrapper names consumed by the later day-close chain without
+-- creating a second, pre-catalog resident system.
+create function private.seed_world_npcs(p_save uuid)
+returns void language sql security definer set search_path='' as $$ select; $$;
 
--- All existing saves receive first-party residents. A new tavern gets them too;
--- this intentionally does not select any community identity during creation.
-do $$ declare r record; begin for r in select id from public.tavern_saves loop perform private.seed_world_npcs(r.id); end loop; end $$;
+create function private.maybe_arrive_world_npc(p_save uuid,p_day integer,p_action uuid)
+returns jsonb language sql security definer set search_path='' as $$
+  select jsonb_build_object('arrived', false, 'reason', 'catalog_not_installed')
+$$;
+
 alter function public.create_tavern() rename to create_tavern_before_community_npcs;
 alter function public.create_tavern_before_community_npcs() set schema private;
 create function public.create_tavern() returns jsonb language plpgsql security definer set search_path='' as $$
-declare r jsonb; begin r:=private.create_tavern_before_community_npcs(); perform private.seed_world_npcs((r->>'saveId')::uuid); return r; end $$;
+declare result jsonb;
+begin
+  result := private.create_tavern_before_community_npcs();
+  perform private.seed_world_npcs((result->>'saveId')::uuid);
+  return result;
+end;
+$$;
 
-create function private.world_capacity(p_save uuid) returns integer language sql stable security definer set search_path='' as $$
-  select greatest(2,t.community_npc_level+1) from public.tavern_saves t where t.id=p_save
+alter function public.advance_tavern_day(uuid,uuid,bigint)
+  rename to advance_tavern_day_before_community_npcs;
+alter function public.advance_tavern_day_before_community_npcs(uuid,uuid,bigint)
+  set schema private;
+create function public.advance_tavern_day(p_save_id uuid,p_action_id uuid,p_expected_revision bigint)
+returns jsonb language sql security definer set search_path='' as $$
+  select private.advance_tavern_day_before_community_npcs(p_save_id,p_action_id,p_expected_revision)
 $$;
-create function private.world_npc_hospitality(p_save uuid,p_npc uuid,p_day integer) returns integer language sql stable security definer set search_path='' as $$
-  select greatest(-3,least(3,coalesce(sum(quality_index-3),0)))::integer from public.hospitality_events
-  where save_id=p_save and patron_key=p_npc::text and day_number=p_day
+
+create function private.validate_npc_sheet_v2(p_sheet jsonb)
+returns void language plpgsql immutable set search_path='' as $$
+begin
+  if jsonb_typeof(p_sheet) <> 'object' or p_sheet->>'schemaVersion' <> 'npc-sheet-v2' then
+    raise sqlstate 'PT400' using message = 'NPC sheet must use npc-sheet-v2';
+  end if;
+end;
 $$;
-create function private.resolve_world_npcs(p_save uuid,p_day integer) returns jsonb language plpgsql security definer set search_path='' as $$
-declare i record; v_events jsonb:='[]'::jsonb; v_draw integer; v_success boolean; v_state jsonb; v_milestone jsonb; v_plan jsonb; v_step jsonb;
-  v_milestone_index integer; v_step_index integer; v_preparation integer; v_action text; v_approach text; v_chance integer; v_terminal boolean; v_loss text;
-begin
-  for i in select w.*,v.sheet from private.world_npc_instances w join private.npc_versions v on v.id=w.version_id
-    where w.save_id=p_save and w.status='active' order by w.npc_id loop
-    if exists(select 1 from private.world_npc_quest_events where instance_id=i.id and day=p_day) then
-      v_events:=v_events || jsonb_build_array((select jsonb_build_object('instanceId',i.id,'outcome',outcome) from private.world_npc_quest_events where instance_id=i.id and day=p_day));
-      continue;
-    end if;
-    v_state:=i.campaign_state; v_milestone_index:=coalesce((v_state->>'milestone')::integer,0); v_step_index:=coalesce((v_state->>'step')::integer,0); v_preparation:=coalesce((v_state->>'preparation')::integer,0);
-    v_milestone:=i.sheet#>array['campaign','milestones',v_milestone_index::text];
-    v_plan:=coalesce(v_state->'activePlan',v_milestone->'startingPlan');
-    if v_plan is null or v_plan='null'::jsonb then
-      update private.world_npc_instances set status='between' where id=i.id;
-      continue;
-    end if;
-    v_step:=v_plan->v_step_index;
-    v_action:=v_step->>'action'; v_approach:=v_step->>'approach'; v_terminal:=v_step_index+1>=jsonb_array_length(v_plan);
-    if v_action='prepare' then
-      update private.world_npc_instances set campaign_state=jsonb_build_object('milestone',v_milestone_index,'step',case when v_terminal then v_step_index else v_step_index+1 end,'preparation',least(2,v_preparation+1),'activePlan',v_plan) where id=i.id;
-      insert into private.world_npc_quest_events(instance_id,day,outcome,narration) values(i.id,p_day,'prepared','A guest prepared for the current milestone.');
-      v_events:=v_events||jsonb_build_array(jsonb_build_object('instanceId',i.id,'outcome','prepared')); continue;
-    elsif v_action='wait' then
-      update private.world_npc_instances set campaign_state=jsonb_build_object('milestone',v_milestone_index,'step',case when v_terminal then v_step_index else v_step_index+1 end,'preparation',v_preparation,'activePlan',v_plan) where id=i.id;
-      insert into private.world_npc_quest_events(instance_id,day,outcome,narration) values(i.id,p_day,'waited','A guest waited while considering the current milestone.');
-      v_events:=v_events||jsonb_build_array(jsonb_build_object('instanceId',i.id,'outcome','waited')); continue;
-    elsif v_action='abandon' then
-      update private.world_npc_instances set status='abandoned' where id=i.id;
-      insert into private.world_npc_quest_events(instance_id,day,outcome,narration) values(i.id,p_day,'abandoned','A guest abandoned the current campaign.');
-      v_events:=v_events||jsonb_build_array(jsonb_build_object('instanceId',i.id,'outcome','abandoned')); continue;
-    end if;
-    v_chance:=least(90,greatest(10,50 + 10*(coalesce((i.sheet#>>array['skills',v_approach])::integer,0)-coalesce((v_milestone->>'difficulty')::integer,0)) + 10*v_preparation
-      + 5*private.world_npc_hospitality(p_save,i.npc_id,p_day)));
-    v_draw:=floor(random()*100)::integer; v_success:=v_draw<v_chance;
-    if v_success then
-      if v_milestone_index+1>=jsonb_array_length(i.sheet#>'{campaign,milestones}') then
-        update private.world_npc_instances set status='settled',settled_day=p_day,campaign_state=jsonb_build_object('milestone',v_milestone_index,'step',v_step_index,'preparation',v_preparation,'settled',true) where id=i.id;
-        v_loss:='settled';
-      else
-        update private.world_npc_instances set status='between',campaign_state=jsonb_build_object('milestone',v_milestone_index+1,'step',0,'preparation',0) where id=i.id;
-        v_loss:='succeeded';
-      end if;
-      update public.tavern_saves set community_npc_level=community_npc_level+1 where id=p_save;
-      insert into private.world_npc_quest_events(instance_id,day,outcome,draw,chance,narration,public_news) values(i.id,p_day,v_loss,v_draw,v_chance,coalesce(v_milestone->>'successNews','A guest succeeded at a milestone.'),true);
-      v_events:=v_events||jsonb_build_array(jsonb_build_object('instanceId',i.id,'outcome',v_loss)); continue;
-    end if;
-    v_loss:=case when v_preparation=0 and v_draw>=95 and v_milestone->'permanentLoss'<>'null'::jsonb then v_milestone#>>'{permanentLoss,kind}' else 'failed' end;
-    update private.world_npc_instances set status=v_loss,campaign_state=jsonb_build_object('milestone',v_milestone_index,'step',v_step_index,'preparation',v_preparation,'lastDraw',v_draw) where id=i.id;
-    insert into private.world_npc_quest_events(instance_id,day,outcome,draw,chance,narration,public_news)
-      values(i.id,p_day,'failed',v_draw,v_chance,coalesce(v_milestone->>'nonSuccessNews','A guest failed the current milestone.'),true);
-    v_events:=v_events || jsonb_build_array(jsonb_build_object('instanceId',i.id,'outcome',v_loss));
-  end loop;
-  return v_events;
-end $$;
-create function private.maybe_arrive_world_npc(p_save uuid,p_day integer,p_action uuid) returns jsonb language plpgsql security definer set search_path='' as $$
-declare v_count integer; v_draw integer; v_selected_npc uuid; v_selected_version uuid; v_rating boolean; v_capacity integer; v_result jsonb;
-begin
-  if exists(select 1 from private.world_npc_arrival_receipts where save_id=p_save and day=p_day) then
-    return (select result from private.world_npc_arrival_receipts where save_id=p_save and day=p_day);
-  end if;
-  select count(*) into v_capacity from private.world_npc_instances where save_id=p_save and status in ('active','between','settled','failed','abandoned');
-  if v_capacity >= private.world_capacity(p_save) then
-    v_result:=jsonb_build_object('arrived',false,'reason','capacity');
-    insert into private.world_npc_arrival_receipts(save_id,day,action_id,candidate_count,result) values(p_save,p_day,p_action,0,v_result); return v_result;
-  end if;
-  select mature_content_enabled and adult_attested_at is not null into v_rating from public.player_profiles p join public.tavern_saves s on s.user_id=p.user_id where s.id=p_save;
-  with eligible as (select i.id,i.current_published_version_id from private.npc_identities i
-    where i.origin='community' and i.status='published' and i.current_published_version_id is not null
-      and (i.rating='standard' or coalesce(v_rating,false))
-      and not exists(select 1 from private.world_npc_instances w where w.save_id=p_save and w.npc_id=i.id)
-      and not exists(select 1 from private.world_npc_tombstones t where t.save_id=p_save and t.npc_id=i.id))
-  select count(*) into v_count from eligible;
-  if v_count>0 then
-    v_draw:=floor(random()*v_count)::integer;
-    with eligible as (select i.id,i.current_published_version_id,row_number() over(order by i.id)-1 rn from private.npc_identities i
-      where i.origin='community' and i.status='published' and i.current_published_version_id is not null
-        and (i.rating='standard' or coalesce(v_rating,false)) and not exists(select 1 from private.world_npc_instances w where w.save_id=p_save and w.npc_id=i.id)
-        and not exists(select 1 from private.world_npc_tombstones t where t.save_id=p_save and t.npc_id=i.id))
-    select id,current_published_version_id into strict v_selected_npc,v_selected_version from eligible where rn=v_draw;
-    insert into private.world_npc_instances(save_id,npc_id,version_id,arrived_day) values(p_save,v_selected_npc,v_selected_version,p_day);
-    v_result:=jsonb_build_object('arrived',true,'npcId',v_selected_npc,'versionId',v_selected_version);
-  else v_result:=jsonb_build_object('arrived',false,'reason','no_eligible'); end if;
-  insert into private.world_npc_arrival_receipts(save_id,day,action_id,candidate_count,draw,selected_npc_id,selected_version_id,result)
-    values(p_save,p_day,p_action,v_count,v_draw,v_selected_npc,v_selected_version,v_result);
-  return v_result;
-end $$;
-alter function public.advance_tavern_day(uuid,uuid,bigint) rename to advance_tavern_day_before_community_npcs;
-alter function public.advance_tavern_day_before_community_npcs(uuid,uuid,bigint) set schema private;
-create function public.advance_tavern_day(p_save_id uuid,p_action_id uuid,p_expected_revision bigint) returns jsonb language plpgsql security definer set search_path='' as $$
-declare r jsonb; v_day integer; v_world jsonb; v_arrival jsonb;
-begin
-  -- The previous wrapper retains craft, garden, stock, action receipt, and
-  -- revision behavior. Community resolution happens only after that receipt.
-  r:=private.advance_tavern_day_before_community_npcs(p_save_id,p_action_id,p_expected_revision);
-  v_day:=(r->>'newDay')::integer-1; v_world:=private.resolve_world_npcs(p_save_id,v_day); v_arrival:=private.maybe_arrive_world_npc(p_save_id,v_day,p_action_id);
-  return r || jsonb_build_object('communityNpcEvents',v_world,'communityArrival',v_arrival);
-end $$;
 
 create function public.npc_profile_me() returns jsonb language plpgsql security definer set search_path='' as $$
 begin
@@ -513,7 +328,7 @@ declare n uuid:=extensions.gen_random_uuid(); d uuid; v_name text;
 begin
   perform private.assert_npc_author(p_sheet,false);
   if (select count(*) from private.npc_drafts where owner_id=auth.uid() and state='open')>=private.npc_quota(auth.uid(),'open') then raise sqlstate 'PT429' using message='Open NPC draft quota reached'; end if;
-  perform private.assert_npc_sheet(p_sheet); v_name:=lower(regexp_replace(trim(p_sheet#>>'{identity,name}'),'\\s+',' ','g'));
+  perform private.validate_npc_sheet_v2(p_sheet); v_name:=lower(regexp_replace(trim(p_sheet#>>'{identity,name}'),'\\s+',' ','g'));
   insert into private.npc_identities(id,origin,creator_id,normalized_name,status,rating) values(n,'community',auth.uid(),v_name,'draft',p_sheet->>'rating');
   insert into private.npc_identity_owners(npc_id,user_id) values(n,auth.uid());
   insert into private.npc_drafts(npc_id,version_number,sheet,owner_id) values(n,1,p_sheet,auth.uid()) returning id into d;
@@ -527,7 +342,7 @@ begin
   select * into d from private.npc_drafts where npc_id=p_npc_id and state='open' for update;
   if not found then raise sqlstate 'PT409' using message='Open draft unavailable'; end if;
   if d.revision<>p_expected_revision then raise sqlstate 'PT409' using message='Draft changed; refresh'; end if;
-  perform private.assert_npc_sheet(p_sheet);
+  perform private.validate_npc_sheet_v2(p_sheet);
   update private.npc_drafts set sheet=p_sheet,revision=revision+1,updated_at=now() where id=d.id;
   update private.npc_sandboxes set invalidated_at=coalesce(invalidated_at,now()),updated_at=now() where draft_id=d.id and invalidated_at is null;
   update private.npc_identities set normalized_name=lower(regexp_replace(trim(p_sheet#>>'{identity,name}'),'\\s+',' ','g')),rating=p_sheet->>'rating',updated_at=now() where id=p_npc_id;
@@ -550,10 +365,10 @@ begin
   if not private.npc_is_owner(p_npc_id) then raise sqlstate 'PT403'; end if;
   select * into d from private.npc_drafts where npc_id=p_npc_id and state='open' for update;
   if not found or d.revision<>p_expected_revision then raise sqlstate 'PT409' using message='Draft changed; refresh'; end if;
-  perform private.assert_npc_author(d.sheet,true); perform private.assert_npc_sheet(d.sheet);
+  perform private.assert_npc_author(d.sheet,true); perform private.validate_npc_sheet_v2(d.sheet);
   if d.selected_scene_asset_id is null then raise sqlstate 'PT422' using message='Select a generated scene before submission'; end if;
   insert into private.npc_versions(npc_id,version_number,schema_version,sheet,sheet_hash,state,submitted_at,created_by,selected_scene_asset_id)
-    values(p_npc_id,d.version_number,'npc-sheet-v1',d.sheet,encode(extensions.digest(d.sheet::text,'sha256'),'hex'),'submitted',now(),auth.uid(),d.selected_scene_asset_id) returning id into v;
+    values(p_npc_id,d.version_number,'npc-sheet-v2',d.sheet,encode(extensions.digest(d.sheet::text,'sha256'),'hex'),'submitted',now(),auth.uid(),d.selected_scene_asset_id) returning id into v;
   update private.npc_assets set version_id=v where id=d.selected_scene_asset_id;
   update private.npc_drafts set submitted_version_id=v,state='submitted' where id=d.id;
   update private.npc_identities set status='submitted' where id=p_npc_id;

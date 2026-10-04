@@ -1,0 +1,16 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(5);
+select has_function('public','npc_memory_active_embedding_profile',array[]::text[],'active profile RPC exists');
+set local role authenticated; set local request.jwt.claim.role='authenticated';
+select throws_ok('select public.npc_memory_active_embedding_profile()','42501',null,'authenticated callers are denied');
+reset role; set local role service_role; set local request.jwt.claim.role='service_role';
+select is(public.npc_memory_active_embedding_profile(),'{"semanticAvailable":false,"profile":null}'::jsonb,'no active profile has exact unavailable envelope');
+reset role;
+insert into private.world_npc_memory_embedding_profiles(id,processor_version,model,dimensions) values('20300000-0000-4000-8000-000000000001','active-profile-v1','active-model',3);
+set local role service_role; set local request.jwt.claim.role='service_role';
+select public.world_npc_memory_embedding_profile_activate('20300000-0000-4000-8000-000000000001');
+select is(public.npc_memory_active_embedding_profile(),'{"semanticAvailable":true,"profile":{"id":"20300000-0000-4000-8000-000000000001","processorVersion":"active-profile-v1","model":"active-model","dimensions":3}}'::jsonb,'active profile envelope is exact');
+reset role;
+select ok(not has_table_privilege('authenticated','private.world_npc_memory_embedding_profiles','select'),'profile identity remains private');
+select * from finish(); rollback;

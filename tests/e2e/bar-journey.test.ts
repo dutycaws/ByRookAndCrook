@@ -11,36 +11,57 @@ async function signInAndOpenBar(page: import('@playwright/test').Page, player: A
   await expect(page).toHaveURL(/\/bar$/);
 }
 
+/**
+ * The seeded roster is installed through immutable resident packages. Its
+ * order and display names are package data, so these journeys interact with
+ * the rendered package projection instead of treating pilot names as IDs.
+ */
+function barResidents(page: import('@playwright/test').Page) {
+  return page.getByRole('group', { name: 'Scene characters' }).getByRole('button');
+}
+
+async function residentName(button: import('@playwright/test').Locator) {
+  const label = await button.getAttribute('aria-label');
+  const match = label?.match(/^Speak with (.+): \1$/);
+  if (!match) throw new Error(`Unexpected Bar resident label: ${label ?? '(missing)'}`);
+  return match[1];
+}
+
 test('the Bar puts present residents in the illustrated room and selects them without navigating', async ({ page }) => {
   const player = await createBrewedTavern('bar-uuid-roster');
   try {
     await signInAndOpenBar(page, player);
-    const room = page.locator('[data-scene-composition="bar"]');
-    const lira = room.getByRole('button', { name: /Speak with Lira Nightwind/ });
-    const torvin = room.getByRole('button', { name: /Speak with Torvin Ashbeard/ });
+    const residents = barResidents(page);
+    const first = residents.nth(0);
+    const second = residents.nth(1);
     // The actors are present in SSR markup, but keyboard handlers intentionally
     // remain inert until the scaled scene has hydrated and aligned its targets.
     await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
-    await expect(lira).toBeVisible();
-    await expect(torvin).toBeVisible();
-    await expect(lira).toHaveAttribute('aria-pressed', 'true');
-    await lira.focus();
+    await expect(residents).toHaveCount(2);
+    await expect(first).toBeVisible();
+    await expect(second).toBeVisible();
+    const firstName = await residentName(first);
+    const secondName = await residentName(second);
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await first.focus();
     await page.keyboard.press('ArrowRight');
-    await expect(torvin).toBeFocused();
-    await expect(torvin).toHaveAttribute('tabindex', '0');
+    await expect(second).toBeFocused();
+    await expect(second).toHaveAttribute('tabindex', '0');
     // Focus is a roving cursor only; it must not change the current guest.
-    await expect(lira).toHaveAttribute('aria-pressed', 'true');
-    await expect(torvin).toHaveAttribute('aria-pressed', 'false');
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await expect(second).toHaveAttribute('aria-pressed', 'false');
     await page.keyboard.press('Space');
     await expect(page).toHaveURL(/\/bar$/);
-    await expect(page.getByRole('heading', { name: 'Torvin Ashbeard', exact: true })).toBeVisible();
+    await expect(second).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('heading', { name: secondName, exact: true })).toBeVisible();
     await page.keyboard.press('ArrowLeft');
-    await expect(lira).toBeFocused();
+    await expect(first).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { name: 'Lira Nightwind', exact: true })).toBeVisible();
-    await torvin.click();
+    await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('heading', { name: firstName, exact: true })).toBeVisible();
+    await second.click();
     await expect(page.getByRole('heading', { name: 'Serve food or drink' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Talk with Torvin Ashbeard' })).toBeAttached();
+    await expect(page.getByRole('heading', { name: `Talk with ${secondName}` })).toBeAttached();
     await expect(page.getByText('Choose your intent', { exact: true })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
@@ -54,7 +75,10 @@ test('a lost UUID serving response retries the frozen resident and item command 
   page.on('pageerror', (cause) => errors.push(cause.message));
   try {
     await signInAndOpenBar(page, player);
-    await page.locator('[data-scene-composition="bar"]').getByRole('button', { name: /Speak with Torvin Ashbeard/ }).click();
+    const recipient = barResidents(page).nth(1);
+    await expect(recipient).toBeVisible();
+    const recipientName = await residentName(recipient);
+    await recipient.click();
     await page.route((url) => url.pathname === '/bar' && url.search === '?/serve', async (route) => {
       requests.push(route.request().postData() ?? '');
       if (requests.length === 1) {
@@ -63,7 +87,7 @@ test('a lost UUID serving response retries the frozen resident and item command 
         await route.abort('failed');
       } else await route.continue();
     });
-    await page.getByRole('button', { name: 'Serve to Torvin Ashbeard' }).click();
+    await page.getByRole('button', { name: `Serve to ${recipientName}` }).click();
     await expect(page.getByRole('alert')).toContainText('serving outcome is unknown');
     await page.getByRole('button', { name: 'Retry the same serving' }).click();
     await expect(page.getByRole('status')).toContainText('Earned');

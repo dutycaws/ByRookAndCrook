@@ -46,7 +46,7 @@
     onactorfocus={(key) => { const instanceId = instanceForActor(key); if (instanceId) onfocus(instanceId); }} />
   <div class="scene-vignette" aria-hidden="true"></div><p class="bar-context-line">The common room · Day {day}</p>
   {#if selected && selectedJournal}
-    <figcaption class="scene-dialogue"><div><strong>{selected.name}</strong><span>{selected.title}</span><span class="scene-facts">Relationship {selected.relationship} / 100{selectedJournal.questStatus==='active'?` · ${selectedJournal.risk} risk`:''}</span></div><p>{latest?.reply ?? (selectedJournal.intention ? `${selectedJournal.intention.goal} — ${selectedJournal.intention.motivation}` : selected.description)}</p></figcaption>
+    <figcaption class="scene-dialogue"><div><strong>{selected.name}</strong><span>{selected.title}</span><span class="scene-facts">Relationship {selected.relationship} / 100{selectedJournal.questLifecycleStatus==='active'&&selectedJournal.currentQuest?` · ${selectedJournal.currentQuest.risk} risk`:''}</span></div><p>{latest?.reply ?? (selectedJournal.questLifecycleStatus==='awaiting_transition' ? 'Considering their next step.' : selectedJournal.questLifecycleStatus==='departing' ? 'Leaving after the tavern closes.' : selectedJournal.currentQuest ? `${selectedJournal.currentQuest.title} — ${selectedJournal.currentQuest.objective}` : selected.description)}</p></figcaption>
   {:else}<figcaption class="scene-dialogue empty-room-copy"><p>The fire is warm, but no guest is waiting at the bar.</p></figcaption>{/if}
 </figure>
 

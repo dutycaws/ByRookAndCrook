@@ -21,55 +21,41 @@ adds about 21 seconds to this machine's full unit run.
 
 ## Startup: outdated platform fixture
 
-The focused feedback command reproduces the exact failure in approximately
-2.6 seconds:
+The original diagnosis reproduced this failure in an all-in-one platform
+fixture. That fixture was retired during the V2 package cutover. Its maintained
+replacement is intentionally split: the setting/portrait lifecycle is covered by
+`supabase/tests/community_npc_authoring_experience.test.sql`; immutable release
+packages, reviewer-selected capability options, and materialization are covered
+by `npc_resident_packages.test.sql`, `npc_v2_review_publication.test.sql`, and
+`npc_materializer_cutover.test.sql`.
 
-```sh
-DO_NOT_TRACK=1 supabase test db --local supabase/tests/community_npc_platform.test.sql
-```
-
-```text
-community_npc_platform.test.sql:41: ERROR: Choose a curated setting before submission
-CONTEXT: PL/pgSQL function public.npc_author_submit(uuid,bigint) line 8 at RAISE
-Planned 20 tests; reached 5.
-```
-
-At line 40, the test calls `npc_author_add_scene`. That legacy function creates
-and selects a scene asset without the curated-library relationship. The final
+The retired fixture called `npc_author_add_scene`, which created and selected a
+scene asset without the curated-library relationship. The final
 `npc_author_submit` definition in migration
 `202609120037_community_npc_portrait_assets.sql:453` requires a selected scene
 linked to an active, verified curated setting. Its next check at line 455 also
-requires a current, selected, valid portrait, which the fixture does not create.
+requires a current, selected, valid portrait, which the fixture did not create.
 
 A temporary copy using the current setting/portrait lifecycle cleared both
-submission predicates and reached all 20 assertions. This also exposed stale
-revision expectations and reviewer-queue assertions that count unrelated
-submissions in the preserved database. The queue test must assert visibility of
-its own submitted version, rather than assume the whole queue is empty or has
-exactly one entry.
+submission predicates and reached all 20 assertions. It also exposed stale
+revision expectations and reviewer-queue assertions that counted unrelated
+submissions in the preserved database. Version-scoped reviewer visibility is now
+the maintained contract rather than an assertion that the entire queue is empty.
 
-After correcting the revision expectation and scoping those visibility checks,
-the temporary copy passed all 20 assertions in approximately 2.5 seconds against
-the same preserved database. The transaction rolled back and the temporary file
-was removed.
-
-Remediation:
+The current remediation and verification path is:
 
 - Follow the deterministic fixture pattern in
   `supabase/tests/community_npc_authoring_experience.test.sql:62`: verify a
   curated setting through the service boundary, select it as the author, request
   a portrait, complete it with fixture metadata, then select the portrait.
-- For this platform test's flow, setting selection advances revision 1 to 2;
-  portrait selection advances 2 to 3. Submit with expected revision 3 and update
-  the submitted-revision assertion accordingly. Portrait request with unchanged
-  controls does not itself advance the revision.
-- Scope both reviewer visibility assertions to the version created by the test.
-  Preserve the owner-exclusion and unrelated-reviewer-visibility checks.
-- Keep the current submission validation. Retain the existing negative coverage
-  for missing, invalid, or stale setting/portrait inputs.
+- Preserve revision-aware submission and version-scoped reviewer assertions in
+  the maintained authoring and V2 review-publication suites.
+- Keep the current submission validation and negative coverage for missing,
+  invalid, or stale setting/portrait inputs.
 
-The incomplete TAP plan is a consequence of the uncaught SQL error. Reducing the
-declared plan would conceal the failure rather than repair it.
+The former incomplete TAP plan was a consequence of the uncaught SQL error.
+The V2 suites isolate these contracts so an error does not mask unrelated
+package or materializer coverage.
 
 ## Startup: later migration regresses quarantine/purge
 

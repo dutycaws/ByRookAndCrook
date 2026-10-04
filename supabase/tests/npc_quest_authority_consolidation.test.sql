@@ -1,0 +1,16 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(10);
+select has_function('private','world_quest_public_news_digest',array['uuid'],'canonical quest public-news bridge exists');
+select has_function('private','world_quest_transition_public_digest',array['uuid','integer'],'late transition public-news bridge exists');
+select has_function('public','world_settlement_status',array['uuid','uuid'],'settlement status composes late transition news');
+select has_trigger('private','world_settlement_jobs','world_retire_legacy_quest_job','legacy quest jobs are made inert on insertion');
+select has_function('public','world_settlement_commit_procedural_world',array['uuid','uuid','uuid','jsonb'],'procedural commit overlay remains callable for non-quest history');
+select ok(not exists(select 1 from private.world_settlement_jobs where job_kind='quest' and status in ('queued','processing')),'no legacy quest settlement job remains live');
+select is(private.world_procedural_world_context('00000000-0000-4000-8000-000000000001'::uuid)->'activeQuestByResident','{}'::jsonb,'general procedural context cannot project legacy quest authority');
+select is(private.world_quest_public_news_digest('00000000-0000-4000-8000-000000000001'::uuid),''::text,'unknown settlement has no quest news');
+set local request.jwt.claim.role='service_role';
+select throws_ok($$select public.world_settlement_commit_procedural_world('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000003','{"version":"procedural-world-v1","commands":[{"operation":"quest"}]}'::jsonb)$$,'PT400','Legacy procedural quest commands are retired; use the canonical quest transition service','quest procedural proposal is rejected by the authoritative overlay');
+select has_table('private','world_procedural_quests','legacy procedural quest table is retained as inert history');
+select * from finish();
+rollback;

@@ -216,7 +216,7 @@ begin
   if not private.npc_is_owner(p_npc_id) then raise sqlstate 'PT403' using message='Only the current owner may edit this NPC'; end if;
   select * into d from private.npc_drafts where npc_id=p_npc_id and state='open' for update;
   if not found or d.revision<>p_expected_revision then raise sqlstate 'PT409' using message='Draft changed; refresh'; end if;
-  perform private.assert_npc_sheet(p_sheet);
+  perform private.validate_npc_sheet_v2(p_sheet);
   old_hash:=private.npc_visual_input_hash(d.sheet,d.portrait_controls);
   new_hash:=private.npc_visual_input_hash(p_sheet,d.portrait_controls);
   update private.npc_drafts set sheet=p_sheet,revision=revision+1,updated_at=now(),selected_portrait_asset_id=case when old_hash<>new_hash then null else selected_portrait_asset_id end where id=d.id;
@@ -449,12 +449,12 @@ begin
   if not private.npc_is_owner(p_npc_id) then raise sqlstate 'PT403'; end if;
   select * into d from private.npc_drafts where npc_id=p_npc_id and state='open' for update;
   if not found or d.revision<>p_expected_revision then raise sqlstate 'PT409' using message='Draft changed; refresh'; end if;
-  perform private.assert_npc_author(d.sheet,true); perform private.assert_npc_sheet(d.sheet);
+  perform private.assert_npc_author(d.sheet,true); perform private.validate_npc_sheet_v2(d.sheet);
   if d.selected_scene_asset_id is null or not exists(select 1 from private.npc_assets a join private.npc_setting_library s on s.id=a.setting_library_id where a.id=d.selected_scene_asset_id and s.state='active' and s.verified_at is not null) then raise sqlstate 'PT422' using message='Choose a curated setting before submission'; end if;
   visual_hash:=private.npc_visual_input_hash(d.sheet,d.portrait_controls);
   if d.selected_portrait_asset_id is null or not exists(select 1 from private.npc_portrait_candidates c join private.npc_assets a on a.id=c.asset_id where c.asset_id=d.selected_portrait_asset_id and c.npc_id=p_npc_id and c.owner_id=auth.uid() and c.state='selected' and c.visual_input_hash=visual_hash and a.media_state='selected' and a.alpha_valid and a.visual_input_hash=visual_hash) then raise sqlstate 'PT422' using message='Select a current valid portrait before submission'; end if;
   insert into private.npc_versions(npc_id,version_number,schema_version,sheet,sheet_hash,state,submitted_at,created_by,selected_scene_asset_id,selected_portrait_asset_id)
-    values(p_npc_id,d.version_number,'npc-sheet-v1',d.sheet,encode(extensions.digest(d.sheet::text,'sha256'),'hex'),'submitted',now(),auth.uid(),d.selected_scene_asset_id,d.selected_portrait_asset_id) returning id into v;
+    values(p_npc_id,d.version_number,'npc-sheet-v2',d.sheet,encode(extensions.digest(d.sheet::text,'sha256'),'hex'),'submitted',now(),auth.uid(),d.selected_scene_asset_id,d.selected_portrait_asset_id) returning id into v;
   update private.npc_assets set version_id=v where id in (d.selected_scene_asset_id,d.selected_portrait_asset_id);
   update private.npc_drafts set submitted_version_id=v,state='submitted' where id=d.id;
   update private.npc_identities set status='submitted' where id=p_npc_id;

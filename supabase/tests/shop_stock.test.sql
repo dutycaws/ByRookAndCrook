@@ -1,7 +1,31 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(39);
+select plan(41);
+
+-- Test-only worker harness: the Shop assertions continue on the next day, so
+-- they explicitly settle the asynchronous day-close before another purchase.
+create function pg_temp.drain_world_settlement(p_settlement_id uuid) returns void
+language plpgsql as $$
+declare
+  claim jsonb;
+  processed integer := 0;
+begin
+  loop
+    claim := public.world_settlement_claim(p_settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      p_settlement_id, (claim->>'jobId')::uuid, (claim->>'fence')::uuid,
+      'no_changes', 'Fixture worker completed the settlement.'
+    );
+    processed := processed + 1;
+    if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  if claim->>'status' <> 'completed' then
+    raise exception 'fixture worker did not terminalize settlement';
+  end if;
+end;
+$$;
 
 insert into auth.users(id,email,role,aud,created_at,updated_at) values
   ('22000000-0000-4000-8000-000000000001','shop-stock-one@example.test','authenticated','authenticated',now(),now()),
@@ -72,6 +96,17 @@ insert into day_receipts select public.advance_tavern_day((select id from public
   '22000000-0000-4000-8000-000000000013',1);
 select is((select remaining_quantity from public.garden_shop_stock where item_key='seed_hops'),10,
   'a successful day advance resets sold-out stock to its cap');
+select set_config('app.fixture_settlement_id', public.world_settlement_status((select id from public.tavern_saves where user_id = '22000000-0000-4000-8000-000000000001'))->>'id', true);
+reset role;
+set local role service_role;
+set local request.jwt.claim.role = 'service_role';
+select pg_temp.drain_world_settlement(current_setting('app.fixture_settlement_id')::uuid);
+reset role;
+set local role authenticated;
+set local request.jwt.claim.role = 'authenticated';
+set local request.jwt.claim.sub = '22000000-0000-4000-8000-000000000001';
+select is(public.world_settlement_status((select id from public.tavern_saves))->>'status', 'completed', 'the fixture worker terminalizes the day settlement');
+select is((select world_phase from public.tavern_saves where user_id = '22000000-0000-4000-8000-000000000001'), 'open', 'the fixture worker reopens the tavern');
 select lives_ok($$ select public.garden_command((select id from public.tavern_saves),
   '22000000-0000-4000-8000-000000000014',2,'purchase','{"itemKey":"seed_hops","quantity":1}'::jsonb) $$,
   'post-restock purchase succeeds at the new revision');
@@ -88,14 +123,22 @@ select is((select remaining_quantity from public.garden_shop_stock where item_ke
   'rejected day advance leaves stock unchanged');
 
 reset role;
-insert into public.dialogue_turns(id,save_id,actor_id,patron_key,message,input_sequence,source_revision,day,status,lease_until)
-select '22000000-0000-4000-8000-000000000016',id,user_id,'lira','A pending conversation.',0,revision,current_day,'processing',now()+interval '5 minutes'
-from public.tavern_saves where user_id='22000000-0000-4000-8000-000000000001';
+insert into private.world_npc_dialogue_turns(
+  id,save_id,instance_id,npc_id,version_id,actor_id,message,input_sequence,source_revision,day_number,status,lease_until
+)
+select
+  '22000000-0000-4000-8000-000000000016',save_row.id,resident.id,resident.npc_id,resident.version_id,
+  save_row.user_id,'A pending conversation.',resident.conversation_sequence,save_row.revision,save_row.current_day,
+  'processing',now()+interval '5 minutes'
+from public.tavern_saves save_row
+join private.world_npc_instances resident on resident.save_id=save_row.id
+where save_row.user_id='22000000-0000-4000-8000-000000000001'
+order by resident.id limit 1;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='22000000-0000-4000-8000-000000000001';
 select throws_ok($$ select public.advance_tavern_day((select id from public.tavern_saves),
-  '22000000-0000-4000-8000-000000000017',3) $$,'PT409','Finish or cancel the pending conversation before closing',
+  '22000000-0000-4000-8000-000000000017',3) $$,'PT409','Finish or cancel the active resident dialogue before closing',
   'a blocked day advance cannot reach stock replenishment');
 select is((select remaining_quantity from public.garden_shop_stock where item_key='seed_hops'),9,
   'a blocked day advance leaves stock unchanged');

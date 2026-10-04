@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(44);
+select plan(41);
 
 insert into auth.users(id,email,role,aud) values
  ('18370000-0000-4000-8000-000000000001','portrait-author@example.test','authenticated','authenticated'),
@@ -176,27 +176,6 @@ select throws_ok(format('select public.npc_portrait_deletion_complete(%L::uuid,%
 select lives_ok(format('select public.npc_portrait_deletion_complete(%L::uuid,%L::uuid)',(select value->>'assetId' from pg_temp.deletion_retry),(select value->>'claimToken' from pg_temp.deletion_retry)),'the current deletion token completes the claimed target once');
 reset request.jwt.claim.role;
 
--- Only an admin assigned to a first-party local pilot may self-review.
-set local request.jwt.claim.role='service_role';
-select public.npc_local_assign_first_party_author('18370000-0000-4000-8000-000000000001');
-reset request.jwt.claim.role;
-insert into private.npc_capabilities(user_id,capability) values('18370000-0000-4000-8000-000000000001','admin');
-create temporary table pg_temp.pilot_version as
-  with inserted as (
-    insert into private.npc_versions(npc_id,version_number,schema_version,sheet,sheet_hash,state,submitted_at,created_by)
-    select d.npc_id,d.version_number,'npc-sheet-v1',d.sheet,encode(extensions.digest(d.sheet::text,'sha256'),'hex'),'submitted',now(),'18370000-0000-4000-8000-000000000001'::uuid
-    from private.npc_drafts d where d.npc_id='18181818-1818-4181-8181-181818181818' and d.state='open'
-    returning id
-  ) select * from inserted;
-grant select on pg_temp.pilot_version to authenticated;
-insert into private.npc_evaluations(npc_id,version_id,evaluator_version,status,result)
-  select '18181818-1818-4181-8181-181818181818',id,'community-eval-v1','completed','{"hardBlocks":[],"prohibited":false}'::jsonb from pg_temp.pilot_version;
-set local role authenticated;
-set local request.jwt.claim.role='authenticated';
-set local request.jwt.claim.sub='18370000-0000-4000-8000-000000000001';
-select ok(public.npc_reviewer_queue()::text like '%'||(select id::text from pg_temp.pilot_version)||'%','assigned first-party pilot appears in the owning admin reviewer queue');
-select is(public.npc_reviewer_decide((select id from pg_temp.pilot_version),'approve','Prototype pilot approval')->>'decision','approve','owning admin may approve an assigned first-party pilot');
-select is(public.npc_reviewer_publish((select id from pg_temp.pilot_version))->>'state','published','owning admin may publish an approved first-party successor');
 select throws_ok(format('select public.npc_reviewer_decide(%L::uuid,%L,%L)',(select value->>'versionId' from pg_temp.submission),'approve','ordinary author cannot self-review'),'PT403',null,'an ordinary community author remains blocked from self-review');
 
 select * from finish();

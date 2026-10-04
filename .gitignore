@@ -145,10 +145,11 @@ build/
 # Playwright
 playwright-report/
 test-results/
-artifacts/npc-evals/
-artifacts/media-captures/
-artifacts/media-master-backups/
-artifacts/media-performance/
+# Keep lightweight review documents; exclude generated media and raw outputs.
+/artifacts/**
+!/artifacts/**/
+!/artifacts/**/*.md
+!/artifacts/**/*.diff
 
 # Private source-image masters for local prototyping. The catalog records only
 # immutable hashes and provenance; image bytes must never enter Git.

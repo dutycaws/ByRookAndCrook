@@ -21,7 +21,7 @@ The JavaScript package versions and npm version are pinned in `package.json` and
 
 Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
 
-Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2`, and 60 seconds. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
+Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2.5-sunburst`, and 60 seconds. Existing ignored `.env` files explicitly pinned to `NPC_IMAGE_MODEL=gpt-image-2` must be updated to the Sunburst alias; the source default cannot replace an explicit local value. Let any claimed or dispatched portrait-generation attempts finish or drain before changing the environment, then restart the web and worker processes so new attempts use the same model. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
 
 Then use the normal human-testing command from the repository root:
 
@@ -29,7 +29,13 @@ Then use the normal human-testing command from the repository root:
 npm run brac-app:dev
 ```
 
-The launcher runs preflight and unit tests, starts or reuses this repository's Supabase stack, refreshes the local environment, applies pending migrations with `supabase migration up --local`, provisions pilot users, runs database and RPC integration tests, then starts Vite with hot reload. Open `http://127.0.0.1:3000/login`. It uses real local authentication, migrations, RPCs, and persistent services to keep local behavior close to the future hosted application; production builds remain a CI and `npm run build` check.
+The launcher runs unit tests and SQL tests in a fresh disposable project before inspecting or starting this repository's persistent Supabase stack. It then refreshes the local environment, applies pending migrations with `supabase migration up --local` without resetting saves, provisions pilot users, runs RPC integration tests against the populated app database, and starts Vite with hot reload. Open `http://127.0.0.1:3000/login`. It uses real local authentication, migrations, RPCs, and persistent services to keep local behavior close to the future hosted application; production builds remain a CI and `npm run build` check.
+
+### SQL test isolation
+
+`npm run test:db:isolated` provisions a fresh, uniquely named local Supabase Postgres-only project, applies the repository migrations and seed, and runs the SQL test suite. It uses temporary configuration and ports, then attempts to remove only its own project resources and temporary files on success, test failure, or a handled interrupt. Cleanup failure makes the gate fail, retains the temporary configuration, and prints a recovery command scoped to that project. Its database is discarded, so no backup is needed for this disposable project; the persistent app database and its saves are not copied, reset, or removed. Optional SQL fixture paths can be passed after npm's `--`.
+
+`npm run test:db` runs `supabase test db` against the project currently selected by the Supabase CLI. When the app stack is running, that means its persistent database. Use this command only when you intend to target that database; the startup gate uses `test:db:isolated` instead.
 
 The local Supabase services use project-specific ports so they can coexist with another local stack:
 
@@ -115,7 +121,7 @@ To rebuild a disposable local database and verify the migration/backfill path, r
 ```sh
 npm run db:reset:local
 npm run db:types:check
-npm run test:db
+npm run test:db:isolated
 ```
 
 The reset destroys local saves. Type output is checked into `src/lib/database.types.ts`; generate it only after the local schema is current. Garden and Apiary RPC coverage is in `tests/integration/garden-commands-rpc.test.ts` and `tests/integration/apiary-commands-rpc.test.ts`. The complete accessible interaction coverage is in `tests/e2e/garden-expanded-layout.test.ts` with compatibility journeys in `garden-journey.test.ts` and `crafting-layout.test.ts`.
@@ -124,7 +130,7 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 
 | Command | Purpose |
 | --- | --- |
-| `npm run brac-app:dev` | Run the supervised local human-testing session: preflight, units, local stack, migration, fixtures, database/RPC gates, and Vite at `127.0.0.1:3000`. Ctrl+C preserves data while stopping the app and adopted project stack. |
+| `npm run brac-app:dev` | Run preflight and unit tests, isolated SQL tests, the persistent local stack, migrations, pilot fixtures, RPC integration tests against the populated app database, and Vite at `127.0.0.1:3000`. Ctrl+C preserves data while stopping the app and adopted project stack. |
 | `npm run dev` | Start the SvelteKit development server on port 3000. |
 | `npm run build` | Create the adapter-node production build. |
 | `npm run preview` | Run the built Node server. |
@@ -153,11 +159,12 @@ The reset destroys local saves. Type output is checked into `src/lib/database.ty
 | `npm run check` | Run Svelte and TypeScript diagnostics. |
 | `npm run test:unit` | Run the focused unit-test suite. |
 | `npm run test` | Run the existing full Vitest suite. |
-| `npm run test:db` | Run pgTAP assertions for garden, brewery, bakery, serving, dialogue, private data, budgets, permanent outcomes and grants. |
+| `npm run test:db:isolated` | Run SQL tests in a fresh disposable Supabase project and remove only that project's temporary resources. |
+| `npm run test:db` | Run SQL tests against the Supabase project currently selected by the CLI; it is not isolated. |
 | `npm run test:integration` | Use real Auth and RPC requests to test initialization, harvest, shared daily crafting, replay, locking, isolation, rewards, and denied direct writes. |
 | `npm run test:e2e` | Run desktop/mobile browser journeys, including Bakery persistence, dialogue recovery, atomic hospitality, overnight intentions, and visual layout bounds. |
-| `npm run npc:content:check` | Validate editable character sheets against their published migration. |
-| `npm run npc:content:migration -- --migration=202609080013_character_revision.sql` | Generate a new publication after bumping the content version; choose a timestamp later than every existing migration. |
+| `npm run npc:catalog:generate` | Validate the editable first-party identity catalogs and deterministically regenerate their executable catalog migration. |
+| `npm run npc:catalog:check` | Verify that the generated catalog migration exactly matches `supabase/content/first-party-npcs/*.json`. |
 | `npm run npc:eval:live` | Run opt-in, billable OpenAI dialogue cases on disposable local users. |
 | `npm run screenshots` | Capture garden, ingredient, brewery, and desktop/mobile bar views against the running app. |
 | `npm run motion:proof:capture` | Capture the issue-#8 Brewery/Bakery 1×/2× stills and interaction clips against the running app. |
@@ -174,7 +181,7 @@ npm run secrets:audit
 npm run art:assets:check
 npm run db:types:check
 npm run check
-npm run test:db
+npm run test:db:isolated
 npm run test:integration
 npm run test:e2e
 npm run build
@@ -192,7 +199,7 @@ Starting a brew or bake reserves the save's single active craft. A bake persists
 
 The garden, brewery, and bakery keep an unresolved command in component state after a connection or unexpected server failure. Retrying reuses its action UUID and exact payload. A validation, conflict, or eligibility error refreshes the authoritative snapshot. Server diagnostics record the action ID, outcome code, committed revision when available, and duration; they do not record credentials or session tokens.
 
-New brews use the versioned `guide-v2` rules: a two-second countdown, fifteen scored seconds, a fixed 15 RPM marker, and four score ticks per second. Pointer players hold and drag the paddle within the wort annulus; keyboard players choose Left or Right and use the focusable rhythm control once per second. The controller scores the paddle against ±22.5° Perfect and ±45° Good corridors, gives forward movement a 500 ms grace window, and ignores reversing jitter. It saves positive ticks, direction, input method, paddle position, guide origin, score cursor, and claimed keyboard beats in session-scoped local storage. Reloaded or hidden elapsed ticks receive no positive credit. Reduced motion advances both the visible and scored guide in quarter turns. The server requires all 60 `guide-v2` ticks after the full 17 seconds and calculates `round(6 × (perfect + 0.5 × good) / 60)`. Historical `rpm-v1` sessions keep their 30-second, 120-tick rules. Aggregate telemetry remains client-generated and server-bounded; server-verifiable anti-cheat telemetry belongs outside this MVP.
+Brews use the versioned `guide-v2` rules: a two-second countdown, fifteen scored seconds, a fixed 15 RPM marker, and four score ticks per second. Pointer players hold and drag the paddle within the wort annulus; keyboard players choose Left or Right and use the focusable rhythm control once per second. The controller scores the paddle against ±22.5° Perfect and ±45° Good corridors, gives forward movement a 500 ms grace window, and ignores reversing jitter. It saves positive ticks, direction, input method, paddle position, guide origin, score cursor, and claimed keyboard beats in session-scoped local storage. Reloaded or hidden elapsed ticks receive no positive credit. Reduced motion advances both the visible and scored guide in quarter turns. The server requires all 60 `guide-v2` ticks after the full 17 seconds and calculates `round(6 × (perfect + 0.5 × good) / 60)`. Aggregate telemetry remains client-generated and server-bounded; server-verifiable anti-cheat telemetry belongs outside this MVP.
 
 Quality uses the shared seven-tier scale from Repugnant through Resplendent. Potable and Decent results earn a fine Charm intent card, Great earns superior Insight, and Legendary or Resplendent earns exceptional Resolve. Serving consumes one food or drink, applies the patron's quality-specific price, and persists the actual deltas in `hospitality_events`. Dialogue consumes a chosen intent through `intent_card_plays`; the intent remains independent from the offered item. The brewery keeps production history. Existing Pour Ale rewards remain available as labeled legacy entitlements for standalone drinks and are never issued by new crafts.
 
@@ -208,7 +215,7 @@ Add schema or game-rule changes as new files in `supabase/migrations/`. Then run
 npm run db:reset:local
 npm run --silent db:types > src/lib/database.types.ts
 npm run db:types:check
-npm run test:db
+npm run test:db:isolated
 npm run test:integration
 ```
 
@@ -243,19 +250,19 @@ The live script records timestamped reports in ignored `artifacts/npc-evals/`; P
 
 The NPC authoring workspace requires `OPENAI_API_KEY` in the ignored root `.env` for live assistance and sandbox replies. It displays the provider as unavailable when the key is absent. Assistance and sandbox work run outside database transactions, then persist validated results against the reserved job and captured draft revision. Use the workspace status and retry controls after a timeout or uncertain network result. Draft saves and accepted assistance invalidate any active sandbox while keeping its transcript available under preserved conversations.
 
-## Editing and publishing character content
+## Editing and publishing first-party NPC content
 
-Edit `supabase/content/npcs.json`. The provenance field distinguishes prototype names/premises from new authored pilot details. Facts need stable IDs and explicit disclosure thresholds; skills and difficulty use 0–4; default plans end with attempt/abandon; terminal targets and character-loss warnings are authored explicitly.
+Each first-party identity has one canonical editable catalog at `supabase/content/first-party-npcs/<identity>.json`. Its active release contains an `npc-sheet-v2`, stable identity and release IDs, roster order, and a finite list of server-issued capability option IDs. Facts use stable IDs and disclosure thresholds; skills and difficulty use 0–4; campaign milestones define the supported actions, approaches, and any explicitly warned permanent loss. Terminal outcomes are authorized by that campaign content, never by an arbitrary capability string.
 
-For a published revision, change the top-level content version (for example, `npc-v2`) and generate a later migration:
+After changing a catalog, regenerate and review the executable migration, then prove it is current before a local reset:
 
 ```sh
-npm run npc:content:migration -- --migration=202609080013_character_revision.sql
-npm run npc:content:check
-DO_NOT_TRACK=1 supabase migration up --local
+npm run npc:catalog:generate
+npm run npc:catalog:check
+npm run db:reset:local
 ```
 
-Choose a filename later than every existing migration. Review the generated migration before applying. The database inserts immutable version rows before changing the current selector. It rejects overwrites and unknown version references. Existing characters retain their pinned version, preserving historical evidence and outcome rules; create a disposable new save to try revised content. Migrating existing characters to a newer authored version requires a separate explicit compatibility migration.
+The generated migration installs immutable release rows and derives one immutable resident package for each release. A shared materializer creates a resident only from that package and pins the exact package selected for that resident. Releases and their packages cannot be overwritten; make a new release in the identity catalog when testing changed content in a disposable local save.
 
 Prompt source and its version are in `src/lib/server/dialogue/prompts.ts`; structured provider-neutral schemas are alongside it. Bump the prompt version and rerun fixture/live evaluations when changing behavior. Database rule changes belong in additive migrations with a new version rather than rewriting a released ruleset.
 

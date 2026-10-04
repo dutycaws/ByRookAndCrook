@@ -1,5 +1,6 @@
-import { error } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { getSnapshot } from '$lib/server/game';
+import { getGeneratedSupplies, purchaseGeneratedSupply } from '$lib/server/evolving-world/generated-supplies';
 import {
   handleGardenCommand,
   handleGardenPreview,
@@ -13,7 +14,9 @@ export const load: PageServerLoad = async ({ locals, setHeaders }) => {
   setHeaders({ 'cache-control': 'private, no-store' });
 
   try {
-    return { snapshot: await getSnapshot(locals.supabase) };
+    const snapshot = await getSnapshot(locals.supabase);
+    if (!snapshot) return { snapshot, supplies: null };
+    return { snapshot, supplies: await getGeneratedSupplies(locals.supabase, snapshot.save.id) };
   } catch (cause) {
     console.error('get_tavern_snapshot failed', cause);
     error(500, 'The shop ledger is unavailable. Please try again.');
@@ -21,6 +24,16 @@ export const load: PageServerLoad = async ({ locals, setHeaders }) => {
 };
 
 export const actions: Actions = {
+  purchaseGeneratedSupply: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    const data = await request.formData();
+    const input = generatedSupplyInput(data);
+    if (!input || input.quantity === null) return fail(400, { message:'That provision purchase was invalid.', error:true });
+    try {
+      await purchaseGeneratedSupply(locals.supabase, { ...input, quantity:input.quantity });
+      return { message:'Provision purchased.', error:false };
+    } catch (cause) { return fail(422, { message: cause instanceof Error ? cause.message : 'The provision purchase could not be completed.', error:true }); }
+  },
   preview: async ({ request, locals }) => {
     await requireGameUser(locals);
     return handleGardenPreview(locals, await request.formData(), {
@@ -40,3 +53,15 @@ export const actions: Actions = {
     });
   }
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const KEY = /^[a-z][a-z0-9-]{1,79}$/;
+function generatedSupplyInput(data: FormData) {
+  const saveId = String(data.get('saveId') ?? '');
+  const actionId = String(data.get('actionId') ?? '');
+  const itemKey = String(data.get('itemKey') ?? '');
+  const expectedRevision = Number(data.get('expectedRevision'));
+  const quantity = Number(data.get('quantity') ?? 1);
+  if (!UUID.test(saveId) || !UUID.test(actionId) || !KEY.test(itemKey) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10) return null;
+  return { saveId, actionId, itemKey, expectedRevision, quantity };
+}

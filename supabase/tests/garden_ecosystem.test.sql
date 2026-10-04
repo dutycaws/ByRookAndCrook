@@ -1,7 +1,41 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(42);
+select plan(44);
+
+-- Test-only worker harness. A fresh day close returns only after its exact
+-- settlement has reached the terminal receipt and reopened this player save.
+create function pg_temp.advance_and_settle(p_save_id uuid, p_action_id uuid, p_revision bigint)
+returns jsonb language plpgsql security definer as $$
+declare
+  result jsonb;
+  settlement_id uuid;
+  claim jsonb;
+  processed integer := 0;
+  request_role text := current_setting('request.jwt.claim.role', true);
+begin
+  result := public.advance_tavern_day(p_save_id, p_action_id, p_revision);
+  settlement_id := (result#>>'{worldSettlement,settlementId}')::uuid;
+  perform set_config('request.jwt.claim.role', 'service_role', true);
+  loop
+    claim := public.world_settlement_claim(settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      settlement_id, (claim->>'jobId')::uuid, (claim->>'fence')::uuid,
+      'no_changes', 'Fixture worker completed the settlement.'
+    );
+    processed := processed + 1;
+    if processed > 64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  perform set_config('request.jwt.claim.role', coalesce(request_role, 'authenticated'), true);
+  if claim->>'status' <> 'completed'
+    or public.world_settlement_status(p_save_id, settlement_id)->>'status' <> 'completed'
+    or (select world_phase from public.tavern_saves where id = p_save_id) <> 'open' then
+    raise exception 'fixture worker did not terminalize and reopen settlement';
+  end if;
+  return result;
+end;
+$$;
 
 insert into auth.users (id, email, role, aud, created_at, updated_at)
 values ('16000000-0000-4000-8000-000000000001', 'garden-ecosystem@example.test',
@@ -46,7 +80,7 @@ select public.project_garden_day() plan;
 create temporary table advance_receipts (receipt jsonb);
 
 select lives_ok(
-  $$ insert into advance_receipts select public.advance_tavern_day(
+  $$ insert into advance_receipts select pg_temp.advance_and_settle(
     (select id from public.tavern_saves),
     '16000000-0000-4000-8000-000000000010',0) $$,
   'an optional-crafting day can advance with the garden resolver'
@@ -63,6 +97,10 @@ select is((select count(*) from public.garden_daily_grants where day_number=2),1
 select is((select quantity from public.garden_inventory where item_key='seed_hops'),3,'daily grant adds one productive seed');
 select is((select count(*) from public.garden_weather where day_number between 2 and 4),3::bigint,
   'forecast rolls forward to three persisted days');
+select is((select receipt#>>'{worldSettlement,status}' from advance_receipts limit 1), 'queued',
+  'day receipt preserves the queued settlement identity');
+select is((select world_phase from public.tavern_saves), 'open',
+  'the fixture worker reopens the save before the next garden mutation');
 
 select lives_ok(
   $$ insert into advance_receipts select public.advance_tavern_day(

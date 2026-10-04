@@ -103,14 +103,14 @@ export const SCENE_COMPOSITIONS: Readonly<Record<ComposedSceneId, SceneCompositi
         kind: 'actor', key: 'bar-lira', label: 'Speak with Lira Nightwind', placeholder: 'Lira artwork',
         x: 408, y: 42, width: 690, height: 825, depth: 5,
         compact: { x: 148, y: 80, width: 610, height: 729 },
-        hitBounds: { x: 462, y: 98, width: 580, height: 690 },
+        hitBounds: { x: 462, y: 98, width: 438, height: 690 },
         entrance: { x: 85, y: 0 }, exit: { x: 150, y: 0 }
       },
       {
         kind: 'actor', key: 'bar-torvin', label: 'Speak with Torvin Ashbeard', placeholder: 'Torvin artwork',
         x: 730, y: 104, width: 590, height: 720, depth: 5,
         compact: { x: 500, y: 156, width: 510, height: 622 },
-        hitBounds: { x: 770, y: 152, width: 490, height: 604 },
+        hitBounds: { x: 900, y: 152, width: 360, height: 604 },
         entrance: { x: 85, y: 0 }, exit: { x: 150, y: 0 }
       }
     ],

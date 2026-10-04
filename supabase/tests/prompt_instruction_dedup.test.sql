@@ -1,0 +1,14 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(8);
+create temporary table dedup_release as select * from private.prompt_releases where label='Bounded prompt instruction deduplication';
+select is((select count(*) from dedup_release),1::bigint,'dedup release is published once');
+select is((select release_id from private.prompt_registry_active_release),(select id from dedup_release),'new work uses the new active release');
+select is((select count(*) from private.prompt_release_entries where release_id=(select id from dedup_release)),(select count(*) from private.prompt_registry_manifest),'all prompt keys are retained');
+select is((select count(*) from private.prompt_release_entries where release_id=(select prior_release_id from dedup_release)),(select count(*) from private.prompt_registry_manifest),'prior snapshot remains complete for old work pins');
+select is((select count(*) from private.prompt_release_entries n join private.prompt_release_entries p using(prompt_key) where n.release_id=(select id from dedup_release) and p.release_id=(select prior_release_id from dedup_release) and n.revision_id<>p.revision_id),9::bigint,'only nine prompt revisions change');
+select ok(not exists(select 1 from private.prompt_release_entries e join private.prompt_revisions r on r.id=e.revision_id where e.release_id=(select id from dedup_release) and r.content_hash<>encode(extensions.digest(r.body,'sha256'),'hex')),'stored hashes match transmitted prompt bodies');
+select ok(not exists(select 1 from private.prompt_release_entries n join private.prompt_release_entries p using(prompt_key) join private.prompt_revisions nr on nr.id=n.revision_id join private.prompt_revisions pr on pr.id=p.revision_id where n.release_id=(select id from dedup_release) and p.release_id=(select prior_release_id from dedup_release) and (nr.contract_id<>pr.contract_id or nr.contract_hash<>pr.contract_hash or nr.prompt_type<>pr.prompt_type)),'all contracts and prompt types are preserved');
+select is((select count(*) from private.prompt_governance_audit where event_kind='release_activated' and release_id=(select id from dedup_release)),1::bigint,'activation is audited');
+select * from finish();
+rollback;

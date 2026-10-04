@@ -577,8 +577,6 @@ begin
     then raise sqlstate 'PT422' using message='Finish the active brew before closing'; end if;
   if exists(select 1 from public.bake_sessions where save_id=p_save_id and status<>'completed')
     then raise sqlstate 'PT422' using message='Finish the active bake before closing'; end if;
-  if exists(select 1 from public.dialogue_turns where save_id=p_save_id and status='processing' and lease_until>now())
-    then raise sqlstate 'PT409' using message='Finish or cancel the pending conversation before closing'; end if;
   v_plan:=private.resolve_garden_day(p_save_id,v_save.current_day);
   v_result:=private.advance_tavern_day_before_garden_apiary(p_save_id,p_action_id,p_expected_revision);
   perform private.apply_garden_day(p_save_id,p_action_id,v_save.current_day,v_plan);

@@ -35,25 +35,87 @@ export interface DialogueReply {
   intention: Intention | null;
   committedRevision: number;
 }
+/**
+ * A deliberately qualitative, player-visible view of a resident's recent
+ * change. It never contains the mutable profile, beliefs, social scores, or
+ * settlement inputs used to arrive at the change.
+ */
+export interface PublicDisposition {
+  summary: string;
+  state: string;
+  version: string;
+}
+
+/** A bounded, public journal entry emitted by an overnight settlement. */
+export interface PublicEvolutionEntry {
+  day: number;
+  profileRevision: number;
+  createdAt: string;
+  disposition: PublicDisposition;
+}
+
+/**
+ * The Bar receives this deliberately small quest projection.  It is distinct
+ * from the package-pinned definition and settlement receipts: players learn
+ * what a resident is doing, not the odds, draws, or private rationale.
+ */
+export type QuestLifecycleStatus = 'active' | 'awaiting_transition' | 'departing' | 'departed';
+export interface PublicQuestStep { action: ActionKind; approach: Approach; }
+export interface CurrentQuest {
+  id: string;
+  origin: 'authored_milestone' | 'generated_successor';
+  title: string;
+  objective: string;
+  plan: PublicQuestStep[];
+  currentStep: number;
+  activationDay: number;
+  readiness: 'rising' | 'steady' | 'strained';
+  risk: 'low' | 'moderate' | 'high';
+}
+export interface PublicQuestHistoryEntry {
+  id: string;
+  day: number;
+  outcome: string;
+  text: string;
+  publicNews: boolean;
+}
+/** A terminal quest plus its chronological, player-safe event record. */
+export interface PublicQuestArchiveQuest {
+  id: string;
+  origin: 'authored_milestone' | 'generated_successor';
+  title: string;
+  objective: string;
+  outcome: 'succeeded' | 'failed' | 'abandoned';
+  activationDay: number;
+  terminalDay: number;
+  events: PublicQuestHistoryEntry[];
+}
+export interface PublicQuestArchive {
+  items: PublicQuestArchiveQuest[];
+  nextCursor: string | null;
+}
+
 export interface Journal {
   instanceId: NpcInstanceId;
   npcId: NpcId;
   sequence: number;
   availability: 'present' | 'dead' | 'departed' | 'dismissed' | 'removed' | 'quarantined';
-  intention: Intention | null;
-  questStatus: string;
-  preparation: number;
-  nextStep: number;
-  risk: 'low' | 'moderate' | 'high' | 'none';
-  warning: string | null;
+  questLifecycleStatus: QuestLifecycleStatus;
+  currentQuest: CurrentQuest | null;
+  /** @deprecated Compact legacy journal events; use questArchive for history. */
+  questHistory: PublicQuestHistoryEntry[];
+  questArchive: PublicQuestArchive;
+  farewellText: string | null;
   turns: Array<{ id: string; message: string; reply: string; day: number }>;
-  events: Array<{ id?: string; text: string; outcome: string; day: number; publicNews?: boolean }>;
   pending: { turnId: string; status: string; message: string; error: string | null } | null;
+  disposition: PublicDisposition | null;
+  evolution: PublicEvolutionEntry[];
 }
 
 /** Attempts and abandonment end a quest, so later daily steps cannot execute. */
 export function hasExecutableSteps(steps: Intention['steps']): boolean {
   return steps.length >= 1 && steps.length <= 3
     && ['attempt', 'abandon'].includes(steps.at(-1)!.action)
-    && steps.slice(0, -1).every(step => ['prepare', 'wait'].includes(step.action));
+    && steps.slice(0, -1).every(step => ['prepare', 'wait'].includes(step.action))
+    && steps.every(step => ['scouting', 'combat', 'diplomacy', 'trade'].includes(step.approach));
 }

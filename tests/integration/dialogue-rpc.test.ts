@@ -5,9 +5,11 @@ import { runDialogue } from '../../src/lib/server/dialogue/orchestrator';
 import { fixtureProvider } from '../helpers/dialogue-provider';
 import { parseBarSnapshot } from '../../src/lib/game/serving';
 import type { DialogueInput } from '../../src/lib/game/dialogue';
+import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
 
 type Player = Awaited<ReturnType<typeof createTestPlayer>>;
 const players: Player[] = [];
+const promptRegistry = fixturePromptRegistry();
 
 afterEach(async () => {
   await Promise.all(players.splice(0).map(({ admin, userId }) => admin.auth.admin.deleteUser(userId)));
@@ -31,19 +33,59 @@ function input(npcId: string, expectedConversationSequence = 0, message = 'How i
 }
 
 describe('UUID community NPC dialogue runtime', () => {
+  it('accepts the active plan without creating a no-op quest revision', async () => {
+    const person = await player('uuid-dialogue-same-plan');
+    const snapshot = await bar(person);
+    const lira = snapshot.roster.find((resident) => resident.name === 'Lira Nightwind')!;
+    const before = await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] });
+    expect(before.error).toBeNull();
+    const priorPlan = (before.data as any)[lira.instanceId].currentQuest.plan;
+    const command = input(lira.npcId, 0, 'Please advise me on the existing plan.');
+
+    const result = await runDialogue(person.admin, person.userId, command, fixtureProvider({ samePlan: true }), { promptRegistry });
+    expect(result.status).toBe('completed');
+    expect((result.result as any)).toMatchObject({ sequence: 1 });
+    const committedBase = await person.admin.rpc('npc_dialogue_context', {
+      p_actor: person.userId, p_turn_id: command.turnId, p_category: 'base'
+    });
+    expect(committedBase.error).toBeNull();
+    expect((committedBase.data as any).activeQuestPlanRevision).toBe(1);
+    expect((committedBase.data as any).currentQuest.plan).toEqual(priorPlan);
+
+    const replay = await runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'investigate' }), { promptRegistry });
+    expect(replay).toEqual(result);
+    const after = await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] });
+    expect(after.error).toBeNull();
+    expect((after.data as any)[lira.instanceId]).toMatchObject({ sequence: 1 });
+    expect((after.data as any)[lira.instanceId].turns).toHaveLength(1);
+    const replayBase = await person.admin.rpc('npc_dialogue_context', {
+      p_actor: person.userId, p_turn_id: command.turnId, p_category: 'base'
+    });
+    expect((replayBase.data as any).activeQuestPlanRevision).toBe(1);
+  });
+
   it('uses the selected UUID resident for adaptive investigation, memory, journal, and replay', async () => {
     const person = await player('uuid-dialogue');
     const roster = await bar(person);
     const lira = roster.roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const command = input(lira.npcId, 0, 'I thank you and advise you to scout, then negotiate.');
+    const before = await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] });
+    expect(before.error).toBeNull();
+    const priorPlan = (before.data as any)[lira.instanceId].currentQuest.plan;
     const provider = fixtureProvider({ secondInvestigation: true, rewrite: true });
-    const result = await runDialogue(person.admin, person.userId, command, provider);
+    const result = await runDialogue(person.admin, person.userId, command, provider, { promptRegistry });
 
     expect(result.status).toBe('completed');
     expect((result.result as any)).toMatchObject({ npcId: lira.npcId, instanceId: lira.instanceId, sequence: 1, relationship: 47 });
     expect(provider.stages).toEqual(['investigate', 'investigate', 'deliberate', 'speak', 'review', 'speak', 'review', 'remember']);
-    const replay = await runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'investigate' }));
+    const replay = await runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'investigate' }), { promptRegistry });
     expect(replay).toEqual(result);
+    const committedBase = await person.admin.rpc('npc_dialogue_context', {
+      p_actor: person.userId, p_turn_id: command.turnId, p_category: 'base'
+    });
+    expect(committedBase.error).toBeNull();
+    expect((committedBase.data as any).activeQuestPlanRevision).toBe(2);
+    expect((committedBase.data as any).currentQuest.plan).not.toEqual(priorPlan);
 
     const journals = await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] });
     expect(journals.error).toBeNull();
@@ -56,6 +98,26 @@ describe('UUID community NPC dialogue runtime', () => {
     expect(memories.data).toMatchObject([{ kind: 'keeper_claim', quote: command.message }]);
   });
 
+  it('normalizes a keeper promise into an attributed claim before checkpoint and commit', async () => {
+    const person = await player('uuid-dialogue-keeper-promise');
+    const roster = await bar(person);
+    const lira = roster.roster.find((resident) => resident.name === 'Lira Nightwind')!;
+    const command = input(lira.npcId, 0, 'I promise to prepare carefully before scouting.');
+    const provider = fixtureProvider({ keeperPromise: true });
+
+    const result = await runDialogue(person.admin, person.userId, command, provider, { promptRegistry });
+    expect(result.status).toBe('completed');
+    expect(provider.stages).toContain('remember');
+
+    const memories = await person.admin.rpc('npc_dialogue_context', {
+      p_actor: person.userId, p_turn_id: command.turnId, p_category: 'memories'
+    });
+    expect(memories.error).toBeNull();
+    expect(memories.data).toMatchObject([{
+      kind: 'keeper_claim', speaker: 'keeper', text: `The keeper offered advice: ${command.message}`, quote: command.message
+    }]);
+  });
+
   it('keeps intent cards and hospitality independent while committing an offering atomically with its UUID turn', async () => {
     const person = await createBrewedTavern('uuid-dialogue-offering');
     players.push(person);
@@ -66,12 +128,12 @@ describe('UUID community NPC dialogue runtime', () => {
       intentCardId: before.intentCards[0].id,
       offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
     };
-    await expect(runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'speak' }))).rejects.toThrow();
+    await expect(runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'speak' }), { promptRegistry })).rejects.toThrow();
     const failed = await bar(person);
     expect(failed.beverages).toHaveLength(1);
     expect(failed.intentCards).toHaveLength(before.intentCards.length);
 
-    const committed = await runDialogue(person.admin, person.userId, command, fixtureProvider());
+    const committed = await runDialogue(person.admin, person.userId, command, fixtureProvider(), { promptRegistry });
     expect((committed.result as any)).toMatchObject({ npcId: lira.npcId, instanceId: lira.instanceId });
     expect((committed.result as any).serving).toMatchObject({ itemKind: 'beverage', itemName: before.beverages[0].name });
     const after = await bar(person);
@@ -86,7 +148,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const ownerLira = (await bar(owner)).roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const strangerLira = (await bar(stranger)).roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const command = input(ownerLira.npcId, 0, 'I thank you for your courage.');
-    await runDialogue(owner.admin, owner.userId, command, fixtureProvider());
+    await runDialogue(owner.admin, owner.userId, command, fixtureProvider(), { promptRegistry });
 
     expect((await stranger.client.rpc('npc_dialogue_status', { p_turn_id: command.turnId })).error?.code).toBe('PT404');
     const foreignJournal = await stranger.client.rpc('npc_journals', { p_instance_ids: [ownerLira.instanceId] });
@@ -113,8 +175,9 @@ describe('UUID community NPC dialogue runtime', () => {
     const command = input(lira.npcId, lira.sequence, 'How is the quest going?');
     const provider = fixtureProvider();
     await expect(runDialogue(person.admin, person.userId, command, {
-      async generate(stage, payload, signal) {
-        const output = await provider.generate(stage, payload, signal);
+      ...provider,
+      async generate(stage, payload, signal, prompt) {
+        const output = await provider.generate(stage, payload, signal, prompt);
         if (stage === 'review') {
           expect((await person.client.rpc('npc_serve_hospitality', {
             p_save_id: person.saveId, p_instance_id: torvin.instanceId, p_item_kind: 'beverage',
@@ -123,7 +186,7 @@ describe('UUID community NPC dialogue runtime', () => {
         }
         return output;
       }
-    })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    }, { promptRegistry })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
     const after = await bar(person);
     expect(after.history).toHaveLength(1);
     expect((await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] })).data).toMatchObject({ [lira.instanceId]: { sequence: 0 } });
