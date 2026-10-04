@@ -166,6 +166,19 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
     if (!registry) throw new Error('Prompt registry is required for settlement execution');
     promptRelease = await registry.resolveForWork('settlement', claim.settlementId);
   } catch {
+    try {
+      await rpc(client, 'world_settlement_fail', {
+        p_settlement_id:claim.settlementId,
+        p_job_id:claim.jobId,
+        p_fence:claim.fence,
+        p_failure_code:'registry_unavailable'
+      });
+    } catch (cause) {
+      if (isLeaseError(cause as Error)) return { status:'lease_lost', errorCode:'registry_unavailable' };
+    } finally {
+      guard.stop();
+      clearTimeout(timeout);
+    }
     return { status:'failed', errorCode:'registry_unavailable' };
   }
   const observability = runtime.observability;

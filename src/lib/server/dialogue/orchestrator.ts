@@ -188,6 +188,13 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   if(turn.status==='completed') return {status:'completed',result:turn.result};
   if(turn.status==='stale') throw new DialogueError('The tavern changed. Send a new message from the refreshed conversation.',409,'STATE_CHANGED');
   if(turn.busy) return {status:'processing',turnId:input.turnId};
+  const fence=turn.fence as string;
+  const checkpoints=turn.checkpoints as Record<string,any>;
+  async function checkpoint(stage:string,value:unknown) {
+    const r=await client.rpc('npc_dialogue_checkpoint',{p_actor:actor,p_turn_id:input.turnId,p_fence:fence,p_stage:stage,p_value:value as Json})
+      .abortSignal(stage==='fail'?AbortSignal.timeout(1000):signal);
+    if(r.error) throw databaseError(r.error);
+  }
   // The row was inserted before provider work and carries an immutable release
   // pin. Resolving it now prevents a later active-release change affecting a
   // retry of this turn.
@@ -196,18 +203,14 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     if (!options.promptRegistry) throw new Error('Prompt registry is required for dialogue execution');
     promptRelease = await options.promptRegistry.resolveForWork('dialogue', input.turnId);
   }
-  catch { throw new DialogueError('The dialogue prompt release is unavailable. Please retry.',503,'REGISTRY_UNAVAILABLE'); }
-  const fence=turn.fence as string;
-  const checkpoints=turn.checkpoints as Record<string,any>;
+  catch {
+    try { await checkpoint('fail',{code:'REGISTRY_UNAVAILABLE'}); } catch { /* Preserve the retryable registry error if failure persistence is unavailable. */ }
+    throw new DialogueError('The dialogue prompt release is unavailable. Please retry.',503,'REGISTRY_UNAVAILABLE');
+  }
   let calls=0;
   let contextWasReplayed=false;
   let cacheHit=false;
   let frozenTelemetry: FrozenDialogueArtifact | null=null;
-  async function checkpoint(stage:string,value:unknown) {
-    const r=await client.rpc('npc_dialogue_checkpoint',{p_actor:actor,p_turn_id:input.turnId,p_fence:fence,p_stage:stage,p_value:value as Json})
-      .abortSignal(stage==='fail'?AbortSignal.timeout(1000):signal);
-    if(r.error) throw databaseError(r.error);
-  }
   async function generate(name:string,stage:Stage,payload:unknown):Promise<any> {
     if(checkpoints[name] && (name.startsWith('investigate') || checkpoints[name].artifactHash===frozenTelemetry?.hash)) return checkpoints[name].value;
     if(signal.aborted || calls>=Math.min(8,options.maxCalls??8)) throw new DialogueError('The conversation took too long. Please retry.',503,'BUDGET');

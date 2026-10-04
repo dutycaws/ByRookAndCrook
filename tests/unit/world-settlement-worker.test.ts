@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { type SettlementWorkerClient } from '$lib/server/evolving-world/settlement-worker';
 import { drainWorldSettlementQueue as drainWorldSettlementQueueBase, runSettlementClaim as runSettlementClaimBase, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
 import { parseSettlementClaim, SettlementProviderError } from '$lib/server/evolving-world/settlement-contracts';
@@ -42,6 +42,54 @@ async function proceduralFingerprint(proposal:unknown) { const context=parseFroz
 async function proceduralReceipt(args: Record<string,unknown>, replayed=false) { return {data:{status:'completed',rulesVersion:'procedural-world-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:await proceduralFingerprint(args.p_proposal),replayed},error:null}; }
 
 describe('world settlement worker', () => {
+  it('fails a claimed job when prompt release resolution is unavailable', async () => {
+    vi.useFakeTimers();
+    const mock=client();
+    const provider=fixtureProvider({proposer:proposal});
+    const failingPromptRegistry={async resolveForWork() { throw new Error('registry unavailable'); }};
+
+    try {
+      await expect(runSettlementClaimBase(mock.api, claim(), {
+        provider,
+        heartbeatMs:99_999,
+        promptRegistry:failingPromptRegistry as any
+      })).resolves.toEqual({status:'failed',errorCode:'registry_unavailable'});
+
+      expect(mock.calls.map((call)=>call.name)).toContain('world_settlement_fail');
+      expect(mock.calls.find((call)=>call.name==='world_settlement_fail')?.args).toMatchObject({
+        p_settlement_id:id('1'),
+        p_job_id:id('2'),
+        p_fence:id('3'),
+        p_failure_code:'registry_unavailable'
+      });
+      expect(provider.calls).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports lease_lost when registry failure finalization has a stale fence', async () => {
+    vi.useFakeTimers();
+    const mock=client({world_settlement_fail:()=>({data:null,error:{message:'Stale settlement fence'}})});
+    const provider=fixtureProvider({proposer:proposal});
+    const failingPromptRegistry={async resolveForWork() { throw new Error('registry unavailable'); }};
+
+    try {
+      await expect(runSettlementClaimBase(mock.api, claim(), {
+        provider,
+        heartbeatMs:99_999,
+        promptRegistry:failingPromptRegistry as any
+      })).resolves.toMatchObject({status:'lease_lost',errorCode:'registry_unavailable'});
+
+      expect(mock.calls.filter((call)=>call.name==='world_settlement_fail')).toHaveLength(1);
+      expect(provider.calls).toEqual([]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('strictly rejects malformed claims before any RPC', async () => {
     expect(() => parseSettlementClaim({ status:'processing', jobId:'nope' })).toThrow();
     const mock=client(); expect(await runSettlementClaim(mock.api, { jobId:'nope' })).toEqual({status:'failed',errorCode:'claim_malformed'}); expect(mock.calls).toHaveLength(0);

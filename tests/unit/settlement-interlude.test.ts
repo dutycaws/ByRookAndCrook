@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
-import SettlementInterlude, {
-  nextSettlementPoll,
-  SETTLEMENT_POLL_LIMIT
-} from '$lib/components/tavern/SettlementInterlude.svelte';
+import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
 import type { PublicSettlementStatus } from '$lib/game/evolving-world';
 
 const id = '11111111-1111-4111-8111-111111111111';
@@ -26,6 +23,8 @@ describe('SettlementInterlude', () => {
     const { body } = render(SettlementInterlude, { props: { settlement: settlement() } });
     expect(body).toContain('The world is turning');
     expect(body).toContain('2 of 5 moments settled');
+    expect(body).toContain('Check for morning');
+    expect(body).toContain('Connecting to overnight updates');
     expect(body).not.toContain('provider');
     expect(body).not.toContain('saveId');
   });
@@ -40,15 +39,4 @@ describe('SettlementInterlude', () => {
     expect(body).not.toContain(id);
   });
 
-  it('caps repeated scheduling across response replacements and pauses while hidden', () => {
-    let state: { settlementId: string | null; count: number } = { settlementId: id, count: 0 };
-    for (let index = 0; index < SETTLEMENT_POLL_LIMIT; index += 1) {
-      const instruction = nextSettlementPoll(state, id, true);
-      expect(instruction.shouldSchedule).toBe(true);
-      state = { settlementId: instruction.settlementId, count: instruction.count };
-    }
-    expect(nextSettlementPoll(state, id, true)).toEqual({ settlementId: id, count: SETTLEMENT_POLL_LIMIT, shouldSchedule: false, delayed: true });
-    expect(nextSettlementPoll(state, id, false)).toEqual({ settlementId: id, count: SETTLEMENT_POLL_LIMIT, shouldSchedule: false, delayed: false });
-    expect(nextSettlementPoll(state, '22222222-2222-4222-8222-222222222222', true)).toEqual({ settlementId: '22222222-2222-4222-8222-222222222222', count: 1, shouldSchedule: true, delayed: false });
-  });
 });

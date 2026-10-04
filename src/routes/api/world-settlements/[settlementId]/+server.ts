@@ -6,7 +6,7 @@ import { getBarSnapshot } from '$lib/server/serving';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRIVATE_NO_STORE = { 'cache-control': 'private, no-store' };
 
-/** Poll a single owner-visible settlement. The save comes from the verified
+/** Read a single owner-visible settlement after a notification or manual refresh. The save comes from the verified
  * player's current bar snapshot, never from request input. */
 export const GET: RequestHandler = async ({ locals, params }) => {
   if (!await locals.getVerifiedUser()) return json({ message: 'Please sign in.' }, { status: 401, headers: PRIVATE_NO_STORE });

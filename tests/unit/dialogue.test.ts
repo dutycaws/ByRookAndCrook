@@ -34,6 +34,38 @@ function cognitionClient(base: Record<string, unknown>) {
   } as any;
 }
 describe('dialogue boundaries',()=>{
+  it('marks a claimed turn failed before returning a registry outage',async()=>{
+    const calls:Array<{name:string;args:Record<string,unknown>}> = [];
+    const signals:AbortSignal[] = [];
+    const result=(data:unknown)=>({
+      data,
+      error:null,
+      abortSignal(signal:AbortSignal) { signals.push(signal); return {data,error:null}; }
+    });
+    const client={rpc(name:string,args:Record<string,unknown>={}) {
+      calls.push({name,args});
+      if(name==='npc_dialogue_begin') return result({status:'processing',fence:'fence-1',checkpoints:{},content_version:'npc-v1',rule_version:'rules-v1'});
+      if(name==='npc_dialogue_checkpoint') return result(null);
+      throw new Error(`Unexpected RPC ${name}`);
+    }} as any;
+    const unavailablePromptRegistry={async resolveForWork() { throw new Error('registry unavailable'); }};
+
+    await expect(runDialogue(client,'33333333-3333-4333-8333-333333333333',{
+      turnId,npcId,message:'Hello',expectedConversationSequence:0,interactionVersion:'dialogue-v2'
+    },{} as DialogueProvider,{promptRegistry:unavailablePromptRegistry as any})).rejects.toMatchObject({status:503,code:'REGISTRY_UNAVAILABLE'});
+
+    expect(calls.map((call)=>call.name)).toEqual(['npc_dialogue_begin','npc_dialogue_checkpoint']);
+    expect(calls[1].args).toMatchObject({
+      p_actor:'33333333-3333-4333-8333-333333333333',
+      p_turn_id:turnId,
+      p_fence:'fence-1',
+      p_stage:'fail',
+      p_value:{code:'REGISTRY_UNAVAILABLE'}
+    });
+    expect(signals).toHaveLength(2);
+    expect(signals[1]).not.toBe(signals[0]);
+  });
+
   it('preserves custom environment configuration and multiline values',()=>{
     const original='OPENAI_API_KEY="test-only-placeholder"\nCUSTOM="first\nsecond"\nPUBLIC_SUPABASE_URL=old\n';
     const result=mergeEnvironment(original,{PUBLIC_SUPABASE_URL:'http://127.0.0.1:57321'});

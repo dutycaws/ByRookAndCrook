@@ -7,5 +7,5 @@ export const load: LayoutServerLoad = async ({ locals }) => {
   if (!user) redirect(303, '/login');
 
   const community = await communityContext(locals.supabase);
-  return { userEmail: user.email ?? 'Tavern keeper', community };
+  return { userId: user.id, userEmail: user.email ?? 'Tavern keeper', community };
 };

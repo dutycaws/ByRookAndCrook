@@ -116,33 +116,55 @@ select throws_ok(
     (select result->>'fence' from pg_temp.claim_two),
     'accepted/'||(select result->>'jobId' from pg_temp.claim_two)||'/art-v2/'||repeat('b',64)||'.png',repeat('a',64)),
   'PT400',null,'accept rejects a storage key whose filename does not match its recorded SHA');
+-- Keep v2's lease alive while the current v3 job finishes first.
+create temporary table pg_temp.claim_three as select public.world_runtime_art_claim_next() result;
+select is((select result->>'appearanceVersion' from pg_temp.claim_three),'art-v3','current appearance claims independently of a still-processing stale job');
 select lives_ok(
+  format('select public.world_runtime_art_accept(%L,%s,%L,%L,%L)',
+    (select result->>'jobId' from pg_temp.claim_three),
+    (select result->>'attempt' from pg_temp.claim_three),
+    (select result->>'fence' from pg_temp.claim_three),
+    'accepted/'||(select result->>'jobId' from pg_temp.claim_three)||'/art-v3/'||repeat('a',64)||'.png',repeat('a',64)),
+  'the current fenced attempt accepts its verified render');
+select lives_ok(
+  format('select public.world_runtime_art_replace_accepted(%L,%L,%L)',
+    (select result->>'jobId' from pg_temp.claim_three),
+    'accepted/'||(select result->>'jobId' from pg_temp.claim_three)||'/art-v3/'||repeat('b',64)||'.png',repeat('b',64)),
+  'same-spec replacement is separate from a claimed worker completion');
+select throws_ok(
   format('select public.world_runtime_art_accept(%L,%s,%L,%L,%L)',
     (select result->>'jobId' from pg_temp.claim_two),
     (select result->>'attempt' from pg_temp.claim_two),
     (select result->>'fence' from pg_temp.claim_two),
-    'accepted/'||(select result->>'jobId' from pg_temp.claim_two)||'/art-v2/'||repeat('a',64)||'.png',repeat('a',64)),
-  'the current fenced attempt accepts its verified render');
-select lives_ok(
-  format('select public.world_runtime_art_replace_accepted(%L,%L,%L)',
-    (select result->>'jobId' from pg_temp.claim_two),
-    'accepted/'||(select result->>'jobId' from pg_temp.claim_two)||'/art-v2/'||repeat('b',64)||'.png',repeat('b',64)),
-  'same-spec replacement is separate from a claimed worker completion');
+    'accepted/'||(select result->>'jobId' from pg_temp.claim_two)||'/art-v2/'||repeat('c',64)||'.png',repeat('c',64)),
+  'PT409',null,'an older still-live worker cannot replace the accepted current appearance');
 reset role;
-select is((select count(*) from private.world_runtime_art_renders r join pg_temp.fixture_jobs fj on fj.job_id=r.job_id and fj.save_id=r.save_id where fj.appearance_version='art-v2'),2::bigint,'accepted replacements retain immutable render history');
+select is((select count(*) from private.world_runtime_art_renders r join pg_temp.fixture_jobs fj on fj.job_id=r.job_id and fj.save_id=r.save_id where fj.appearance_version='art-v3'),2::bigint,'accepted replacements retain immutable render history');
 select is((select r.sha256 from private.world_runtime_art_current c join private.world_runtime_art_renders r on r.id=c.render_id join pg_temp.fixture f on f.save_id=c.save_id and f.entity_id=c.canonical_entity_id),repeat('b',64),'current pointer advances to latest accepted replacement');
 create temporary table pg_temp.current_render as select c.render_id from private.world_runtime_art_current c join pg_temp.fixture f on f.save_id=c.save_id and f.entity_id=c.canonical_entity_id;
 grant select on pg_temp.current_render to authenticated;
+select is((select count(*) from private.world_runtime_art_renders r join pg_temp.fixture_jobs fj on fj.job_id=r.job_id where fj.appearance_version='art-v2'),0::bigint,'stale acceptance inserts no render');
 select ok(has_function_privilege('service_role','public.world_runtime_art_service_runtime_key(uuid)','execute'),'only service can resolve a runtime storage key');
 
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='19000000-0000-4000-8000-000000000001';
 select is((select count(*) from jsonb_array_elements(public.world_runtime_art_projection((select save_id from pg_temp.fixture))) item where item->>'entityId'=(select entity_id::text from pg_temp.fixture)),1::bigint,'projection contains only the latest effective fixture entity state');
+select is((select item->>'status' from jsonb_array_elements(public.world_runtime_art_projection((select save_id from pg_temp.fixture))) item where item->>'entityId'=(select entity_id::text from pg_temp.fixture)),'accepted','late stale completion does not regress public art to a placeholder');
 select ok(not (public.world_runtime_art_projection((select save_id from pg_temp.fixture))::text ~ 'runtimeKey|accepted/|token'),'projection never exposes storage keys or tokens');
 select ok((select public.world_runtime_art_authorize_delivery((select save_id from pg_temp.fixture),(select entity_id from pg_temp.fixture),(select render_id from pg_temp.current_render)) ? 'renderId'),'owner receives only an opaque render authorization');
 select throws_ok($$select public.world_runtime_art_service_runtime_key('19000000-0000-4000-8000-000000000002')$$,'42501',null,'authenticated callers cannot resolve private storage keys');
 reset role;
 select ok(not has_table_privilege('authenticated','private.world_runtime_art_jobs','select'),'players cannot read private runtime-art jobs');
+set local role service_role;
+set local request.jwt.claim.role='service_role';
+select public.world_runtime_art_set_appearance((select save_id from pg_temp.fixture),'19000000-0000-4000-8000-000000000002','art-v4','gold lantern');
+select throws_ok(
+  format('select public.world_runtime_art_replace_accepted(%L,%L,%L)',
+    (select result->>'jobId' from pg_temp.claim_three),
+    'accepted/'||(select result->>'jobId' from pg_temp.claim_three)||'/art-v3/'||repeat('d',64)||'.png',repeat('d',64)),
+  'PT409',null,'accepted replacement cannot publish a superseded appearance');
+reset role;
+select is((select c.render_id from private.world_runtime_art_current c join pg_temp.fixture f on f.save_id=c.save_id and f.entity_id=c.canonical_entity_id),(select render_id from pg_temp.current_render),'stale replacement leaves the pointer unchanged');
 select * from finish();
 rollback;

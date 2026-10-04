@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(33);
+select plan(38);
 
 select has_function('private','world_quest_lifecycle_status',array['uuid','uuid'],'one canonical lifecycle status helper exists');
 select has_function('private','world_quest_public_view',array['private.world_quests','integer'],'player-safe quest view exists');
@@ -14,6 +14,30 @@ create temporary table pg_temp.resident as
   select * from private.world_materialize_resident_from_version('74000000-0000-4000-8000-000000000011','18181818-1818-4181-8181-181818181818','18181818-1818-4181-8181-181818181819',1);
 
 select is((select campaign_state from private.world_npc_instances where id=(select instance_id from pg_temp.resident)),'{}'::jsonb,'legacy campaign quest state is empty');
+create temporary table pg_temp.registry_turn as
+  select public.npc_dialogue_begin(
+    '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
+    '18181818-1818-4181-8181-181818181818','The registry is temporarily unavailable.',0,null,null,null
+  ) result;
+select public.npc_dialogue_checkpoint(
+  '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
+  (select (result->>'fence')::uuid from pg_temp.registry_turn),'fail','{"code":"REGISTRY_UNAVAILABLE"}'::jsonb
+);
+select is((select status::text from private.world_npc_dialogue_turns where id='74000000-0000-4000-8000-000000000022'),'failed','registry outage fails the claimed dialogue turn');
+select is((select error_code from private.world_npc_dialogue_turns where id='74000000-0000-4000-8000-000000000022'),'REGISTRY_UNAVAILABLE','registry outage code persists on the dialogue turn');
+select is((select error_code from private.world_npc_dialogue_attempts where fence=(select (result->>'fence')::uuid from pg_temp.registry_turn)),'REGISTRY_UNAVAILABLE','registry outage code persists on its attempt');
+create temporary table pg_temp.registry_retry as
+  select public.npc_dialogue_begin(
+    '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
+    '18181818-1818-4181-8181-181818181818','The registry is temporarily unavailable.',0,null,null,null
+  ) result;
+select is((select result->>'status' from pg_temp.registry_retry),'processing','the failed turn can be reclaimed immediately');
+select ok(not coalesce((select (result->>'busy')::boolean from pg_temp.registry_retry),false),'retry is not held behind the prior lease');
+select public.npc_dialogue_checkpoint(
+  '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
+  (select (result->>'fence')::uuid from pg_temp.registry_retry),'fail','{"code":"REGISTRY_UNAVAILABLE"}'::jsonb
+);
+
 create temporary table pg_temp.turn as
   select public.npc_dialogue_begin(
     '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000021',

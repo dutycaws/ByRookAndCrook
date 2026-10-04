@@ -131,7 +131,20 @@
     <div class="tavern-dashboard">
       <BarStatusRail day={data.snapshot.save.currentDay} gold={data.snapshot.save.gold} drinks={data.snapshot.beverages.length} foods={data.snapshot.foods.length} recent={data.snapshot.history.length} />
       {#if data.archived}
-        <section class="panel empty-state compact-empty"><h2>Past residents</h2><p>This is a read-only record. Departed and dismissed residents never return to the active tavern scene.</p></section>
+        <section class="panel empty-state compact-empty">
+          <h2>Past residents</h2>
+          <p>This is a read-only record. Departed and dismissed residents never return to the active tavern scene.</p>
+          {#if displayedPatrons.length > 0}
+            <div class="archived-resident-picker">
+              <label for="archived-resident">Select a past resident</label>
+              <select id="archived-resident" bind:value={selectedInstanceId} disabled={!hydrated}>
+                {#each displayedPatrons as resident (resident.instanceId)}
+                  <option value={resident.instanceId}>{resident.name}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
+        </section>
       {:else}
         <TavernScene patrons={data.snapshot.patrons} selected={patron} focusedKey={focusedInstanceId} journals={data.journals} day={data.snapshot.save.currentDay}
           disabled={!hydrated || pending || !!unresolved}
@@ -196,3 +209,30 @@
     </div>{/if}
   {/if}
 </main>
+
+<style>
+  .archived-resident-picker {
+    display: grid;
+    gap: .4rem;
+    width: min(100%, 24rem);
+  }
+
+  .archived-resident-picker label {
+    color: #c9b891;
+    font-size: .9rem;
+  }
+
+  .archived-resident-picker select {
+    min-height: 44px;
+    padding: .5rem .65rem;
+    border: 1px solid #765324;
+    color: #e2cc97;
+    background: #100a05;
+    font: inherit;
+  }
+
+  .archived-resident-picker select:focus-visible {
+    outline: 3px solid #f0d383;
+    outline-offset: 2px;
+  }
+</style>

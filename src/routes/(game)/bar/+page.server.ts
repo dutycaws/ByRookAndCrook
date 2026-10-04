@@ -194,15 +194,17 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
           evolution: publicEvolution(journal.evolution)
         };
       }
-      if (historyInstanceId && journals[historyInstanceId]) {
+      // Scene selection stays local while a conversation is pending. Preload
+      // each journal's bounded archive so switching residents keeps its history.
+      await Promise.all(Object.keys(journals).map(async (instanceId) => {
         const historyResult = await rpc('npc_quest_history_archive', {
-          p_instance_id: historyInstanceId,
+          p_instance_id: instanceId,
           p_limit: 20,
-          p_cursor: historyCursor
+          p_cursor: instanceId === historyInstanceId ? historyCursor : null
         });
         if (historyResult.error) throw historyResult.error;
-        journals[historyInstanceId].questArchive = publicQuestArchive(historyResult.data);
-      }
+        journals[instanceId].questArchive = publicQuestArchive(historyResult.data);
+      }));
       }
       // The roster is a bounded browse projection.  The illustrated room may
       // only show residents whose authoritative journal says they are present.
