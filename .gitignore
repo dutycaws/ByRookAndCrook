@@ -162,3 +162,10 @@ test-results/
 # Supabase local state
 supabase/.branches/
 supabase/.temp/
+
+# Historical documentation media retained only in local archives.
+/docs/reference/*.png
+/docs/screenshots/**
+!/docs/screenshots/**/*.json
+!/docs/screenshots/curated/
+!/docs/screenshots/curated/**

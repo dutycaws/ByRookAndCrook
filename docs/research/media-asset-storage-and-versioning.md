@@ -1,5 +1,6 @@
 # Media asset storage and versioning guidance
 
+> Historical recommendation: the October 2026 cleanup supersedes the recommendation below to retain old documentation media in Git. See [the current media lifecycle](../design/media-lifecycle.md).
 **Scope.** This note records the assessment that preceded the repository's media policy. It is based on repository evidence plus official GitHub, Supabase, AWS, and IETF documentation (checked 2026-09-10). The adopted, implementation-authoritative decisions are in the [media lifecycle](../design/media-lifecycle.md): they use no Git LFS or inline size overrides, grandfather unchanged historical evidence, and reject every newly introduced ordinary Git blob over 1 MiB. Where an option discussed below differs, the lifecycle document controls. This is not a history-rewrite plan.
 
 ## Repository assessment

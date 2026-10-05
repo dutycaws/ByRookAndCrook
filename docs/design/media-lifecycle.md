@@ -14,7 +14,7 @@ This document defines the storage boundary for visual source material, browser-r
 | Curated still evidence | `docs/screenshots/curated/**` | Ordinary Git, immutable commit-scoped directories | At most 12 stills and 4 MiB per evidence set; every file is at most 1 MiB. |
 | Curated motion evidence | Public Supabase Storage bucket `review-evidence` | Commit only its index/links and metadata | Immutable content-addressed objects. Retain indefinitely while referenced. |
 
-Existing documentation screenshots, videos, and reference images are historical evidence. They remain available and are not retroactively moved or rewritten. No new Git LFS use, Git video, or history rewrite is part of this policy.
+The historical documentation screenshots, videos, and reference PNGs are removed from Git history by the October 2026 size cleanup. Existing local copies can remain at their ignored original paths; fresh clones do not include them. Their older documentation links describe local archival evidence, not files shipped by Git. Preserve an external archive before applying the rewrite. Runtime assets and text/JSON provenance remain tracked. New evidence continues to follow the capture and promotion rules below.
 
 ## Guardrails in development
 
@@ -81,7 +81,7 @@ At least quarterly, download the newest Drive ZIP and its `.sha256` companion to
 
 ## Capture, review, and promotion
 
-Normal capture commands write candidates to a commit-scoped ignored directory beneath `artifacts/media-captures/` and create a capture manifest. The manifest identifies the Git commit, worktree cleanliness, browser/viewport conditions, asset hashes, outputs, and measurements. Existing committed evidence remains historical; regenerating a capture does not overwrite it.
+Normal capture commands write candidates to a commit-scoped ignored directory beneath `artifacts/media-captures/` and create a capture manifest. The manifest identifies the Git commit, worktree cleanliness, browser/viewport conditions, asset hashes, outputs, and measurements. Existing local archival evidence remains historical; regenerating a capture does not overwrite it.
 
 ```sh
 npm run screenshots

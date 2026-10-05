@@ -57,33 +57,6 @@ type SceneContract = {
   bakery: { layers: SceneLayer[] };
 };
 
-const references: ExpectedAsset[] = [
-  {
-    path: 'docs/reference/CozyTavernConceptArt2.png',
-    width: 1672,
-    height: 941,
-    alpha: false,
-    sha256: '06925a9fb1eb1603a3f237c54419701f62c11882f181a1d66a9ae5acc8816b8b',
-    maxBytes: 4_000_000
-  },
-  {
-    path: 'docs/reference/CozyTavernConceptArt3.png',
-    width: 1672,
-    height: 941,
-    alpha: false,
-    sha256: '9ae79901a389c228751c828649561f3e982aeda78019e60cbfe4211adce6c2ee',
-    maxBytes: 4_000_000
-  },
-  {
-    path: 'docs/reference/CozyTavernConceptArt4.png',
-    width: 1672,
-    height: 941,
-    alpha: false,
-    sha256: '67f9219290374363de2dd156ff1f83556bb94c2906e2e74546068ddacfb239c0',
-    maxBytes: 4_000_000
-  },
-];
-
 const HISTORICAL_ART6_REVISION_ID = 'design-reference-cozy-tavern-art-6@b3429ddfcb61';
 const CURRENT_ART6_REVISION_ID = 'design-reference-cozy-tavern-art-6@21cdb0728f33';
 const ELARA_COUNTER_HERO_REVISION_ID = 'exec-413ef454-79d1-40e2-827f-f6d033030512@819f0f238644';
@@ -503,7 +476,7 @@ async function assertContract() {
   console.log(`ok ${path} ${referenced.size} referenced assets`);
 }
 
-await Promise.all([...references, ...runtimeAssets].map(assertAsset));
+await Promise.all(runtimeAssets.map(assertAsset));
 await assertLocalArt6Catalog();
 await assertLocalIssue24SceneAssets();
 assertIssue24CompositionMediaContract();
@@ -511,4 +484,4 @@ const runtimeFiles = await inventoryRuntimeFiles(RUNTIME_ASSET_DIRECTORY);
 assertRuntimeInventory(runtimeFiles);
 await stat('static/assets/scenes/motion-proof-contract.json');
 await assertContract();
-console.log(`validated ${references.length} references and ${runtimeAssets.length} optimized runtime assets`);
+console.log(`validated ${runtimeAssets.length} optimized runtime assets`);

@@ -15,10 +15,6 @@ function git(root: string, ...args: string[]): string {
   }).trim();
 }
 
-function gitBlobFromWorkspace(oid: string): Buffer {
-  return Buffer.from(execFileSync('git', ['cat-file', 'blob', oid], { cwd: process.cwd(), maxBuffer: 5_000_000 }));
-}
-
 async function repository(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'media-git-policy-'));
   roots.push(root);
@@ -81,81 +77,24 @@ describe('media Git policy', () => {
     ]));
   });
 
-  it('grandfathers only the reviewed current path/OID pairs when a base predates them', async () => {
+  it('rejects synthetic oversized documentation images and video evidence', async () => {
     const root = await repository();
     const base = git(root, 'rev-parse', 'HEAD');
-    const historical = [
-      {
-        path: 'docs/reference/CozyTavernConceptArt2.png',
-        oid: 'c732c4c1323d6519399e5d0c4c29e2fe98ab6911'
-      },
-      {
-        path: 'docs/screenshots/final-review/bakery-interaction.webm',
-        oid: 'a64a144333775187ba028b0462852d29585d9bb0'
-      }
+    await commitFile(root, 'docs/reference/candidate.png', Buffer.alloc(MAX_GIT_BLOB_BYTES + 1, 7));
+    const head = await commitFile(root, 'docs/screenshots/candidate.webm', Buffer.from('synthetic candidate clip'));
+
+    const expectedViolations = [
+      expect.objectContaining({ code: 'oversized-blob', path: 'docs/reference/candidate.png' }),
+      expect.objectContaining({ code: 'git-video', path: 'docs/screenshots/candidate.webm' })
     ];
-    for (const item of historical) {
-      await mkdir(dirname(join(root, item.path)), { recursive: true });
-      await writeFile(join(root, item.path), gitBlobFromWorkspace(item.oid));
-    }
-    git(root, 'add', '--', ...historical.map((item) => item.path));
-    git(root, 'commit', '-qm', 'historical media introduced before policy');
-    const head = git(root, 'rev-parse', 'HEAD');
-
-    expect((await checkGitPolicy({ kind: 'range', base, head }, root)).violations).toEqual([]);
-
-    await writeFile(join(root, 'docs/reference/copied-concept.png'), gitBlobFromWorkspace(historical[0].oid));
-    git(root, 'add', 'docs/reference/copied-concept.png');
-    git(root, 'commit', '-qm', 'copy reviewed historical image');
-    const copied = git(root, 'rev-parse', 'HEAD');
-    expect((await checkGitPolicy({ kind: 'range', base: head, head: copied }, root)).violations)
-      .toEqual(expect.arrayContaining([expect.objectContaining({
-        code: 'oversized-grandfathered-copy', path: 'docs/reference/copied-concept.png'
-      })]));
-
-    await writeFile(join(root, historical[0].path), Buffer.alloc(MAX_GIT_BLOB_BYTES + 1, 7));
-    git(root, 'add', '--', historical[0].path);
-    git(root, 'commit', '-qm', 'replace reviewed historical image');
-    const replaced = git(root, 'rev-parse', 'HEAD');
-    expect((await checkGitPolicy({ kind: 'range', base: copied, head: replaced }, root)).violations)
-      .toEqual(expect.arrayContaining([expect.objectContaining({
-        code: 'oversized-blob', path: historical[0].path
-      })]));
-  });
-
-  it('rejects a transient copy of grandfathered oversized and video objects even when it is deleted before head', async () => {
-    const root = await repository();
-    const historical = [
-      {
-        path: 'docs/reference/CozyTavernConceptArt2.png',
-        oid: 'c732c4c1323d6519399e5d0c4c29e2fe98ab6911'
-      },
-      {
-        path: 'docs/screenshots/final-review/bakery-interaction.webm',
-        oid: 'a64a144333775187ba028b0462852d29585d9bb0'
-      }
-    ];
-    for (const item of historical) {
-      await mkdir(dirname(join(root, item.path)), { recursive: true });
-      await writeFile(join(root, item.path), gitBlobFromWorkspace(item.oid));
-    }
-    git(root, 'add', '--', ...historical.map((item) => item.path));
-    git(root, 'commit', '-qm', 'reviewed historical media');
-    const base = git(root, 'rev-parse', 'HEAD');
-
-    await writeFile(join(root, 'docs/reference/transient-copy.png'), gitBlobFromWorkspace(historical[0].oid));
-    await writeFile(join(root, 'docs/screenshots/transient-copy.webm'), gitBlobFromWorkspace(historical[1].oid));
-    git(root, 'add', '--', 'docs/reference/transient-copy.png', 'docs/screenshots/transient-copy.webm');
-    git(root, 'commit', '-qm', 'temporarily copy historical media');
-    git(root, 'rm', '-q', 'docs/reference/transient-copy.png', 'docs/screenshots/transient-copy.webm');
-    git(root, 'commit', '-qm', 'remove temporary media copies');
-    const head = git(root, 'rev-parse', 'HEAD');
-
     expect((await checkGitPolicy({ kind: 'range', base, head }, root)).violations)
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ code: 'oversized-grandfathered-copy', path: 'docs/reference/transient-copy.png' }),
-        expect.objectContaining({ code: 'git-video', path: 'docs/screenshots/transient-copy.webm' })
-      ]));
+      .toEqual(expect.arrayContaining(expectedViolations));
+
+    git(root, 'rm', '-q', 'docs/reference/candidate.png', 'docs/screenshots/candidate.webm');
+    git(root, 'commit', '-qm', 'delete synthetic documentation media');
+    const deletedHead = git(root, 'rev-parse', 'HEAD');
+    expect((await checkGitPolicy({ kind: 'range', base, head: deletedHead }, root)).violations)
+      .toEqual(expect.arrayContaining(expectedViolations));
   });
 
   it('permits a true rename of a grandfathered large blob but rejects its copy', async () => {
