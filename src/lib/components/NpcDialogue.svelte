@@ -1,418 +1,590 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import { invalidateAll } from '$app/navigation';
-  import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
-  import type { BarSnapshot } from '$lib/game/serving';
-  let { npcId, name, journal, stock, unavailable, archiveHref = null, archived = false, embedded = false, journalOnly = false, blocked = false, onbusychange }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null;archiveHref?:string|null;archived?:boolean;embedded?:boolean;journalOnly?:boolean;blocked?:boolean;onbusychange?:(busy:boolean)=>void}=$props();
-  let message=$state(''); let intentCardId=$state(''); let offeringSelection=$state(''); let busy=$state(false);
-  let frozen=$state<DialogueInput|null>(null); let notice=$state(''); let failure=$state(false);
-  let hydrated=$state(false);
-  let restoredTurn=$state<string|null>(null);
-  $effect(()=>{hydrated=true; if(journal.pending && journal.pending.turnId!==restoredTurn && !frozen) {
-    restoredTurn=journal.pending.turnId; void recover(journal.pending.turnId);
-  }});
-  let cancelling=$state(false);
-  let canRetry=$state(true);
-  $effect(()=>{onbusychange?.(busy || frozen !== null);});
-  onDestroy(()=>onbusychange?.(false));
-  let operation=0;
-  let posting:AbortController|undefined;
-  let selectedIntent=$derived(stock.intentCards.find(card=>card.id===intentCardId));
-  // Intent cards are individual stock items. Group identical effects for a
-  // calmer picker while retaining a concrete stock ID for the dialogue API.
-  let intentOptions=$derived.by(()=>{
-    const grouped=new Map<string,{card:typeof stock.intentCards[number];count:number;ids:string[]}>();
-    const tiersByName=new Map<string,Set<string>>();
-    for(const card of stock.intentCards) {
-      const nameKey=JSON.stringify([card.cardKey,card.displayName]);
-      const tiers=tiersByName.get(nameKey) ?? new Set<string>();
-      tiers.add(card.tier);
-      tiersByName.set(nameKey,tiers);
-      const key=JSON.stringify([card.cardKey,card.displayName,card.description,card.tier]);
-      const existing=grouped.get(key);
-      if(existing) { existing.count+=1; existing.ids.push(card.id); }
-      else grouped.set(key,{card,count:1,ids:[card.id]});
-    }
-    return [...grouped.values()].map((option)=>({
-      ...option,
-      label: (tiersByName.get(JSON.stringify([option.card.cardKey,option.card.displayName]))?.size ?? 0) > 1
-        ? `${option.card.displayName} · ${tierLabel(option.card.tier)}`
-        : option.card.displayName
-    }));
-  });
-  let selectedOffering=$derived(offeringSelection
-    ? [...stock.beverages,...stock.foods].find(item=>`${item.kind}:${item.id}`===offeringSelection)
-    : undefined);
+	import { onDestroy, onMount, tick } from 'svelte';
+	import { invalidateAll } from '$app/navigation';
+	import NpcHistory from '$lib/components/tavern/NpcHistory.svelte';
+	import ServiceCardHand from '$lib/components/tavern/ServiceCardHand.svelte';
+	import TavernCard from '$lib/components/tavern/TavernCard.svelte';
+	import type { TavernCardChoice, TavernCardKind } from '$lib/components/tavern/card-types';
+	import { serviceCardStacks } from '$lib/game/service-cards';
+	import { qualityLabel, type IntentCardKey } from '$lib/game/contracts';
+	import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
+	import type { BarSnapshot, ServeReceipt } from '$lib/game/serving';
 
-  function tierLabel(tier:string) {
-    return ({fine:'Fine',superior:'Superior',exceptional:'Exceptional'} as Record<string,string>)[tier] ?? tier;
-  }
+	let {
+		npcId,
+		name,
+		journal,
+		stock,
+		instanceId,
+		saveId = '',
+		history,
+		unavailable,
+		archiveHref = null,
+		archived = false,
+		embedded = false,
+		journalOnly = false,
+		blocked = false,
+		focusActive = true,
+		composerOpen = false,
+		deckOpen = false,
+		onbusychange,
+		oncomposerchange,
+		ondeckchange,
+		onselectionchange
+	}: {
+		npcId: string;
+		instanceId?: string;
+		saveId?: string;
+		name: string;
+		journal: Journal;
+		history?: ServeReceipt[];
+		stock: BarSnapshot;
+		unavailable: string | null;
+		archiveHref?: string | null;
+		archived?: boolean;
+		embedded?: boolean;
+		journalOnly?: boolean;
+		blocked?: boolean;
+		focusActive?: boolean;
+		composerOpen?: boolean;
+		deckOpen?: boolean;
+		onbusychange?: (busy: boolean) => void;
+		oncomposerchange?: (open: boolean) => void;
+		ondeckchange?: (open: boolean) => void;
+		onselectionchange?: (selected: boolean) => void;
+	} = $props();
 
-  async function acceptStatus(body:any, completedNotice='Your last reply was saved.') {
-    failure=false;
-    if(body.status==='completed') {
-      frozen=null;message='';intentCardId='';offeringSelection='';notice=completedNotice;
-      await invalidateAll();
-    } else if(body.status==='cancelled'||body.status==='stale') {
-      frozen=null;notice=body.status==='cancelled'?'Unfinished message cancelled.':'That message is closed. You can send a new message.';
-      await invalidateAll();
-    } else {
-      frozen=body.input;message=body.input.message;intentCardId=body.input.intentCardId??'';
-      offeringSelection=body.input.offering ? `${body.input.offering.kind}:${body.input.offering.itemId}` : '';
-      canRetry=body.canRetry??body.status!=='processing';
-      notice=body.status==='processing'?'Your conversation is still being completed. Check again shortly.'
-        :canRetry?'The last reply was not completed. Retry the same message or cancel it.'
-        :'This reply cannot be resumed. Cancel the unfinished message, then edit it before sending again.';
-    }
-  }
-  async function recover(id:string) {
-    if(blocked||busy)return;
-    const current=++operation;busy=true;failure=false;
-    try {
-      const r=await fetch(`/api/dialogue/${id}`);const body=await r.json();
-      if(current!==operation)return;
-      if(!r.ok)throw new Error(body.message);
-      await acceptStatus(body);
-    } catch {
-      if(current===operation){notice='The conversation could not be checked. Please retry.';failure=true;}
-    } finally {if(current===operation)busy=false;}
-  }
-  async function send(event:SubmitEvent) {
-    event.preventDefault(); if(blocked||busy||frozen&&!canRetry)return;
-    if(!frozen)canRetry=true;
-    const [offeringKind, offeringId] = offeringSelection.split(':', 2);
-    const offering: Offering | null = offeringId && (offeringKind === 'food' || offeringKind === 'beverage')
-      ? { kind: offeringKind, itemId: offeringId }
-      : null;
-    frozen??={turnId:crypto.randomUUID(),npcId,message,expectedConversationSequence:journal.sequence,
-      interactionVersion:'dialogue-v2',intentCardId:intentCardId||null,offering};
-    const command=frozen as DialogueInput;const current=++operation;
-    const controller=new AbortController();posting=controller;
-    busy=true;notice='';failure=false;
-    try {
-      const response=await fetch('/api/dialogue',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(command),signal:controller.signal});
-      const body=await response.json();
-      if(current!==operation)return;
-      if(!response.ok) {
-        canRetry=!['CONSISTENCY','CONTEXT_BUDGET'].includes(body.code);
-        if([400,409,422].includes(response.status)) {
-          // Only a confirmed closure (or a missing turn after POST has finished) releases the command.
-          const closed=await fetch(`/api/dialogue/${command.turnId}`,{method:'DELETE'});
-          if(current!==operation)return;
-          if(closed.ok){const status=await closed.json();await acceptStatus(status);if(status.status==='completed')return;}
-          else if(closed.status===404){frozen=null;await invalidateAll();}
-        }
-        throw new Error(body.message);
-      }
-      if(body.status==='completed')await acceptStatus(body,'Reply saved.');
-      else {canRetry=false;notice='Your conversation is still being completed. Check again shortly.';}
-    } catch(cause) {
-      if(current===operation){failure=true;notice=cause instanceof Error?cause.message:'The result is unknown. Check the conversation before retrying.';}
-    } finally {
-      if(posting===controller)posting=undefined;
-      if(current===operation)busy=false;
-    }
-  }
-  async function cancel() {
-    if(blocked||!frozen||cancelling)return;
-    const command=frozen;const current=++operation;const pendingPost=posting;
-    busy=true;cancelling=true;failure=false;
-    try {
-      const r=await fetch(`/api/dialogue/${command.turnId}`,{method:'DELETE'});
-      const body=await r.json();
-      if(!r.ok)throw new Error();
-      if(!['completed','cancelled','stale'].includes(body.status))throw new Error();
-      // Fence the server turn first. Aborting the browser request alone cannot cancel a generation.
-      pendingPost?.abort();
-      await acceptStatus(body);
-    } catch {
-      failure=true;notice='Cancellation could not be confirmed. Check the reply or try cancelling again.';
-    } finally {cancelling=false;if(current===operation)busy=false;}
-  }
+	const residentKey = $derived(instanceId ?? journal.instanceId);
+	const residentHistory = $derived(history ?? stock.history);
+	const messageFieldId = $derived(`npc-message-${safeId(residentKey)}`);
+	const dialogueHeadingId = $derived(`npc-dialogue-heading-${safeId(residentKey)}`);
+	const draftKey = $derived(`byrook:bar-draft:${saveId}:${residentKey}`);
+
+	let message = $state('');
+	let intentCardId = $state('');
+	let offeringSelection = $state('');
+	let busy = $state(false);
+	let frozen = $state<DialogueInput | null>(null);
+	let notice = $state('');
+	let failure = $state(false);
+	let hydrated = $state(false);
+	let draftLoaded = $state(false);
+	let restoredTurn = $state<string | null>(null);
+	let cancelling = $state(false);
+	let canRetry = $state(true);
+	let composerOpenLocal = $state(false);
+	let deckOpenLocal = $state(false);
+	let operation = 0;
+	let posting: AbortController | undefined;
+
+	$effect(() => { composerOpenLocal = composerOpen; });
+	$effect(() => { deckOpenLocal = deckOpen; });
+	$effect(() => { onbusychange?.(busy || frozen !== null); });
+	$effect(() => { onselectionchange?.(!!intentCardId || !!offeringSelection); });
+	$effect(() => {
+		if (!focusActive) {
+			setDeckOpen(false);
+			setComposerOpen(false);
+			if (!frozen) clearChoice();
+		}
+	});
+	$effect(() => {
+		if (hydrated && journal.pending && journal.pending.turnId !== restoredTurn && !frozen) {
+			restoredTurn = journal.pending.turnId;
+			void recover(journal.pending.turnId);
+		}
+	});
+	$effect(() => {
+		const key = draftKey;
+		const draft = message;
+		if (!draftLoaded || !key || typeof window === 'undefined') return;
+		try {
+			if (draft) window.sessionStorage.setItem(key, draft);
+			else window.sessionStorage.removeItem(key);
+		} catch {
+			// The in-memory draft remains available when browser storage is disabled.
+		}
+	});
+
+	onMount(() => {
+		try {
+			if (!journal.pending) message = window.sessionStorage.getItem(draftKey) ?? '';
+		} catch {
+			// The composer still works without session storage.
+		}
+		draftLoaded = true;
+		hydrated = true;
+	});
+	onDestroy(() => onbusychange?.(false));
+
+	let intentOptions = $derived.by(() => {
+		const grouped = new Map<string, { card: (typeof stock.intentCards)[number]; count: number; ids: string[] }>();
+		const tiersByName = new Map<string, Set<string>>();
+		for (const card of stock.intentCards) {
+			const nameKey = JSON.stringify([card.cardKey, card.displayName]);
+			const tiers = tiersByName.get(nameKey) ?? new Set<string>();
+			tiers.add(card.tier);
+			tiersByName.set(nameKey, tiers);
+			const key = JSON.stringify([card.cardKey, card.displayName, card.description, card.tier]);
+			const existing = grouped.get(key);
+			if (existing) {
+				existing.count += 1;
+				existing.ids.push(card.id);
+			} else {
+				grouped.set(key, { card, count: 1, ids: [card.id] });
+			}
+		}
+		return [...grouped.entries()].map(([key, option]) => ({
+			key,
+			...option,
+			label: (tiersByName.get(JSON.stringify([option.card.cardKey, option.card.displayName]))?.size ?? 0) > 1
+				? `${option.card.displayName} · ${tierLabel(option.card.tier)}`
+				: option.card.displayName
+		}));
+	});
+	let serviceStacks = $derived(serviceCardStacks([...stock.beverages, ...stock.foods]));
+	let cardChoices = $derived.by((): TavernCardChoice[] => [
+		...intentOptions.map((option) => ({
+			key: `intent:${option.key}`,
+			kind: option.card.cardKey as IntentCardKey,
+			itemIds: option.ids,
+			title: option.label,
+			eyebrow: `${titleCase(option.card.cardKey)} · ${tierLabel(option.card.tier)}`,
+			detail: option.card.description,
+			quantity: option.count
+		})),
+		...serviceStacks.map((stack) => ({
+			key: `service:${stack.key}`,
+			kind: stack.kind as TavernCardKind,
+			itemIds: stack.itemIds,
+			title: stack.name,
+			eyebrow: stack.kind === 'food' ? 'From the kitchen' : 'From the cellar',
+			detail: `${stack.ingredientName} · ${qualityLabel(stack.qualityIndex)}`,
+			quantity: stack.quantity
+		}))
+	]);
+	let selectedIntent = $derived(stock.intentCards.find((card) => card.id === intentCardId));
+	let selectedOffering = $derived(offeringSelection
+		? [...stock.beverages, ...stock.foods].find((item) => `${item.kind}:${item.id}` === offeringSelection)
+		: undefined);
+	let selectedItemId = $derived(intentCardId || (offeringSelection ? offeringSelection.slice(offeringSelection.indexOf(':') + 1) : ''));
+	let selectedChoice = $derived(cardChoices.find((choice) => choice.itemIds.includes(selectedItemId)));
+	let staleSelection = $derived(!!selectedItemId && !selectedChoice && !frozen);
+	let submitLabel = $derived(
+		busy ? 'Thinking…'
+			: frozen ? 'Retry the same message'
+				: selectedOffering ? 'Speak & serve'
+					: selectedIntent ? 'Speak with card' : 'Send message'
+	);
+	let submitAriaLabel = $derived(
+		busy ? 'Considering your words'
+			: frozen ? 'Retry the same message'
+				: selectedOffering ? 'Speak & serve'
+					: selectedIntent ? 'Speak with card' : 'Send message'
+	);
+
+	function safeId(value: string) {
+		return value.replace(/[^a-zA-Z0-9_-]/g, '-');
+	}
+
+	function titleCase(value: string) {
+		return value.charAt(0).toUpperCase() + value.slice(1);
+	}
+
+	function tierLabel(tier: string) {
+		return ({ fine: 'Fine', superior: 'Superior', exceptional: 'Exceptional' } as Record<string, string>)[tier] ?? tier;
+	}
+
+	function clearChoice() {
+		intentCardId = '';
+		offeringSelection = '';
+	}
+
+	async function removeChoice() {
+		clearChoice();
+		await focusComposer();
+	}
+
+	async function dismissCardFromDeck() {
+		clearChoice();
+		setDeckOpen(false);
+		setComposerOpen(true);
+		await focusComposer();
+	}
+
+	function setComposerOpen(open: boolean) {
+		composerOpenLocal = open;
+		oncomposerchange?.(open);
+	}
+
+	function setDeckOpen(open: boolean) {
+		deckOpenLocal = open;
+		ondeckchange?.(open);
+	}
+
+	async function focusControl(name: 'talk' | 'deck') {
+		await tick();
+		if (typeof document !== 'undefined') {
+			document.querySelector<HTMLElement>(`[data-bar-control="${name}"]`)?.focus();
+		}
+	}
+
+	async function closeComposer() {
+		setComposerOpen(false);
+		await focusControl('talk');
+	}
+
+	function handleEscape(event: KeyboardEvent) {
+		if (event.key !== 'Escape') return;
+		if (deckOpenLocal) {
+			event.preventDefault();
+			event.stopPropagation();
+			setDeckOpen(false);
+			void focusControl('deck');
+		} else if (composerOpenLocal) {
+			event.preventDefault();
+			event.stopPropagation();
+			void closeComposer();
+		}
+	}
+
+	async function changeCard() {
+		setComposerOpen(false);
+		setDeckOpen(true);
+		await focusControl('deck');
+	}
+
+	async function returnToTalk() {
+		setDeckOpen(false);
+		setComposerOpen(true);
+		await focusComposer();
+	}
+
+	async function focusComposer() {
+		await tick();
+		if (typeof document !== 'undefined') document.getElementById(messageFieldId)?.focus();
+	}
+
+	async function chooseCard(choice: TavernCardChoice) {
+		if (blocked || busy || frozen) return;
+		const itemId = choice.itemIds[0];
+		if (!itemId) return;
+		if (choice.kind === 'food' || choice.kind === 'beverage') {
+			intentCardId = '';
+			offeringSelection = `${choice.kind}:${itemId}`;
+		} else {
+			intentCardId = itemId;
+			offeringSelection = '';
+		}
+		setDeckOpen(false);
+		setComposerOpen(true);
+		await focusComposer();
+	}
+
+	async function acceptStatus(body: any, completedNotice = 'Your last reply was saved.') {
+		failure = false;
+		if (body.status === 'completed') {
+			frozen = null;
+			message = '';
+			clearChoice();
+			notice = typeof body.reply === 'string' && body.reply.trim()
+				? `${name}: ${body.reply}`
+				: completedNotice;
+			await invalidateAll();
+		} else if (body.status === 'cancelled' || body.status === 'stale') {
+			frozen = null;
+			notice = body.status === 'cancelled'
+				? 'Unfinished message cancelled. You can edit it and try again.'
+				: 'That message is closed. You can edit it and start a new conversation.';
+			await invalidateAll();
+		} else {
+			frozen = body.input;
+			message = body.input.message;
+			intentCardId = body.input.intentCardId ?? '';
+			offeringSelection = body.input.offering
+				? `${body.input.offering.kind}:${body.input.offering.itemId}`
+				: '';
+			canRetry = body.canRetry ?? body.status !== 'processing';
+			notice = body.status === 'processing'
+				? 'Your conversation is still being completed. Check again shortly.'
+				: canRetry
+					? 'The last reply was not completed. Retry the same message or cancel it.'
+					: 'This reply cannot be resumed. Cancel the unfinished message, then edit it before sending again.';
+		}
+	}
+
+	async function recover(id: string) {
+		if (blocked || busy) return;
+		const current = ++operation;
+		busy = true;
+		failure = false;
+		try {
+			const response = await fetch(`/api/dialogue/${id}`);
+			const body = await response.json();
+			if (current !== operation) return;
+			if (!response.ok) throw new Error(body.message);
+			await acceptStatus(body);
+		} catch {
+			if (current === operation) {
+				notice = 'The conversation could not be checked. Please retry.';
+				failure = true;
+			}
+		} finally {
+			if (current === operation) busy = false;
+		}
+	}
+
+	async function send(event: SubmitEvent) {
+		event.preventDefault();
+		if (blocked || busy || (frozen && !canRetry)) return;
+		if (!frozen) canRetry = true;
+		const [offeringKind, offeringId] = offeringSelection.split(':', 2);
+		const offering: Offering | null = offeringId && (offeringKind === 'food' || offeringKind === 'beverage')
+			? { kind: offeringKind, itemId: offeringId }
+			: null;
+		frozen ??= {
+			turnId: crypto.randomUUID(),
+			npcId,
+			message,
+			expectedConversationSequence: journal.sequence,
+			interactionVersion: 'dialogue-v2',
+			intentCardId: intentCardId || null,
+			offering
+		};
+		const command = frozen as DialogueInput;
+		const current = ++operation;
+		const controller = new AbortController();
+		posting = controller;
+		busy = true;
+		notice = '';
+		failure = false;
+		try {
+			const response = await fetch('/api/dialogue', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(command),
+				signal: controller.signal
+			});
+			const body = await response.json();
+			if (current !== operation) return;
+			if (!response.ok) {
+				canRetry = !['CONSISTENCY', 'CONTEXT_BUDGET'].includes(body.code);
+				if ([400, 409, 422].includes(response.status)) {
+					// Only a confirmed closure (or a missing turn after POST has finished) releases the command.
+					const closed = await fetch(`/api/dialogue/${command.turnId}`, { method: 'DELETE' });
+					if (current !== operation) return;
+					if (closed.ok) {
+						const status = await closed.json();
+						await acceptStatus(status);
+						if (status.status === 'completed') return;
+					} else if (closed.status === 404) {
+						frozen = null;
+						await invalidateAll();
+					}
+				}
+				throw new Error(body.message);
+			}
+			if (body.status === 'completed') await acceptStatus(body, 'Reply saved.');
+			else {
+				canRetry = false;
+				notice = 'Your conversation is still being completed. Check again shortly.';
+			}
+		} catch (cause) {
+			if (current === operation) {
+				failure = true;
+				notice = cause instanceof Error
+					? cause.message
+					: 'The result is unknown. Check the conversation before retrying.';
+			}
+		} finally {
+			if (posting === controller) posting = undefined;
+			if (current === operation) busy = false;
+		}
+	}
+
+	async function cancel() {
+		if (blocked || !frozen || cancelling) return;
+		const command = frozen;
+		const current = ++operation;
+		const pendingPost = posting;
+		busy = true;
+		cancelling = true;
+		failure = false;
+		try {
+			const response = await fetch(`/api/dialogue/${command.turnId}`, { method: 'DELETE' });
+			const body = await response.json();
+			if (!response.ok || !['completed', 'cancelled', 'stale'].includes(body.status)) throw new Error();
+			// Fence the server turn first. Aborting the browser request alone cannot cancel a generation.
+			pendingPost?.abort();
+			await acceptStatus(body);
+		} catch {
+			failure = true;
+			notice = 'Cancellation could not be confirmed. Check the reply or try cancelling again.';
+		} finally {
+			cancelling = false;
+			if (current === operation) busy = false;
+		}
+	}
 </script>
 
-<section class="npc-dialogue" class:embedded class:journal-only={journalOnly} aria-labelledby="conversation-heading">
-  <h2 id="conversation-heading" class="sr-only">{journalOnly ? `Journal for ${name}` : `Talk with ${name}`}</h2>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (Escape closes the active dialogue surface and restores its scene opener.) -->
+<section
+	class="patron-dialogue"
+	class:embedded
+	class:journal-only={journalOnly}
+	aria-labelledby={dialogueHeadingId}
+	onkeydown={handleEscape}
+>
+	<h2 id={dialogueHeadingId} class="sr-only">{journalOnly ? `History for ${name}` : `Talk with ${name}`}</h2>
 
-  {#if journalOnly}
-    {#if journal.availability!=='present' || archived}
-      <div class="dialogue-unavailable" role="status"><p class="eyebrow">{archived ? 'Read-only archive' : journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
-    {/if}
-  {:else if journal.availability!=='present' || archived}
-    <div class="dialogue-unavailable"><p class="eyebrow">{archived ? 'Read-only archive' : journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
-  {:else}
-    {#if unavailable}<p class="form-message dialogue-provider-notice" role="note">{unavailable}</p>{/if}
-    <form onsubmit={send} class="dialogue-composer">
-      <fieldset disabled={!hydrated||busy||!!unavailable||blocked}>
-        <legend class="sr-only">Compose your message to {name}</legend>
-        <div class="composer-row">
-          <div class="keeper-seal" aria-hidden="true"><img src="/raven.svg" alt="" /><span>Keeper</span></div>
-          <div class="parchment-input">
-            <label for="npc-message" class="sr-only">Your message</label>
-            <textarea id="npc-message" rows="2" maxlength="2000" required disabled={!!frozen} bind:value={message} placeholder="Say something…"></textarea>
-            <div class="selection-summary" aria-live="polite">
-              <span>{selectedIntent ? `Intent: ${selectedIntent.displayName} · ${tierLabel(selectedIntent.tier)}` : 'Speaking plainly'}</span>
-              {#if selectedOffering}<span>Offering: {selectedOffering.name}</span>{/if}
-            </div>
-          </div>
-          <button class="composer-send" aria-label={busy?'Considering your words…':frozen?'Retry the same message':'Speak'} disabled={!hydrated||busy||!!unavailable||blocked||!!frozen&&!canRetry||(!frozen&&!message.trim())}>
-            <span>{busy?'Thinking…':frozen?'Retry':'Send'}</span><small>{frozen?'Same message':'Enter'}</small>
-          </button>
-        </div>
+	{#if journalOnly}
+		<NpcHistory {name} {journal} history={residentHistory} instanceId={residentKey} {archiveHref} />
+	{:else if journal.availability !== 'present' || archived}
+		<div class="dialogue-unavailable" role="status">
+			<p class="dialogue-eyebrow">{archived ? 'Read-only archive' : journal.availability === 'dead' ? 'In memory' : journal.availability === 'departed' ? 'Departed' : 'Unavailable'}</p>
+			<p>{name} is not available for a new conversation. Their story remains in the tavern history.</p>
+		</div>
+	{:else}
+		{#if deckOpenLocal}
+			{#if staleSelection}
+				<div class="stale-selection-note" role="alert">
+					<p>{offeringSelection ? 'The selected item left your hand and has not been replaced. Choose a card below or remove it.' : 'The selected card left your hand and has not been replaced. Choose a card below or remove it.'}</p>
+					<div class="stale-selection-actions">
+						<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={dismissCardFromDeck}>Remove unavailable card</button>
+					</div>
+				</div>
+			{/if}
+			<ServiceCardHand
+				choices={cardChoices}
+				{selectedItemId}
+				disabled={blocked || busy || !!frozen}
+				onselect={chooseCard}
+				onclose={returnToTalk}
+			/>
+		{/if}
 
-        <div class="composer-tools">
-          <section class="intent-tool" aria-labelledby="intent-tool-title">
-            <div class="tool-label"><p class="eyebrow" id="intent-tool-title">Choose your intent</p><span>Characterizes your words</span></div>
-            <div class="intent-picker" role="group" aria-labelledby="intent-tool-title">
-              <button type="button" class="intent-option" aria-pressed={intentCardId===''} disabled={!!frozen} onclick={()=>intentCardId=''}>
-                <span>Plain</span>
-              </button>
-              {#each intentOptions as option (`${option.card.cardKey}:${option.card.displayName}:${option.card.description}:${option.card.tier}`)}
-                <button type="button" class="intent-option intent-{option.card.cardKey}" class:selected={option.ids.includes(intentCardId)} aria-pressed={option.ids.includes(intentCardId)} aria-label={`${option.label}${option.count > 1 ? `, ${option.count} cards available` : ''}: ${option.card.description}`} title={option.card.description} disabled={!!frozen} onclick={()=>intentCardId=option.ids.includes(intentCardId)?'':option.card.id}>
-                  <span>{option.label}</span>{#if option.count > 1}<small aria-hidden="true">×{option.count}</small>{/if}
-                </button>
-              {/each}
-            </div>
-          </section>
+		{#if composerOpenLocal}
+			<section class="dialogue-surface" aria-labelledby={`${dialogueHeadingId}-talk`}>
+				<header class="composer-heading">
+					<div>
+					<p class="dialogue-eyebrow">A word with {name}</p>
+					<h2 id={`${dialogueHeadingId}-talk`}>Talk</h2>
+				</div>
+				<button type="button" class="dialogue-action close-composer" onclick={closeComposer}>Close talk</button>
+			</header>
 
-          <label class="hospitality-tool">
-            <span><strong>Food &amp; drink</strong><small>Optional, separate from intent</small></span>
-            <select bind:value={offeringSelection} aria-label="Offer hospitality" disabled={!!frozen}>
-              <option value="">No food or drink</option>
-              {#each stock.beverages as beverage}<option value={`beverage:${beverage.id}`}>Drink · {beverage.name}</option>{/each}
-              {#each stock.foods as food}<option value={`food:${food.id}`}>Food · {food.name}</option>{/each}
-            </select>
-          </label>
-        </div>
-      </fieldset>
-      {#if frozen}<div class="recovery-actions"><button type="button" class="text-button" disabled={busy||blocked} onclick={()=>recover(frozen!.turnId)}>Check reply</button><button type="button" class="text-button" disabled={cancelling||blocked} onclick={cancel}>{cancelling?'Cancelling…':'Cancel unfinished message'}</button></div>{/if}
-    </form>
-  {/if}
-  {#if !journalOnly && notice}<p class="form-message dialogue-notice" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
+			{#if unavailable}<p class="form-message provider-notice" role="note">{unavailable}</p>{/if}
 
-  {#snippet journalContent()}
-    <div class="journal-drawer">
-      {#if !journalOnly}<section class="npc-intention">
-        <p class="eyebrow">{journal.availability==='present'?'Current quest':journal.availability==='dead'?'In memory':'Departed'} · {journal.questLifecycleStatus.replace('_',' ')}</p>
-        {#if journal.currentQuest}<h3>{journal.currentQuest.title}</h3><p>{journal.currentQuest.objective}</p>{/if}
-        {#if journal.questLifecycleStatus==='awaiting_transition'}<p>They are considering their next step.</p>{/if}
-        {#if journal.questLifecycleStatus==='departing'}<p>They are leaving after the tavern closes.</p>{/if}
-        {#if journal.questLifecycleStatus==='active'&&journal.currentQuest}
-          <p>Readiness: {journal.currentQuest.readiness} · Risk: {journal.currentQuest.risk}. Food and drink can help their readiness.</p>
-          <ol class="intention-steps" aria-label="Intended daily steps">
-            {#each journal.currentQuest.plan as step,index}<li class:completed={index<journal.currentQuest.currentStep}>
-              {index<journal.currentQuest.currentStep?'Done':index===journal.currentQuest.currentStep?'Next outing':'Later'}: {step.action==='prepare'?'Prepare':step.action==='attempt'?'Attempt the objective':step.action==='wait'?'Wait':'Abandon the objective'} · {step.approach}
-            </li>{/each}
-          </ol>
-        {/if}
-        {#if journal.farewellText}<p class="form-message" role="note">{journal.farewellText}</p>{/if}
-      </section>{/if}
-      {#if journal.disposition}
-        <section class="npc-news" aria-label="How they seem lately">
-          <p class="eyebrow">How they seem lately</p>
-          <p>{journal.disposition.summary}</p>
-        </section>
-      {/if}
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex (The overflow transcript must be keyboard-scrollable.) -->
-      <div class="npc-transcript" role="region" aria-label="Conversation history" tabindex="0">
-        {#if journal.turns.length===0}<p class="muted">Ask about their plans, share advice, or simply get to know them.</p>{/if}
-        {#each journal.turns as turn (turn.id)}
-          <article class="npc-exchange"><p class="eyebrow">Day {turn.day}</p><p class="keeper-line"><strong>You</strong> {turn.message}</p><p><strong>{name}</strong> {turn.reply}</p></article>
-        {/each}
-      </div>
-      {#if journal.evolution.length}
-        <section class="npc-news" aria-label="What shaped them">
-          <p class="eyebrow">What shaped them</p>
-          <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
-        </section>
-      {/if}
-      {#if journal.questArchive.items.length}
-        <section class="npc-news" aria-label="Quest archive"><p class="eyebrow">Quest archive</p>
-          {#each journal.questArchive.items as quest (quest.id)}
-            <article><p class="eyebrow">Days {quest.activationDay}–{quest.terminalDay} · {quest.origin === 'authored_milestone' ? 'Authored quest' : 'Successor quest'} · {quest.outcome}</p><h3>{quest.title}</h3><p>{quest.objective}</p>
-              {#if quest.events.length}<ul>{#each quest.events as event (event.id)}<li><small>Day {event.day} · {event.outcome}</small> {event.text}</li>{/each}</ul>{/if}
-            </article>
-          {/each}
-          {#if journal.questArchive.nextCursor && archiveHref}<a class="text-button" href={archiveHref}>Earlier quests</a>{/if}
-        </section>
-      {/if}
-    </div>
-  {/snippet}
-  {#if journalOnly}
-    <div class="journal-destination" aria-label="Conversation and quest journal">
-      {@render journalContent()}
-    </div>
-  {:else if !embedded}
-    <details class="dialogue-journal">
-      <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questLifecycleStatus.replace('_',' ')}</small></summary>
-      {@render journalContent()}
-    </details>
-  {/if}
+				{#if selectedChoice}
+					<div class="selected-card-row" aria-label="Card attached to this conversation">
+						<TavernCard choice={selectedChoice} selected={true} interactive={false} compact={true} />
+						<button type="button" class="dialogue-action remove-card" disabled={!!frozen || busy || blocked} onclick={removeChoice}>Remove card</button>
+					</div>
+					{#if selectedOffering}
+						<p class="service-consumption-note">One {selectedOffering.name} will be consumed if this reply succeeds.</p>
+					{/if}
+				{:else if frozen && selectedItemId}
+					<p class="locked-card-note" role="note">The exact selected card is held for this unfinished reply.</p>
+				{:else if staleSelection}
+					<div class="stale-selection-note" role="alert">
+						<p>{offeringSelection ? 'That item is no longer in your hand. It has not been replaced with another item.' : 'That card is no longer in your hand. It has not been replaced with another card.'}</p>
+						<div class="stale-selection-actions">
+							<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={removeChoice}>Dismiss unavailable card</button>
+							<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={changeCard}>Choose another card</button>
+						</div>
+					</div>
+				{/if}
+
+				{#if journal.turns.length === 0}
+					<p class="first-conversation">Ask about their plans, share advice, or simply get to know them.</p>
+				{/if}
+
+			<form onsubmit={send} class="dialogue-form">
+				<fieldset disabled={!hydrated || busy || !!unavailable || blocked}>
+					<legend class="sr-only">Compose a message to {name}</legend>
+					<label for={messageFieldId} class="sr-only">Your message to {name}</label>
+					<div class="dialogue-composer-row">
+						<textarea
+							id={messageFieldId}
+							rows="2"
+							maxlength="2000"
+							required
+							disabled={!!frozen}
+							bind:value={message}
+							placeholder="Say something…"
+						></textarea>
+						<button
+							class="composer-send"
+							aria-label={submitAriaLabel}
+							disabled={!hydrated || busy || !!unavailable || blocked || (!!frozen && !canRetry) || (!frozen && !message.trim()) || staleSelection}
+						>
+							<span>{!hydrated ? 'Opening…' : submitLabel}</span>
+						</button>
+					</div>
+				</fieldset>
+				{#if frozen}
+					<div class="recovery-actions">
+						<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={() => recover(frozen!.turnId)}>Check reply</button>
+						<button type="button" class="dialogue-action" disabled={cancelling || blocked} onclick={cancel}>{cancelling ? 'Cancelling…' : 'Cancel unfinished message'}</button>
+					</div>
+				{/if}
+			</form>
+		</section>
+		{/if}
+	{/if}
+
+	{#if !journalOnly && notice}
+		<p class="form-message dialogue-notice" class:error={failure} role={failure ? 'alert' : 'status'}>{notice}</p>
+	{/if}
 </section>
 
 <style>
-  .npc-dialogue.embedded {
-    grid-area: auto;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .embedded .composer-row {
-    grid-template-columns: minmax(0, 1fr) 76px;
-  }
-
-  .embedded .keeper-seal {
-    display: none;
-  }
-
-  .npc-dialogue.embedded .composer-tools {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: .6rem;
-  }
-
-  .npc-dialogue.embedded .intent-tool {
-    display: block;
-    min-width: 0;
-  }
-
-  .npc-dialogue.embedded .tool-label {
-    display: block;
-    margin-bottom: .35rem;
-  }
-
-  .embedded .tool-label .eyebrow {
-    margin: 0;
-    white-space: nowrap;
-  }
-
-  .embedded .tool-label span {
-    display: none;
-  }
-
-  .npc-dialogue.embedded .intent-picker {
-    display: flex;
-    flex-flow: row wrap;
-    align-items: center;
-    gap: .35rem;
-    min-width: 0;
-    overflow: visible;
-  }
-
-  .intent-option {
-    display: inline-flex;
-    min-height: 34px;
-    align-items: center;
-    justify-content: center;
-    gap: .35rem;
-    padding: .35rem .65rem;
-    border: 1px solid #735a31;
-    border-radius: 999px;
-    color: #d8c28f;
-    background: #20180f;
-    font: 600 12px 'EB Garamond', Georgia, serif;
-    cursor: pointer;
-    transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
-  }
-
-  .intent-option small {
-    color: inherit;
-    font-size: 10px;
-    opacity: .8;
-  }
-
-  .intent-option.selected,
-  .intent-option[aria-pressed='true'] {
-    border-color: #e1bd61;
-    color: #ffe6a0;
-    background: #463419;
-    box-shadow: inset 0 0 0 1px rgb(225 189 97 / 18%);
-  }
-
-  .intent-option:hover:not(:disabled) {
-    border-color: #c29b51;
-    transform: translateY(-1px);
-  }
-
-  .intent-option:focus-visible,
-  .embedded .hospitality-tool select:focus-visible,
-  .embedded .parchment-input textarea:focus-visible {
-    outline: 2px solid #f0cd72;
-    outline-offset: 2px;
-  }
-
-  .intent-option:disabled {
-    cursor: not-allowed;
-    opacity: .65;
-  }
-
-  .npc-dialogue.embedded .hospitality-tool {
-    display: flex;
-    flex-flow: row wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: .5rem;
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
-
-  .npc-dialogue.embedded .hospitality-tool > span {
-    display: flex;
-    align-items: baseline;
-    gap: .35rem;
-  }
-
-  .npc-dialogue.embedded .hospitality-tool strong {
-    white-space: nowrap;
-  }
-
-  .npc-dialogue.embedded .hospitality-tool small {
-    display: none;
-  }
-
-  .npc-dialogue.embedded .hospitality-tool select {
-    width: min(100%, 15rem);
-    max-width: 15rem;
-  }
-
-  .embedded.journal-only .journal-destination {
-    min-width: 0;
-  }
-
-  .embedded.journal-only .journal-drawer {
-    grid-template-columns: minmax(0, 1fr);
-    padding-top: 0;
-  }
-
-  .embedded.journal-only .npc-news,
-  .embedded.journal-only .npc-transcript {
-    grid-column: auto;
-  }
-
-  @media (max-width: 700px) {
-    .npc-dialogue.embedded .composer-tools {
-      display: flex;
-      gap: .5rem;
-    }
-
-    .npc-dialogue.embedded .intent-tool {
-      display: block;
-    }
-
-    .npc-dialogue.embedded .hospitality-tool > span {
-      align-items: baseline;
-      flex-direction: row;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .intent-option {
-      transition: none;
-    }
-  }
+	.patron-dialogue { min-width: 0; color: #eee2c3; }
+	.dialogue-surface { min-width: 0; animation: surface-enter 150ms ease-out both; }
+	.composer-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-bottom: 0.6rem; border-bottom: 1px solid rgb(145 112 52 / 35%); }
+	.dialogue-eyebrow { margin: 0 0 0.15rem; color: #d3b46d; font: 600 0.65rem 'Cinzel', Georgia, serif; letter-spacing: 0.08em; text-transform: uppercase; }
+	.composer-heading h2 { margin: 0; font: 600 1rem 'Cinzel', Georgia, serif; }
+	.dialogue-action { min-height: 2.25rem; padding: 0.25rem 0.45rem; border: 0; background: transparent; color: #e9d49f; font: inherit; font-size: 0.76rem; text-decoration: underline; text-underline-offset: 0.2em; cursor: pointer; }
+	.dialogue-action:hover:not(:disabled) { color: #fff0bc; }
+	.dialogue-action:disabled { opacity: 0.5; cursor: not-allowed; }
+	.dialogue-action:focus-visible { outline: 2px solid #ffe49c; outline-offset: 2px; border-radius: 0.2rem; }
+	.selected-card-row { display: grid; grid-template-columns: minmax(0, 14rem) auto; align-items: center; justify-content: start; gap: 0.55rem; margin: 0.65rem 0 0.35rem; animation: card-attach 160ms ease-out both; }
+	.remove-card { white-space: nowrap; }
+	.service-consumption-note { margin: 0 0 0.65rem 0.25rem; color: #e3ce97; font-size: 0.74rem; }
+	.locked-card-note { margin: 0.65rem 0; color: #e1c983; font-size: 0.76rem; }
+	.stale-selection-note { margin: 0.6rem 0; padding-left: 0.7rem; border-left: 2px solid #ac7850; color: #e7bd8a; font-size: 0.78rem; line-height: 1.45; }
+	.stale-selection-note p { margin: 0; }
+	.stale-selection-actions { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin-top: 0.25rem; }
+	.first-conversation { margin: 0.6rem 0; color: #c9bd9f; font-size: 0.8rem; }
+	.dialogue-form { margin-top: 0.6rem; }
+	.dialogue-form fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+	.dialogue-composer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 0.6rem; }
+	.dialogue-composer-row textarea { width: 100%; min-height: 3.3rem; max-height: 12rem; resize: vertical; padding: 0.75rem 0.85rem; border: 1px solid rgb(171 135 72 / 48%); border-radius: 0.6rem; background: #211a12; color: #f5eddb; font: inherit; font-size: 0.9rem; line-height: 1.4; }
+	.dialogue-composer-row textarea::placeholder { color: #a79b81; }
+	.dialogue-composer-row textarea:focus-visible { outline: 2px solid #f0cd72; outline-offset: 2px; }
+	.dialogue-composer-row textarea:disabled { opacity: 0.78; }
+	.composer-send { min-width: 4.5rem; min-height: 2.8rem; padding: 0.45rem 0.8rem; border: 1px solid #9a793d; border-radius: 0.55rem; background: linear-gradient(145deg, #846333, #59411f); color: #fff0c0; font: 600 0.78rem 'Cinzel', Georgia, serif; cursor: pointer; transition: transform 140ms ease, filter 140ms ease; }
+	.composer-send:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.12); }
+	.composer-send:focus-visible { outline: 2px solid #ffe49c; outline-offset: 3px; }
+	.composer-send:disabled { opacity: 0.5; cursor: not-allowed; }
+	.recovery-actions { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; margin-top: 0.45rem; }
+	.form-message { margin: 0.6rem 0; color: #dfc58d; font-size: 0.8rem; line-height: 1.45; }
+	.dialogue-notice { padding-top: 0.5rem; border-top: 1px solid rgb(145 112 52 / 25%); }
+	.form-message.error { color: #f0a9a1; }
+	.dialogue-unavailable { padding: 0.5rem 0; color: #c8b99a; }
+	.dialogue-unavailable .dialogue-eyebrow { margin: 0 0 0.2rem; color: #dfbf78; font: 600 0.68rem 'Cinzel', Georgia, serif; text-transform: uppercase; }
+	.dialogue-unavailable p:last-child { margin: 0; font-size: 0.84rem; }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+	@keyframes surface-enter { from { opacity: 0; transform: translateY(0.3rem); } to { opacity: 1; transform: translateY(0); } }
+	@keyframes card-attach { from { opacity: 0; transform: translateY(0.3rem); } to { opacity: 1; transform: translateY(0); } }
+	@media (max-width: 520px) {
+		.dialogue-composer-row { grid-template-columns: minmax(0, 1fr); }
+		.composer-send { justify-self: end; min-width: 5rem; }
+		.selected-card-row { grid-template-columns: minmax(0, 1fr) auto; }
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.dialogue-surface { animation: none; }
+		.selected-card-row { animation: none; }
+		.composer-send { transition: none; }
+	}
 </style>

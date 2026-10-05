@@ -1,115 +1,108 @@
-import { expect, test } from '@playwright/test';
-import { createBrewedTavern } from '../helpers/brewed-tavern';
+import {expect,test,type Page,type Locator} from '@playwright/test';
+import {createBrewedTavern} from '../helpers/brewed-tavern';
+import {runDialogue} from '../../src/lib/server/dialogue/orchestrator';
+import {fixtureProvider} from '../helpers/dialogue-provider';
+import {fixturePromptRegistry} from '../helpers/prompt-registry-fixture';
+import type {DialogueInput} from '../../src/lib/game/dialogue';
 
-async function signInAndOpenBar(page: import('@playwright/test').Page, player: Awaited<ReturnType<typeof createBrewedTavern>>) {
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(player.email);
-  await page.getByLabel('Password').fill(player.password);
-  await page.getByRole('button', { name: 'Open the ledger' }).click();
-  await expect(page).toHaveURL(/\/garden$/);
-  await page.getByRole('link', { name: 'Bar', exact: true }).click();
-  await expect(page).toHaveURL(/\/bar$/);
+test.use({ video: process.env.ISSUE37_CAPTURE ? 'on' : 'retain-on-failure' });
+async function motionBeat(page: Page) { if (process.env.ISSUE37_CAPTURE) await page.waitForTimeout(650); }
+async function openBar(page:Page,player:Awaited<ReturnType<typeof createBrewedTavern>>){
+ await page.goto('/login');await page.getByLabel('Email').fill(player.email);await page.getByLabel('Password').fill(player.password);await page.getByRole('button',{name:'Open the ledger'}).click();await expect(page).toHaveURL(/\/garden$/);await expect(page.locator('.game-shell')).toHaveAttribute('data-hydrated','true');await page.goto('/bar');
+ await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready','true');
 }
+function residents(page:Page){return page.getByRole('group',{name:'Scene characters'}).getByRole('button');}
+async function nameOf(actor:Locator){const label=await actor.getAttribute('aria-label');const name=label?.match(/Speak with (.+?): /)?.[1]??label?.replace(/^Speak with /,'');if(!name)throw Error('Resident label missing');return name;}
 
-/**
- * The seeded roster is installed through immutable resident packages. Its
- * order and display names are package data, so these journeys interact with
- * the rendered package projection instead of treating pilot names as IDs.
- */
-function barResidents(page: import('@playwright/test').Page) {
-  return page.getByRole('group', { name: 'Scene characters' }).getByRole('button');
-}
+test('overview, focus, transient Escape and drafts connect without unrelated panels',async({page})=>{
+ const player=await createBrewedTavern('bar-scene-focus');try{
+  await openBar(page,player);await expect(residents(page)).toHaveCount(2);for(const actor of await residents(page).all())await expect(actor).toHaveAttribute('aria-pressed','false');await expect(page.getByRole('button',{name:'Talk',exact:true})).toHaveCount(0);
+  const first=residents(page).first();await first.focus();await first.press('ArrowRight');await expect(residents(page).last()).toBeFocused();await residents(page).last().press('ArrowLeft');await expect(first).toBeFocused();const name=await nameOf(first);await first.click();await motionBeat(page);
+  await expect(page.getByRole('button',{name:'Back to bar',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Talk',exact:true})).toBeVisible();await expect(page.getByRole('tablist',{name:/Actions for/})).toHaveCount(0);
+  await page.getByRole('button',{name:'Talk',exact:true}).click();await motionBeat(page);const composer=page.getByRole('textbox',{name:`Your message to ${name}`});await composer.fill('A draft for this resident.');await composer.press('Escape');await expect(composer).toBeHidden();await expect(page.locator('[data-bar-control="talk"]')).toBeFocused();
+  await page.locator('[data-bar-control="back"]').click();await expect(residents(page)).toHaveCount(2);await expect(page.getByRole('group',{name:'Keepsake display slots'})).toBeVisible();
+  await residents(page).last().click();await page.getByRole('button',{name:'Talk',exact:true}).click();await motionBeat(page);await expect(page.getByRole('textbox')).toHaveValue('');await page.getByRole('button',{name:'Close talk'}).click();await page.locator('[data-bar-control="back"]').click();
+  await page.getByRole('button',{name:new RegExp(`Speak with ${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`)}).click();await page.getByRole('button',{name:'Talk',exact:true}).click();await motionBeat(page);await expect(page.getByRole('textbox')).toHaveValue('A draft for this resident.');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+ }finally{await player.admin.auth.admin.deleteUser(player.userId);}
+});
 
-async function residentName(button: import('@playwright/test').Locator) {
-  const label = await button.getAttribute('aria-label');
-  const match = label?.match(/^Speak with (.+): \1$/);
-  if (!match) throw new Error(`Unexpected Bar resident label: ${label ?? '(missing)'}`);
-  return match[1];
-}
+test('an inventory card opens Talk directly and retries the same concrete serving exactly once',async({page})=>{
+ const player=await createBrewedTavern('bar-service-retry');const commands:DialogueInput[]=[];const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));try{
+  await openBar(page,player);await residents(page).last().click();await page.getByRole('button',{name:'Open the card deck',exact:true}).click();await motionBeat(page);const hand=page.getByRole('toolbar',{name:'Choose an intent or hospitality card'});await expect(hand).toBeVisible();
+  await hand.getByRole('button').first().press('End');await expect(hand.getByRole('button').last()).toBeFocused();await hand.getByRole('button',{name:/From the cellar\. Fennel Mead/}).click();await expect(hand).toBeHidden();await expect(page.getByRole('combobox')).toHaveCount(0);await motionBeat(page);await expect(page.getByRole('button',{name:'Remove card'})).toBeVisible();
+  await page.getByRole('textbox').fill('Please enjoy this drink while we talk.');await page.route('**/api/dialogue',async route=>{
+   if(route.request().method()!=='POST'){await route.continue();return;}const command=route.request().postDataJSON() as DialogueInput;commands.push(command);
+   const result=await runDialogue(player.admin,player.userId,command,fixtureProvider(),{promptRegistry:fixturePromptRegistry()});
+   if(commands.length===1)await route.abort('failed');else await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(result)});
+  });
+  await page.getByRole('button',{name:'Speak & serve',exact:true}).click();await expect(page.getByRole('alert')).toBeVisible();await page.getByRole('button',{name:'Retry the same message'}).click();await expect(page.getByRole('alert')).toHaveCount(0);expect(commands).toHaveLength(2);expect(commands[0]).toEqual(commands[1]);expect(commands[0].intentCardId).toBeNull();expect(commands[0].offering?.itemId).toBe(player.brew.beverageId);
+  const snapshot=await player.client.rpc('npc_bar_summary');expect(snapshot.error).toBeNull();expect((snapshot.data as any).offerings.beverages).toHaveLength(0);expect((snapshot.data as any).recent.hospitality).toHaveLength(1);
+  await page.getByRole('button',{name:/Open the card deck/}).click();await expect(hand.getByRole('button',{name:/From the cellar/})).toHaveCount(0);expect(errors).toEqual([]);
+ }finally{await player.admin.auth.admin.deleteUser(player.userId);}
+});
 
-test('the Bar puts present residents in the illustrated room and selects them without navigating', async ({ page }) => {
-  const player = await createBrewedTavern('bar-uuid-roster');
+test('reduced motion preserves card dismissal, overview return and contextual empty keepsake slots',async({page})=>{
+ await page.emulateMedia({reducedMotion:'reduce'});const player=await createBrewedTavern('bar-reduced-motion');try{
+  await openBar(page,player);await residents(page).first().click();await page.getByRole('button',{name:'Open the card deck',exact:true}).click();await motionBeat(page);await page.getByRole('toolbar',{name:'Choose an intent or hospitality card'}).getByRole('button',{name:/From the cellar\. Fennel Mead/}).click();
+  await motionBeat(page);expect(await page.locator('.selected-card-row .tavern-card').evaluate(el=>getComputedStyle(el).animationName)).toBe('none');await page.getByRole('button',{name:'Remove card'}).click();await expect(page.getByRole('button',{name:'Remove card'})).toHaveCount(0);await page.getByRole('button',{name:'Close talk'}).click();await page.locator('[data-bar-control="back"]').click();
+  const slot=page.getByRole('button',{name:/Keepsake slot 1, empty/});await slot.click();await expect(page.getByRole('dialog')).toBeVisible();await page.getByRole('dialog').press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(slot).toBeFocused();
+  const snapshot=await player.client.rpc('npc_bar_summary');expect((snapshot.data as any).offerings.beverages).toHaveLength(1);expect((snapshot.data as any).recent.hospitality).toHaveLength(0);
+ }finally{await player.admin.auth.admin.deleteUser(player.userId);}
+});
+
+test('End evening opens a dismissible dialog and retries the same close into settlement', async ({ page }) => {
+  const player = await createBrewedTavern('bar-close-evening');
   try {
-    await signInAndOpenBar(page, player);
-    const residents = barResidents(page);
-    const first = residents.nth(0);
-    const second = residents.nth(1);
-    // The actors are present in SSR markup, but keyboard handlers intentionally
-    // remain inert until the scaled scene has hydrated and aligned its targets.
-    await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
-    await expect(residents).toHaveCount(2);
-    await expect(first).toBeVisible();
-    await expect(second).toBeVisible();
-    const firstName = await residentName(first);
-    const secondName = await residentName(second);
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
-    await first.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(second).toBeFocused();
-    await expect(second).toHaveAttribute('tabindex', '0');
-    // Focus is a roving cursor only; it must not change the current guest.
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
-    await expect(second).toHaveAttribute('aria-pressed', 'false');
-    await page.keyboard.press('Space');
-    await expect(page).toHaveURL(/\/bar\?npc=[^&]+$/);
-    await expect(second).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('heading', { name: secondName, exact: true })).toBeVisible();
-    await page.keyboard.press('ArrowLeft');
-    await expect(first).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(first).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('heading', { name: firstName, exact: true })).toBeVisible();
-    await second.click();
-    const actions = page.getByRole('tablist', { name: `Actions for ${secondName}` });
-    await expect(actions.getByRole('tab', { name: 'Talk' })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('heading', { name: `Talk with ${secondName}` })).toBeAttached();
-    await expect(page.getByText('Choose your intent', { exact: true })).toBeVisible();
-    await actions.getByRole('tab', { name: 'Serve' }).click();
-    await expect(page.getByRole('heading', { name: 'Offer something' })).toBeVisible();
+    await openBar(page, player);
+    await page.getByRole('button', { name: 'End evening', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'End evening?' });
+    await expect(dialog).toBeVisible();
+    await dialog.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'End evening', exact: true })).toBeFocused();
+    const commands: string[] = [];
+    await page.route('**/bar?*/close', async (route) => {
+      commands.push(route.request().postData() ?? '');
+      if (commands.length === 1) await route.abort('failed');
+      else await route.continue();
+    });
+    await page.getByRole('button', { name: 'End evening', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Close and begin the next day', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Retry the same close', exact: true }).click();
+    await expect(page.locator('[data-settlement-state="queued"]')).toBeVisible();
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe(commands[1]);
+    await expect(page.getByRole('button', { name: 'Check for morning', exact: true })).toBeVisible();
+    const snapshot = await player.client.rpc('get_tavern_snapshot');
+    expect((snapshot.data as any).save.currentDay).toBe(2);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
 });
 
-test('a lost UUID serving response retries the frozen resident and item command exactly once', async ({ page, browser }) => {
-  const player = await createBrewedTavern('bar-uuid-retry');
-  const requests: string[] = [];
-  const errors: string[] = [];
-  page.on('pageerror', (cause) => errors.push(cause.message));
+test('a failed Bar load gives a focused retry and returns to the usable overview', async ({ page }) => {
+  const player = await createBrewedTavern('bar-load-retry');
   try {
-    await signInAndOpenBar(page, player);
-    const recipient = barResidents(page).nth(1);
-    await expect(recipient).toBeVisible();
-    const recipientName = await residentName(recipient);
-    await recipient.click();
-    const actions = page.getByRole('tablist', { name: `Actions for ${recipientName}` });
-    await actions.getByRole('tab', { name: 'Serve' }).click();
-    await page.route((url) => url.pathname === '/bar' && url.search === '?/serve', async (route) => {
-      requests.push(route.request().postData() ?? '');
-      if (requests.length === 1) {
-        const response = await route.fetch();
-        expect(response.ok()).toBe(true);
-        await route.abort('failed');
-      } else await route.continue();
+    await openBar(page, player);
+    await page.getByRole('link', { name: 'Garden', exact: true }).click();
+    await expect(page).toHaveURL(/\/garden$/);
+    await page.route('**/bar/__data.json*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.nodes[body.nodes.length - 1] = { type: 'error', error: { message: 'The bar journal is unavailable.' }, status: 500 };
+      await route.fulfill({ response, json: body });
     });
-    await page.getByRole('button', { name: `Serve to ${recipientName}` }).click();
-    await expect(page.getByRole('alert')).toContainText('serving outcome is unknown');
-    await page.getByRole('button', { name: 'Retry the same serving' }).click();
-    await expect(page.getByRole('status')).toContainText('Earned');
-    expect(requests).toHaveLength(2);
-    expect(Object.fromEntries(new URLSearchParams(requests[0]))).toEqual(Object.fromEntries(new URLSearchParams(requests[1])));
-
-    const context = await browser.newContext();
-    try {
-      const other = await context.newPage();
-      await signInAndOpenBar(other, player);
-      const otherActions = other.getByRole('tablist', { name: /^Actions for / });
-      await otherActions.getByRole('tab', { name: 'Serve' }).click();
-      await expect(other.getByText('No hospitality is ready to serve.', { exact: true })).toBeVisible();
-      await other.getByRole('link', { name: 'Keeper’s Journal' }).click();
-      await expect(other.locator('.history-list li')).toHaveCount(1);
-    } finally { await context.close(); }
-    expect(errors).toEqual([]);
+    await page.getByRole('link', { name: 'Bar', exact: true }).click();
+    const retry = page.getByRole('button', { name: 'Try this page again' });
+    await expect(retry).toBeVisible();
+    await expect(page.locator('#route-error-title')).toBeFocused();
+    await expect(page.getByRole('link', { name: 'Return to the bar', exact: true })).toBeVisible();
+    await retry.click();
+    await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
+    await expect(residents(page)).toHaveCount(2);
+    await expect(page.getByRole('button', { name: 'Talk', exact: true })).toHaveCount(0);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }

@@ -168,6 +168,7 @@ export function parseInput(value:unknown): DialogueInput {
   if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !uuid.test(v.npcId??'') || typeof v.message!=='string'
     || !v.message.trim() || v.message.length>2000 || !Number.isSafeInteger(v.expectedConversationSequence) || v.expectedConversationSequence<0
     || v.interactionVersion!=='dialogue-v2' || v.intentCardId!=null&&!uuid.test(v.intentCardId)
+    || v.intentCardId!=null&&v.offering!=null
     || v.offering!=null&&(!['food','beverage'].includes(v.offering.kind)||!uuid.test(v.offering.itemId)))
     throw new DialogueError('Enter a message and choose an available intent card or offering.',400,'INVALID_INPUT');
   return {turnId:v.turnId,npcId:v.npcId,message:v.message,expectedConversationSequence:v.expectedConversationSequence,

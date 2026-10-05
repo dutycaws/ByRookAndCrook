@@ -78,7 +78,7 @@ test('manual Check for morning remains available and terminal unavailable unsubs
   await page.getByRole('button', { name: 'Check for morning' }).click();
 
   await expect(page.locator('[data-settlement-state="unavailable"]')).toBeVisible();
-  await expect(page.getByText('The tavern opened without a new report.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Overnight report unavailable' })).toBeVisible();
   await expect(page.getByTestId('settlement-load-count')).toHaveText(String(initialLoadCount + 1));
   await expect(page.getByTestId('settlement-channel-count')).toHaveText('0');
   expect(getRequests()).toBe(2);

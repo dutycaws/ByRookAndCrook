@@ -291,14 +291,13 @@ describe('UUID community NPC dialogue runtime', () => {
     }]);
   });
 
-  it('keeps intent cards and hospitality independent while committing an offering atomically with its UUID turn', async () => {
+  it('serves one inventory card atomically through Talk without spending an intent card', async () => {
     const person = await createBrewedTavern('uuid-dialogue-offering');
     players.push(person);
     const before = await bar(person);
     const lira = before.roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const command = {
       ...input(lira.npcId, lira.sequence, 'Please accept this drink.'),
-      intentCardId: before.intentCards[0].id,
       offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
     };
     await expect(runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'speak' }), { promptRegistry })).rejects.toThrow();
@@ -311,7 +310,7 @@ describe('UUID community NPC dialogue runtime', () => {
     expect((committed.result as any).serving).toMatchObject({ itemKind: 'beverage', itemName: before.beverages[0].name });
     const after = await bar(person);
     expect(after.beverages).toHaveLength(0);
-    expect(after.intentCards).toHaveLength(before.intentCards.length - 1);
+    expect(after.intentCards).toHaveLength(before.intentCards.length);
     expect(after.history).toHaveLength(1);
   });
 

@@ -39,15 +39,15 @@
     if (status === 'queued') return 'The night is settling';
     if (status === 'processing') return 'The world is turning';
     if (status === 'completed') return 'A new day has dawned';
-    if (status === 'unavailable') return 'The tavern is ready';
-    return 'The morning is ready';
+    if (status === 'unavailable') return 'Overnight report unavailable';
+    return 'The morning’s record is complete';
   };
   const statusDetail = (status: PublicSettlementStatus['status']) => {
     if (status === 'queued') return 'Your regulars are following their plans after the doors close.';
     if (status === 'processing') return 'Stories beyond the tavern are finding their next chapter.';
     if (status === 'completed') return 'The tavern journal has been refreshed with what became known overnight.';
-    if (status === 'unavailable') return 'The tavern is ready for the day ahead.';
-    return 'The tavern is ready for the day ahead.';
+    if (status === 'unavailable') return 'Your saved tavern progress remains safe, but overnight details could not be loaded.';
+    return 'The overnight update is complete. Your regulars are back at the common room.';
   };
   const progressLabel = (progress: PublicSettlementStatus['progress']) => progress.total > 0
     ? `${Math.min(progress.completed, progress.total)} of ${progress.total} moments settled`
@@ -208,7 +208,6 @@
       {:else}
         {#if current.morningNews}<div class="morning-news"><strong>Morning news</strong><p>{current.morningNews}</p></div>{/if}
         {#if current.publicSummary || current.publicDigest}<div class="morning-summary"><strong>What the keeper learns</strong><p>{current.publicSummary ?? current.publicDigest}</p></div>{/if}
-        {#if current.status === 'unavailable'}<p class="settlement-helper">The tavern opened without a new report. Your existing stories and progress remain safe.</p>{/if}
         {#if revalidationError}<p class="settlement-helper" role="alert">Morning is ready, but the tavern journal could not be refreshed.</p><button class="settlement-retry" type="button" onclick={refreshTavern} disabled={revalidating}>{revalidating ? 'Refreshing…' : 'Refresh tavern'}</button>{/if}
       {/if}
     </div>

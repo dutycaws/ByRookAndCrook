@@ -184,7 +184,7 @@ export interface SocialCard {
   createdAt: string;
 }
 
-export type IntentCardKey = 'charm' | 'insight' | 'resolve' | 'rumor';
+export type IntentCardKey = 'charm' | 'insight' | 'flirt' | 'rumor';
 
 export interface IntentCard {
   id: string;

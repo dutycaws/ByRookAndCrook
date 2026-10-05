@@ -3,7 +3,7 @@ import { createBrewedTavern } from '../helpers/brewed-tavern';
 
 type Resident = { instanceId: string; name: string };
 
-test('the archived resident selector updates the read-only inspector and honors deep links', async ({ page }) => {
+test('the Codex past-resident destination updates the shared read-only journal and honors deep links', async ({ page, isMobile }) => {
   const player = await createBrewedTavern('bar-archive-selector');
   try {
     const rosterResult = await player.client.rpc('npc_roster', { p_limit: 20 });
@@ -28,25 +28,25 @@ test('the archived resident selector updates the read-only inspector and honors 
     await page.getByLabel('Password').fill(player.password);
     await page.getByRole('button', { name: 'Open the ledger' }).click();
     await expect(page).toHaveURL(/\/garden$/);
-    await page.goto(`/bar?archive=1&npc=${encodeURIComponent(deepLinkedResident.instanceId)}`);
-
-    const selector = page.getByRole('combobox', { name: /^Resident/ });
-    const inspector = page.locator('.guest-inspector');
-    await expect(page.getByRole('link', { name: 'Past residents' })).toHaveAttribute('aria-current', 'page');
-    await expect(selector).toBeVisible();
-    await expect(selector).toBeEnabled();
-    await expect(selector).toHaveValue(deepLinkedResident.instanceId);
-    await expect(page.getByRole('heading', { name: deepLinkedResident.name, exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: `Journal for ${deepLinkedResident.name}`, exact: true })).toBeAttached();
-    await expect(page.getByRole('tabpanel', { name: 'Conversations' }).getByText('Read-only archive', { exact: true })).toBeVisible();
-
-    await selector.selectOption(otherResident.instanceId);
-    await expect(selector).toHaveValue(otherResident.instanceId);
-    await expect(page.getByRole('heading', { name: otherResident.name, exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: deepLinkedResident.name, exact: true })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: `Journal for ${otherResident.name}`, exact: true })).toBeAttached();
-    await page.getByRole('tablist', { name: 'Past resident sections' }).getByRole('tab', { name: 'About' }).click();
-    await expect(inspector.getByRole('button', { name: 'Confirm dismissal' })).toHaveCount(0);
+    await expect(page.locator('.game-shell')).toHaveAttribute('data-hydrated', 'true');
+    await page.goto(`/codex?section=residents&resident=${encodeURIComponent(deepLinkedResident.instanceId)}`);
+    await expect(page.locator('.game-shell')).toHaveAttribute('data-hydrated', 'true');
+    const picker=page.getByRole('complementary',{name:'Current and past residents'});
+    if (!isMobile) await expect(page.getByRole('heading',{name:'Past residents',exact:true})).toBeVisible();
+    await expect(page.getByRole('article',{name:`History for ${deepLinkedResident.name}`})).toBeVisible();
+    await expect(page.getByRole('textbox')).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Send message'})).toHaveCount(0);
+    if (isMobile) await page.getByRole('link', { name: '← All residents', exact: true }).click();
+    await picker.getByRole('link',{name:new RegExp(otherResident.name)}).click();
+    await expect(page).toHaveURL(new RegExp(`resident=${otherResident.instanceId}`));
+    await expect(page.getByRole('article',{name:`History for ${otherResident.name}`})).toBeVisible();
+    await expect(page.getByRole('article',{name:`History for ${deepLinkedResident.name}`})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Confirm dismissal'})).toHaveCount(0);
+    await page.getByRole('link', { name: 'Bar', exact: true }).click();
+    await expect(page.getByRole('group', { name: 'Scene characters' }).getByRole('button')).toHaveCount(0);
+    await expect(page.getByRole('status')).toContainText('The common room is quiet.');
+    await expect(page.getByRole('button', { name: /Keepsake slot 1, empty/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Past residents', exact: true })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }

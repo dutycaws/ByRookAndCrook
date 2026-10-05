@@ -40,6 +40,7 @@
 
 <style>
   .ui-dialog {
+    margin: auto;
     width: min(34rem, calc(100vw - 2rem));
     max-width: none;
     max-height: min(90vh, 42rem);

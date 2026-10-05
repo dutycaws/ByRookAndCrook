@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
-  import { TRINKET_ARTWORK, TRINKET_EFFECT_CATALOG, type OwnedTrinket } from '$lib/game/trinkets';
+  import { TRINKET_ARTWORK, TRINKET_EFFECT_CATALOG, type OwnedTrinket, type TrinketSlot } from '$lib/game/trinkets';
 
   type SwapCommand = {
     saveId: string;
@@ -9,8 +9,8 @@
     actionId: string;
     expectedRevision: number;
   };
-  type Props = { collection: OwnedTrinket[]; saveId: string; revision: number; selectedId: string; disabled?: boolean; onselect: (id: string) => void };
-  let { collection, saveId, revision, selectedId, disabled = false, onselect }: Props = $props();
+  type Props = { collection: OwnedTrinket[]; saveId: string; revision: number; selectedId: string; targetSlot?: TrinketSlot | null; disabled?: boolean; onselect: (id: string) => void; oncomplete?: () => void };
+  let { collection, saveId, revision, selectedId, targetSlot = null, disabled = false, onselect, oncomplete }: Props = $props();
   let pendingCommand = $state<SwapCommand | null>(null);
   let pending = $state(false);
   let message = $state('');
@@ -45,7 +45,7 @@
         ? 'That keepsake is already in the chosen place.'
         : command.targetSlot === null ? 'Keepsake returned to the collection.' : `Keepsake moved to slot ${command.targetSlot + 1}.`;
       messageKind = 'status';
-      try { await invalidateAll(); }
+      try { await invalidateAll(); oncomplete?.(); }
       catch { message = 'The swap was saved, but the latest collection could not be loaded. Refresh the bar to continue.'; }
     } catch {
       message = 'The swap result is unknown. Retry the same arrangement to check whether it was saved.';
@@ -73,12 +73,13 @@
   }
 </script>
 
-<section class="trinket-collection panel" aria-labelledby="trinket-title">
+<section class="trinket-collection" aria-labelledby="trinket-title">
   <header class="trinket-heading">
-    <div><p class="eyebrow">Keepsakes</p><h2 id="trinket-title">The four active places</h2></div>
+    <div><p class="eyebrow">Keepsakes</p><h2 id="trinket-title">{targetSlot === null ? 'The four active places' : `Place for slot ${targetSlot + 1}`}</h2></div>
     <p>Displayed keepsakes add their bonuses. Moving them is free.</p>
   </header>
 
+  {#if targetSlot === null}
   <div class="trinket-slots" aria-label="Four active trinket slots">
     {#each slots as slot (slot)}
       {@const equipped = collection.find((item) => item.slot === slot) ?? null}
@@ -98,6 +99,23 @@
       </article>
     {/each}
   </div>
+  {:else}
+    {@const equipped = collection.find((item) => item.slot === targetSlot) ?? null}
+    <div class="trinket-target-slot" aria-label={`Keepsake slot ${targetSlot + 1}`}>
+      <span class="slot-label">Slot {targetSlot + 1}</span>
+      {#if equipped}
+        <img class="trinket-art" src={TRINKET_ARTWORK[equipped.artworkId].src} alt={TRINKET_ARTWORK[equipped.artworkId].alt} />
+        <strong>{equipped.name}</strong>
+        <small>{TRINKET_EFFECT_CATALOG[equipped.catalogId].label}</small>
+        <button class="trinket-text-button" type="button" disabled={disabled || pending || !!pendingCommand}
+          onclick={() => move(equipped.id, null)}>Return this keepsake to the collection</button>
+      {:else}
+        <span class="empty-slot-mark" aria-hidden="true">◇</span>
+        <strong>Empty place</strong>
+        <small>Displayed keepsakes add their bonuses. Moving them is free.</small>
+      {/if}
+    </div>
+  {/if}
 
   {#if collection.length > 0}
     <div class="trinket-move-controls">
@@ -107,12 +125,19 @@
           <option value={item.id}>{item.name}{item.slot === null ? ' · Collection' : ` · Slot ${item.slot + 1}`}</option>
         {/each}
       </select>
-      <div class="trinket-slot-actions" aria-label="Choose active slot">
-        {#each slots as slot (slot)}
-          <button type="button" disabled={disabled || pending || !!pendingCommand || !selectedItem}
-            onclick={() => selectedItem && move(selectedItem.id, slot)}>Move to slot {slot + 1}</button>
-        {/each}
-      </div>
+      {#if targetSlot !== null}
+        <button class="trinket-place" type="button" disabled={disabled || pending || !!pendingCommand || !selectedItem || selectedItem.slot === targetSlot}
+          onclick={() => selectedItem && move(selectedItem.id, targetSlot)}>
+          {selectedItem ? `Place ${selectedItem.name} in slot ${targetSlot + 1}` : `Choose a keepsake for slot ${targetSlot + 1}`}
+        </button>
+      {:else}
+        <div class="trinket-slot-actions" aria-label="Choose active slot">
+          {#each slots as slot (slot)}
+            <button type="button" disabled={disabled || pending || !!pendingCommand || !selectedItem}
+              onclick={() => selectedItem && move(selectedItem.id, slot)}>Move to slot {slot + 1}</button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
     <div class="trinket-inventory" aria-label="Keepsake collection">
@@ -134,7 +159,7 @@
 </section>
 
 <style>
-  .trinket-collection { display: grid; gap: .8rem; min-width: 0; margin: 0; padding: .9rem; border-color: #654b20; background: linear-gradient(145deg, rgb(29 21 10 / .96), rgb(12 9 5 / .96)); }
+  .trinket-collection { display: grid; gap: .8rem; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
   .trinket-heading { display: flex; align-items: end; justify-content: space-between; gap: .8rem; padding-bottom: .55rem; border-bottom: 1px solid rgb(128 96 44 / .5); }
   .trinket-heading .eyebrow { margin: 0 0 .1rem; font-size: .67rem; }
   .trinket-heading h2 { margin: 0; color: #e7c871; font-family: 'Cinzel', serif; font-size: 1rem; }
@@ -142,15 +167,17 @@
   .trinket-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; }
   .trinket-slot { display: grid; align-content: start; justify-items: center; gap: .3rem; min-width: 0; min-height: 8.2rem; padding: .45rem .35rem; border: 1px dashed #51401f; background: rgb(5 4 2 / .38); text-align: center; }
   .trinket-slot.occupied { border-style: solid; border-color: #80602e; background: linear-gradient(160deg, rgb(77 55 18 / .3), rgb(12 9 5 / .42)); }
+  .trinket-target-slot { display: grid; justify-items: center; gap: .35rem; min-height: 7rem; padding: .55rem; border: 1px solid #80602e; background: linear-gradient(160deg, rgb(77 55 18 / .3), rgb(12 9 5 / .42)); text-align: center; }
   .slot-label { color: #a98d56; font-family: 'Cinzel', serif; font-size: .64rem; letter-spacing: .08em; text-transform: uppercase; }
   .trinket-art { display: block; width: 2rem; height: 2rem; object-fit: contain; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .5)); }
   .trinket-slot strong, .trinket-item strong { color: #e6ca7a; font-family: 'Cinzel', serif; font-size: .78rem; }
   .trinket-slot small, .trinket-item small { color: #a89468; font-size: .72rem; line-height: 1.25; }
   .empty-slot-mark { color: #675126; font-size: 1.35rem; line-height: 1.2; }
-  .trinket-text-button, .trinket-slot-actions button, .trinket-retry { min-height: 2rem; border: 1px solid #705329; padding: .27rem .45rem; color: #e2c373; background: #171108; font-size: .76rem; cursor: pointer; }
-  .trinket-text-button:hover, .trinket-slot-actions button:hover, .trinket-retry:hover { border-color: #d2aa51; background: #261b0b; }
-  .trinket-text-button:disabled, .trinket-slot-actions button:disabled, .trinket-retry:disabled { opacity: .55; cursor: not-allowed; }
+  .trinket-text-button, .trinket-slot-actions button, .trinket-place, .trinket-retry { min-height: 2rem; border: 1px solid #705329; padding: .27rem .45rem; color: #e2c373; background: #171108; font-size: .76rem; cursor: pointer; }
+  .trinket-text-button:hover, .trinket-slot-actions button:hover, .trinket-place:hover, .trinket-retry:hover { border-color: #d2aa51; background: #261b0b; }
+  .trinket-text-button:disabled, .trinket-slot-actions button:disabled, .trinket-place:disabled, .trinket-retry:disabled { opacity: .55; cursor: not-allowed; }
   .trinket-move-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .4rem .55rem; align-items: center; }
+  .trinket-place { justify-self: start; min-height: 2.4rem; padding-inline: .65rem; font-size: .82rem; }
   .trinket-move-controls > label { color: #b6a073; font-size: .83rem; }
   .trinket-move-controls select { grid-column: 1 / -1; min-height: 2.4rem; min-width: 0; border: 1px solid #60481f; padding: .35rem .5rem; color: #ead8a6; background: #0e0b06; font: inherit; }
   .trinket-move-controls select:disabled { color: #8d7c56; cursor: not-allowed; }

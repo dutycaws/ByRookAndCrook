@@ -114,6 +114,7 @@ async function signIn(page: import('@playwright/test').Page, player: Awaited<Ret
   await page.getByLabel('Password').fill(player.password);
   await page.getByRole('button', { name: 'Open the ledger' }).click();
   await expect(page).toHaveURL(/\/garden$/);
+    await expect(page.locator('.game-shell')).toHaveAttribute('data-hydrated', 'true');
   await page.getByRole('link', { name: /Bar/ }).click();
   await expect(page).toHaveURL(/\/bar$/);
 }
@@ -135,18 +136,13 @@ test('fixed keepsake displays select collection items and overflow swaps persist
     await expect(page.locator('.scene-keepsake-place')).toHaveCount(4);
     await expect(page.locator('[data-keepsake-slot="1"] .scene-keepsake-art')).toBeVisible();
     await expect(page.locator('[data-keepsake-slot="4"] .scene-keepsake-art')).toBeVisible();
-    await expect(page.getByText('1 keepsake waits in the collection until you choose a place.')).toBeVisible();
-
-    const fourthDisplay = page.locator('[data-keepsake-slot="4"] .scene-keepsake-art');
-    const fourthItem = initialItems.find((item) => item.slot === 3)!;
-    await page.getByLabel('Choose a keepsake').selectOption(fourthItem.id);
-    await expect(fourthDisplay).toHaveClass(/chosen/);
-
+    const slotOne = page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${displaced.name}`) });
+    await slotOne.click();
+    await expect(page.getByRole('dialog', { name: 'Arrange a keepsake' })).toBeVisible();
     await page.getByLabel('Choose a keepsake').selectOption(overflow.id);
-    await page.getByRole('button', { name: 'Move to slot 1' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Keepsake moved to slot 1.' })).toBeVisible();
-    await expect(page.locator('[data-keepsake-slot="1"] .scene-keepsake-art')).toHaveAttribute('aria-label', new RegExp(overflow.name));
-    await expect(page.getByText('1 keepsake waits in the collection until you choose a place.')).toBeVisible();
+    await page.getByRole('button', { name: `Place ${overflow.name} in slot 1` }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) })).toBeVisible();
 
     const swappedSnapshot = await player.client.rpc('npc_bar_snapshot');
     expect(swappedSnapshot.error).toBeNull();
@@ -156,8 +152,11 @@ test('fixed keepsake displays select collection items and overflow swaps persist
 
     await page.reload();
     await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
-    await expect(page.locator('[data-keepsake-slot="1"] .scene-keepsake-art')).toHaveAttribute('aria-label', new RegExp(overflow.name));
-    await expect(page.getByText('1 keepsake waits in the collection until you choose a place.')).toBeVisible();
+    await expect(page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) })).toBeVisible();
+    await page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) }).click();
+    await expect(page.getByLabel('Choose a keepsake')).toHaveValue(overflow.id);
+    await page.getByRole('dialog').press('Escape');
+    await expect(page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) })).toBeFocused();
     const reloadedSnapshot = await player.client.rpc('npc_bar_snapshot');
     expect(reloadedSnapshot.error).toBeNull();
     expect(readTrinketCollection(reloadedSnapshot.data))

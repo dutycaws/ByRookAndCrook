@@ -146,7 +146,7 @@ select is(jsonb_array_length(public.get_tavern_snapshot() #> '{ingredients}'), 0
 select is((select count(*) from public.social_cards), 0::bigint, 'a new brew creates no legacy Pour Ale entitlement');
 select is((select count(*) from public.intent_cards where source_kind='brew'), 1::bigint, 'a qualifying brew creates one intent card');
 select is((select tier from public.intent_cards where source_kind='brew'), 'exceptional', 'Resplendent brew earns an exceptional intent card');
-select is((select card_key from public.intent_cards where source_kind='brew'), 'resolve', 'a Resplendent brew rewards Resolve');
+select is((select card_key from public.intent_cards where source_kind='brew'), 'flirt', 'a Resplendent brew rewards Flirt');
 select is((select revision from public.tavern_saves), 3::bigint, 'completion advances revision once');
 select is((select day_minigame_completed from public.tavern_saves), true, 'completion records that a craft finished today');
 select ok((public.get_tavern_snapshot() #>> '{brewery,activeSession}') is null, 'completed brew is no longer active');

@@ -35,6 +35,10 @@ export interface ServeCommand {
 }
 
 export interface ServeReceipt {
+  /** Older saved receipts retain their original name without new provenance fields. */
+  productKey?: string;
+  ingredientType?: string;
+  ingredientName?: string;
   actionId: string;
   instanceId: string;
   itemKind: 'food' | 'beverage';
@@ -54,8 +58,8 @@ export interface BarSnapshot {
   trinkets?: { collection: OwnedTrinket[] };
   save: { id: string; revision: number; gold: number; currentDay: number };
   patrons: Patron[];
-  beverages: Array<{ id: string; kind: 'beverage'; name: string; qualityIndex: QualityIndex }>;
-  foods: Array<{ id: string; kind: 'food'; name: string; qualityIndex: QualityIndex }>;
+  beverages: FinishedServiceItem[];
+  foods: FinishedServiceItem[];
   intentCards: Array<Pick<IntentCard, 'id' | 'cardKey' | 'displayName' | 'description' | 'tier'>>;
   roster: Patron[];
   history: ServeReceipt[];
@@ -65,12 +69,31 @@ export interface BarSnapshot {
   legacyCards?: Array<Pick<IntentCard, 'id' | 'displayName' | 'tier'>>;
 }
 
+/** A read-time projection of a crafted unit; provenance remains in crafting. */
+export interface FinishedServiceItem {
+  id: string;
+  kind: 'food' | 'beverage';
+  name: string;
+  qualityIndex: QualityIndex;
+  productKey: string;
+  ingredientType: string;
+  ingredientName: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isFinishedServiceItem(value:unknown): value is FinishedServiceItem {
+  if(!isRecord(value))return false;
+  return typeof value.id==='string' && ['food','beverage'].includes(String(value.kind))
+    && typeof value.name==='string' && Number.isInteger(value.qualityIndex)
+    && Number(value.qualityIndex)>=0 && Number(value.qualityIndex)<=6
+    && ['productKey','ingredientType','ingredientName'].every(key=>typeof value[key]==='string' && String(value[key]).length>0);
 }
 
 function isPatron(value: unknown): value is Patron {
@@ -109,7 +132,8 @@ export function parseBarSnapshot(value: Json): BarSnapshot | null {
     !Array.isArray(candidate.roster) || !Array.isArray(candidate.beverages) ||
     !Array.isArray(candidate.foods) || !Array.isArray(candidate.intentCards) ||
     !Array.isArray(candidate.history) || !Array.isArray(candidate.news) ||
-    !candidate.roster.every(isPatron)) throw new Error('Invalid bar snapshot');
+    !candidate.roster.every(isPatron) || !candidate.beverages.every(isFinishedServiceItem)
+    || !candidate.foods.every(isFinishedServiceItem)) throw new Error('Invalid bar snapshot');
   return candidate;
 }
 

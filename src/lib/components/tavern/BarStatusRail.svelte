@@ -2,56 +2,31 @@
   let {
     day,
     gold,
-    drinks,
-    foods,
     disabled = false,
     onclose
   }: {
     day: number;
     gold: number;
-    drinks: number;
-    foods: number;
     disabled?: boolean;
     onclose: () => void;
   } = $props();
 </script>
 
-<header class="bar-status" aria-label="Tavern status">
-  <dl class="status-facts">
-    <div><dt>Day</dt><dd>{day}</dd></div>
-    <div><dt>Gold</dt><dd>{gold}</dd></div>
-    <div><dt>Cellar</dt><dd>{drinks + foods} ready</dd></div>
-  </dl>
+<div class="bar-status" aria-label="Tavern status">
+  <p class="status-line"><span>Day {day}</span><span aria-hidden="true">·</span><span>{gold} gold</span></p>
   <button class="end-evening" type="button" {disabled} onclick={onclose}>
     <span aria-hidden="true">☾</span><span>End evening</span>
   </button>
-</header>
+</div>
 
 <style>
-  .bar-status {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    justify-content: space-between;
-    gap: clamp(.75rem, 2vw, 1.5rem);
-    padding: .75rem 0;
-    border-bottom: 1px solid rgb(193 159 94 / .28);
-  }
-
-  .status-facts { display: flex; flex: 1 1 auto; align-items: center; gap: clamp(1rem, 3vw, 2.25rem); margin: 0; }
-  .status-facts div { display: flex; align-items: baseline; gap: .4rem; white-space: nowrap; }
-  .status-facts dt { color: #a89468; font-size: .85rem; }
-  .status-facts dd { margin: 0; color: #e4cb8b; font-variant-numeric: tabular-nums; font-weight: 700; }
-  .end-evening { display: inline-flex; min-height: 2.5rem; align-items: center; justify-content: center; gap: .5rem; padding: .45rem .8rem; border: 1px solid #806631; color: #ebd9ad; background: rgb(39 29 14 / .8); font: inherit; font-size: .88rem; font-weight: 650; white-space: nowrap; cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease; }
+  .bar-status { position: absolute; z-index: 13; top: .7rem; right: .75rem; left: .75rem; display: flex; align-items: start; justify-content: space-between; gap: .75rem; pointer-events: none; }
+  .status-line { display: inline-flex; align-items: center; gap: .5rem; margin: 0; padding: .45rem .65rem; border: 1px solid rgb(193 159 94 / .28); color: #e7d7af; background: rgb(14 10 6 / .78); font-size: .82rem; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #000; }
+  .status-line span[aria-hidden='true'] { color: #a89468; }
+  .end-evening { display: inline-flex; min-height: 2.25rem; align-items: center; justify-content: center; gap: .45rem; padding: .4rem .65rem; border: 1px solid #806631; color: #ebd9ad; background: rgb(17 12 6 / .92); font: inherit; font-size: .84rem; font-weight: 650; white-space: nowrap; cursor: pointer; pointer-events: auto; transition: background-color 150ms ease, border-color 150ms ease; }
   .end-evening span:first-child { color: #e4c36b; }
   .end-evening:hover { border-color: #c49b4e; background: #392910; }
   .end-evening:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
-
-  @media (max-width: 600px) {
-    .bar-status { flex-wrap: wrap; gap: .55rem .75rem; }
-    .status-facts { justify-content: space-between; gap: .65rem; }
-    .status-facts div { gap: .3rem; }
-    .status-facts dt { font-size: .78rem; }
-    .end-evening { min-height: 2.35rem; margin-left: auto; padding: .4rem .6rem; font-size: .82rem; }
-  }
+  .end-evening:disabled { opacity: .62; cursor: wait; }
+  @media (max-width: 520px) { .bar-status { top: .45rem; right: .45rem; left: .45rem; } .status-line { gap: .35rem; padding: .35rem .5rem; font-size: .75rem; } .end-evening { min-height: 2rem; padding: .3rem .45rem; font-size: .76rem; } }
 </style>
