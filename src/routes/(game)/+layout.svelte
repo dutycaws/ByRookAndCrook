@@ -207,14 +207,22 @@
       aria-live="polite"
       role="region"
       tabindex="-1"
-      onmouseenter={enterPointer}
-      onmouseleave={leavePointer}
+      onpointerenter={enterPointer}
+      onpointerleave={leavePointer}
       onfocusin={enterFocus}
       onfocusout={leaveFocus}
     >
       <div class="toast-copy">
-        <p class="eyebrow">Day {activeReport.day} · A change at the tavern</p>
-        <a href={reportHref(activeReport)}>{activeReport.text}<span>Read in the Codex</span></a>
+        <p class="eyebrow">Day {activeReport.day} · Tavern chronicle</p>
+        <a
+          class="toast-report-link"
+          href={reportHref(activeReport)}
+          aria-label={`Read full chronicle report in the Codex: ${activeReport.text}`}
+          title={activeReport.text}
+        >
+          <span class="toast-report-text">{activeReport.text}</span>
+          <span class="toast-report-action" aria-hidden="true">Read in the Codex</span>
+        </a>
       </div>
       <button class="toast-dismiss" type="button" aria-label="Dismiss notice" onclick={() => clearToast(true)}>×</button>
     </aside>
@@ -240,6 +248,7 @@
     color: #e9d9ac;
     background: linear-gradient(115deg, rgb(42 31 13 / .98), rgb(20 17 9 / .98));
     box-shadow: 0 12px 34px rgb(0 0 0 / 58%);
+    pointer-events: none;
     transform: translate(0, 0) scale(1);
     transform-origin: top right;
     transition: transform 360ms cubic-bezier(.2, .75, .25, 1), opacity 360ms ease;
@@ -249,11 +258,27 @@
   .codex-report-toast.dispatching:not(.settle-to-codex) { transform: none; }
   .toast-copy { min-width: 0; }
   .toast-copy .eyebrow { margin: 0 0 .25rem; font-size: .67rem; }
-  .toast-copy a { display: grid; gap: .22rem; color: #f1e4bd; font-size: 1rem; line-height: 1.35; text-decoration: none; }
-  .toast-copy a span { color: #e4c675; font-size: .82rem; text-decoration: underline; text-underline-offset: .2em; }
+  .toast-copy a, .toast-dismiss { pointer-events: auto; }
+  .toast-report-link { display: grid; gap: .22rem; color: #f1e4bd; font-size: 1rem; line-height: 1.35; text-decoration: none; }
+  .toast-report-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+  .toast-report-action { color: #e4c675; font-size: .82rem; text-decoration: underline; text-underline-offset: .2em; }
   .toast-dismiss { align-self: start; display: grid; width: 2.5rem; height: 2.5rem; place-items: center; border: 1px solid rgb(184 148 76 / 52%); color: #e9d9ac; background: transparent; font: 1.5rem/1 'EB Garamond', Georgia, serif; cursor: pointer; }
-  .toast-copy a:focus-visible, .toast-dismiss:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
-  @media (max-width: 600px) { .codex-report-toast { top: 4.75rem; right: .5rem; width: calc(100vw - 1rem); padding: .7rem .75rem; } }
+  .toast-report-link:focus-visible, .toast-dismiss:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
+  @media (max-width: 600px) {
+    .codex-report-toast {
+      top: auto;
+      right: max(.5rem, calc((100vw - 28rem) / 2));
+      bottom: calc(env(safe-area-inset-bottom, 0px) + .5rem);
+      left: max(.5rem, calc((100vw - 28rem) / 2));
+      width: auto;
+      gap: .45rem;
+      padding: .55rem .65rem;
+    }
+    .toast-copy .eyebrow { margin-bottom: .12rem; font-size: .61rem; }
+    .toast-report-link { gap: .1rem; font-size: .86rem; line-height: 1.25; }
+    .toast-report-action { font-size: .7rem; }
+    .toast-dismiss { width: 2.25rem; height: 2.25rem; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .codex-report-toast { transition: opacity 160ms ease; }
     .codex-report-toast.dispatching { transform: none; }
