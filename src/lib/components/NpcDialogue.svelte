@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { invalidateAll } from '$app/navigation';
   import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
   import type { BarSnapshot } from '$lib/game/serving';
-  let { npcId, name, journal, stock, unavailable, archiveHref = null, archived = false }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null;archiveHref?:string|null;archived?:boolean}=$props();
+  let { npcId, name, journal, stock, unavailable, archiveHref = null, archived = false, embedded = false, journalOnly = false, blocked = false, onbusychange }: {npcId:string;name:string;journal:Journal;stock:BarSnapshot;unavailable:string|null;archiveHref?:string|null;archived?:boolean;embedded?:boolean;journalOnly?:boolean;blocked?:boolean;onbusychange?:(busy:boolean)=>void}=$props();
   let message=$state(''); let intentCardId=$state(''); let offeringSelection=$state(''); let busy=$state(false);
   let frozen=$state<DialogueInput|null>(null); let notice=$state(''); let failure=$state(false);
   let hydrated=$state(false);
@@ -12,15 +13,39 @@
   }});
   let cancelling=$state(false);
   let canRetry=$state(true);
+  $effect(()=>{onbusychange?.(busy || frozen !== null);});
+  onDestroy(()=>onbusychange?.(false));
   let operation=0;
   let posting:AbortController|undefined;
   let selectedIntent=$derived(stock.intentCards.find(card=>card.id===intentCardId));
+  // Intent cards are individual stock items. Group identical effects for a
+  // calmer picker while retaining a concrete stock ID for the dialogue API.
+  let intentOptions=$derived.by(()=>{
+    const grouped=new Map<string,{card:typeof stock.intentCards[number];count:number;ids:string[]}>();
+    const tiersByName=new Map<string,Set<string>>();
+    for(const card of stock.intentCards) {
+      const nameKey=JSON.stringify([card.cardKey,card.displayName]);
+      const tiers=tiersByName.get(nameKey) ?? new Set<string>();
+      tiers.add(card.tier);
+      tiersByName.set(nameKey,tiers);
+      const key=JSON.stringify([card.cardKey,card.displayName,card.description,card.tier]);
+      const existing=grouped.get(key);
+      if(existing) { existing.count+=1; existing.ids.push(card.id); }
+      else grouped.set(key,{card,count:1,ids:[card.id]});
+    }
+    return [...grouped.values()].map((option)=>({
+      ...option,
+      label: (tiersByName.get(JSON.stringify([option.card.cardKey,option.card.displayName]))?.size ?? 0) > 1
+        ? `${option.card.displayName} · ${tierLabel(option.card.tier)}`
+        : option.card.displayName
+    }));
+  });
   let selectedOffering=$derived(offeringSelection
     ? [...stock.beverages,...stock.foods].find(item=>`${item.kind}:${item.id}`===offeringSelection)
     : undefined);
 
-  function intentMark(cardKey:string) {
-    return ({charm:'CH',insight:'IN',flirt:'FL',rumor:'RU',intimidate:'IM'} as Record<string,string>)[cardKey] ?? cardKey.slice(0,2).toUpperCase();
+  function tierLabel(tier:string) {
+    return ({fine:'Fine',superior:'Superior',exceptional:'Exceptional'} as Record<string,string>)[tier] ?? tier;
   }
 
   async function acceptStatus(body:any, completedNotice='Your last reply was saved.') {
@@ -41,6 +66,7 @@
     }
   }
   async function recover(id:string) {
+    if(blocked||busy)return;
     const current=++operation;busy=true;failure=false;
     try {
       const r=await fetch(`/api/dialogue/${id}`);const body=await r.json();
@@ -52,7 +78,7 @@
     } finally {if(current===operation)busy=false;}
   }
   async function send(event:SubmitEvent) {
-    event.preventDefault(); if(busy||frozen&&!canRetry)return;
+    event.preventDefault(); if(blocked||busy||frozen&&!canRetry)return;
     if(!frozen)canRetry=true;
     const [offeringKind, offeringId] = offeringSelection.split(':', 2);
     const offering: Offering | null = offeringId && (offeringKind === 'food' || offeringKind === 'beverage')
@@ -88,7 +114,7 @@
     }
   }
   async function cancel() {
-    if(!frozen||cancelling)return;
+    if(blocked||!frozen||cancelling)return;
     const command=frozen;const current=++operation;const pendingPost=posting;
     busy=true;cancelling=true;failure=false;
     try {
@@ -105,15 +131,19 @@
   }
 </script>
 
-<section class="npc-dialogue" aria-labelledby="conversation-heading">
-  <h2 id="conversation-heading" class="sr-only">Talk with {name}</h2>
+<section class="npc-dialogue" class:embedded class:journal-only={journalOnly} aria-labelledby="conversation-heading">
+  <h2 id="conversation-heading" class="sr-only">{journalOnly ? `Journal for ${name}` : `Talk with ${name}`}</h2>
 
-  {#if journal.availability!=='present' || archived}
+  {#if journalOnly}
+    {#if journal.availability!=='present' || archived}
+      <div class="dialogue-unavailable" role="status"><p class="eyebrow">{archived ? 'Read-only archive' : journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
+    {/if}
+  {:else if journal.availability!=='present' || archived}
     <div class="dialogue-unavailable"><p class="eyebrow">{archived ? 'Read-only archive' : journal.availability==='dead'?'In memory':journal.availability==='departed'?'Departed':'Unavailable'}</p><p>This character's story has lasting consequences. Their conversations remain in your journal.</p></div>
   {:else}
     {#if unavailable}<p class="form-message dialogue-provider-notice" role="note">{unavailable}</p>{/if}
     <form onsubmit={send} class="dialogue-composer">
-      <fieldset disabled={!hydrated||busy||!!unavailable}>
+      <fieldset disabled={!hydrated||busy||!!unavailable||blocked}>
         <legend class="sr-only">Compose your message to {name}</legend>
         <div class="composer-row">
           <div class="keeper-seal" aria-hidden="true"><img src="/raven.svg" alt="" /><span>Keeper</span></div>
@@ -121,11 +151,11 @@
             <label for="npc-message" class="sr-only">Your message</label>
             <textarea id="npc-message" rows="2" maxlength="2000" required disabled={!!frozen} bind:value={message} placeholder="Say something…"></textarea>
             <div class="selection-summary" aria-live="polite">
-              <span>{selectedIntent ? `Intent: ${selectedIntent.displayName}` : 'Speaking plainly'}</span>
+              <span>{selectedIntent ? `Intent: ${selectedIntent.displayName} · ${tierLabel(selectedIntent.tier)}` : 'Speaking plainly'}</span>
               {#if selectedOffering}<span>Offering: {selectedOffering.name}</span>{/if}
             </div>
           </div>
-          <button class="composer-send" aria-label={busy?'Considering your words…':frozen?'Retry the same message':'Speak'} disabled={!hydrated||busy||!!unavailable||!!frozen&&!canRetry||(!frozen&&!message.trim())}>
+          <button class="composer-send" aria-label={busy?'Considering your words…':frozen?'Retry the same message':'Speak'} disabled={!hydrated||busy||!!unavailable||blocked||!!frozen&&!canRetry||(!frozen&&!message.trim())}>
             <span>{busy?'Thinking…':frozen?'Retry':'Send'}</span><small>{frozen?'Same message':'Enter'}</small>
           </button>
         </div>
@@ -133,14 +163,13 @@
         <div class="composer-tools">
           <section class="intent-tool" aria-labelledby="intent-tool-title">
             <div class="tool-label"><p class="eyebrow" id="intent-tool-title">Choose your intent</p><span>Characterizes your words</span></div>
-            <div class="intent-card-tray" role="group" aria-labelledby="intent-tool-title">
-              <button type="button" class="intent-card plain" class:selected={intentCardId===''} aria-pressed={intentCardId===''} disabled={!!frozen} onclick={()=>intentCardId=''}>
-                <strong>Plain</strong><small>No added intent</small>
+            <div class="intent-picker" role="group" aria-labelledby="intent-tool-title">
+              <button type="button" class="intent-option" aria-pressed={intentCardId===''} disabled={!!frozen} onclick={()=>intentCardId=''}>
+                <span>Plain</span>
               </button>
-              {#each stock.intentCards as card (card.id)}
-                <button type="button" class="intent-card intent-{card.cardKey}" class:selected={intentCardId===card.id} aria-pressed={intentCardId===card.id} disabled={!!frozen} onclick={()=>intentCardId=intentCardId===card.id?'':card.id}>
-                  <span class="intent-mark" aria-hidden="true">{intentMark(card.cardKey)}</span>
-                  <strong>{card.displayName}</strong><small>{card.description}</small>
+              {#each intentOptions as option (`${option.card.cardKey}:${option.card.displayName}:${option.card.description}:${option.card.tier}`)}
+                <button type="button" class="intent-option intent-{option.card.cardKey}" class:selected={option.ids.includes(intentCardId)} aria-pressed={option.ids.includes(intentCardId)} aria-label={`${option.label}${option.count > 1 ? `, ${option.count} cards available` : ''}: ${option.card.description}`} title={option.card.description} disabled={!!frozen} onclick={()=>intentCardId=option.ids.includes(intentCardId)?'':option.card.id}>
+                  <span>{option.label}</span>{#if option.count > 1}<small aria-hidden="true">×{option.count}</small>{/if}
                 </button>
               {/each}
             </div>
@@ -156,15 +185,14 @@
           </label>
         </div>
       </fieldset>
-      {#if frozen}<div class="recovery-actions"><button type="button" class="text-button" disabled={busy} onclick={()=>recover(frozen!.turnId)}>Check reply</button><button type="button" class="text-button" disabled={cancelling} onclick={cancel}>{cancelling?'Cancelling…':'Cancel unfinished message'}</button></div>{/if}
+      {#if frozen}<div class="recovery-actions"><button type="button" class="text-button" disabled={busy||blocked} onclick={()=>recover(frozen!.turnId)}>Check reply</button><button type="button" class="text-button" disabled={cancelling||blocked} onclick={cancel}>{cancelling?'Cancelling…':'Cancel unfinished message'}</button></div>{/if}
     </form>
   {/if}
-  {#if notice}<p class="form-message dialogue-notice" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
+  {#if !journalOnly && notice}<p class="form-message dialogue-notice" class:error={failure} role={failure?'alert':'status'}>{notice}</p>{/if}
 
-  <details class="dialogue-journal">
-    <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questLifecycleStatus.replace('_',' ')}</small></summary>
+  {#snippet journalContent()}
     <div class="journal-drawer">
-      <section class="npc-intention">
+      {#if !journalOnly}<section class="npc-intention">
         <p class="eyebrow">{journal.availability==='present'?'Current quest':journal.availability==='dead'?'In memory':'Departed'} · {journal.questLifecycleStatus.replace('_',' ')}</p>
         {#if journal.currentQuest}<h3>{journal.currentQuest.title}</h3><p>{journal.currentQuest.objective}</p>{/if}
         {#if journal.questLifecycleStatus==='awaiting_transition'}<p>They are considering their next step.</p>{/if}
@@ -178,7 +206,7 @@
           </ol>
         {/if}
         {#if journal.farewellText}<p class="form-message" role="note">{journal.farewellText}</p>{/if}
-      </section>
+      </section>{/if}
       {#if journal.disposition}
         <section class="npc-news" aria-label="How they seem lately">
           <p class="eyebrow">How they seem lately</p>
@@ -209,5 +237,182 @@
         </section>
       {/if}
     </div>
-  </details>
+  {/snippet}
+  {#if journalOnly}
+    <div class="journal-destination" aria-label="Conversation and quest journal">
+      {@render journalContent()}
+    </div>
+  {:else if !embedded}
+    <details class="dialogue-journal">
+      <summary><span>Conversation journal</span><small>{journal.turns.length} exchange{journal.turns.length===1?'':'s'} · {journal.questLifecycleStatus.replace('_',' ')}</small></summary>
+      {@render journalContent()}
+    </details>
+  {/if}
 </section>
+
+<style>
+  .npc-dialogue.embedded {
+    grid-area: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .embedded .composer-row {
+    grid-template-columns: minmax(0, 1fr) 76px;
+  }
+
+  .embedded .keeper-seal {
+    display: none;
+  }
+
+  .npc-dialogue.embedded .composer-tools {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: .6rem;
+  }
+
+  .npc-dialogue.embedded .intent-tool {
+    display: block;
+    min-width: 0;
+  }
+
+  .npc-dialogue.embedded .tool-label {
+    display: block;
+    margin-bottom: .35rem;
+  }
+
+  .embedded .tool-label .eyebrow {
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .embedded .tool-label span {
+    display: none;
+  }
+
+  .npc-dialogue.embedded .intent-picker {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    gap: .35rem;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .intent-option {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    gap: .35rem;
+    padding: .35rem .65rem;
+    border: 1px solid #735a31;
+    border-radius: 999px;
+    color: #d8c28f;
+    background: #20180f;
+    font: 600 12px 'EB Garamond', Georgia, serif;
+    cursor: pointer;
+    transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+  }
+
+  .intent-option small {
+    color: inherit;
+    font-size: 10px;
+    opacity: .8;
+  }
+
+  .intent-option.selected,
+  .intent-option[aria-pressed='true'] {
+    border-color: #e1bd61;
+    color: #ffe6a0;
+    background: #463419;
+    box-shadow: inset 0 0 0 1px rgb(225 189 97 / 18%);
+  }
+
+  .intent-option:hover:not(:disabled) {
+    border-color: #c29b51;
+    transform: translateY(-1px);
+  }
+
+  .intent-option:focus-visible,
+  .embedded .hospitality-tool select:focus-visible,
+  .embedded .parchment-input textarea:focus-visible {
+    outline: 2px solid #f0cd72;
+    outline-offset: 2px;
+  }
+
+  .intent-option:disabled {
+    cursor: not-allowed;
+    opacity: .65;
+  }
+
+  .npc-dialogue.embedded .hospitality-tool {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .npc-dialogue.embedded .hospitality-tool > span {
+    display: flex;
+    align-items: baseline;
+    gap: .35rem;
+  }
+
+  .npc-dialogue.embedded .hospitality-tool strong {
+    white-space: nowrap;
+  }
+
+  .npc-dialogue.embedded .hospitality-tool small {
+    display: none;
+  }
+
+  .npc-dialogue.embedded .hospitality-tool select {
+    width: min(100%, 15rem);
+    max-width: 15rem;
+  }
+
+  .embedded.journal-only .journal-destination {
+    min-width: 0;
+  }
+
+  .embedded.journal-only .journal-drawer {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 0;
+  }
+
+  .embedded.journal-only .npc-news,
+  .embedded.journal-only .npc-transcript {
+    grid-column: auto;
+  }
+
+  @media (max-width: 700px) {
+    .npc-dialogue.embedded .composer-tools {
+      display: flex;
+      gap: .5rem;
+    }
+
+    .npc-dialogue.embedded .intent-tool {
+      display: block;
+    }
+
+    .npc-dialogue.embedded .hospitality-tool > span {
+      align-items: baseline;
+      flex-direction: row;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .intent-option {
+      transition: none;
+    }
+  }
+</style>

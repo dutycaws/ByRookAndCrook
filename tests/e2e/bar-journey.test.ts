@@ -51,7 +51,7 @@ test('the Bar puts present residents in the illustrated room and selects them wi
     await expect(first).toHaveAttribute('aria-pressed', 'true');
     await expect(second).toHaveAttribute('aria-pressed', 'false');
     await page.keyboard.press('Space');
-    await expect(page).toHaveURL(/\/bar$/);
+    await expect(page).toHaveURL(/\/bar\?npc=[^&]+$/);
     await expect(second).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('heading', { name: secondName, exact: true })).toBeVisible();
     await page.keyboard.press('ArrowLeft');
@@ -60,9 +60,12 @@ test('the Bar puts present residents in the illustrated room and selects them wi
     await expect(first).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('heading', { name: firstName, exact: true })).toBeVisible();
     await second.click();
-    await expect(page.getByRole('heading', { name: 'Serve food or drink' })).toBeVisible();
+    const actions = page.getByRole('tablist', { name: `Actions for ${secondName}` });
+    await expect(actions.getByRole('tab', { name: 'Talk' })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('heading', { name: `Talk with ${secondName}` })).toBeAttached();
     await expect(page.getByText('Choose your intent', { exact: true })).toBeVisible();
+    await actions.getByRole('tab', { name: 'Serve' }).click();
+    await expect(page.getByRole('heading', { name: 'Offer something' })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -79,6 +82,8 @@ test('a lost UUID serving response retries the frozen resident and item command 
     await expect(recipient).toBeVisible();
     const recipientName = await residentName(recipient);
     await recipient.click();
+    const actions = page.getByRole('tablist', { name: `Actions for ${recipientName}` });
+    await actions.getByRole('tab', { name: 'Serve' }).click();
     await page.route((url) => url.pathname === '/bar' && url.search === '?/serve', async (route) => {
       requests.push(route.request().postData() ?? '');
       if (requests.length === 1) {
@@ -98,8 +103,11 @@ test('a lost UUID serving response retries the frozen resident and item command 
     try {
       const other = await context.newPage();
       await signInAndOpenBar(other, player);
-      await expect(other.getByRole('heading', { name: 'No hospitality ready to serve' })).toBeVisible();
-      await expect(other.locator('.serving-history li')).toHaveCount(1);
+      const otherActions = other.getByRole('tablist', { name: /^Actions for / });
+      await otherActions.getByRole('tab', { name: 'Serve' }).click();
+      await expect(other.getByText('No hospitality is ready to serve.', { exact: true })).toBeVisible();
+      await other.getByRole('link', { name: 'Keeper’s Journal' }).click();
+      await expect(other.locator('.history-list li')).toHaveCount(1);
     } finally { await context.close(); }
     expect(errors).toEqual([]);
   } finally {

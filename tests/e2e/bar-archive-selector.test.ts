@@ -30,20 +30,22 @@ test('the archived resident selector updates the read-only inspector and honors 
     await expect(page).toHaveURL(/\/garden$/);
     await page.goto(`/bar?archive=1&npc=${encodeURIComponent(deepLinkedResident.instanceId)}`);
 
-    const selector = page.getByLabel('Select a past resident');
+    const selector = page.getByRole('combobox', { name: /^Resident/ });
     const inspector = page.locator('.guest-inspector');
+    await expect(page.getByRole('link', { name: 'Past residents' })).toHaveAttribute('aria-current', 'page');
     await expect(selector).toBeVisible();
     await expect(selector).toBeEnabled();
     await expect(selector).toHaveValue(deepLinkedResident.instanceId);
-    await expect(inspector.getByRole('heading', { name: deepLinkedResident.name, exact: true })).toBeVisible();
-    await expect(page.getByRole('heading', { name: `Talk with ${deepLinkedResident.name}`, exact: true })).toBeAttached();
-    await expect(page.getByText('Read-only archive')).toBeVisible();
+    await expect(page.getByRole('heading', { name: deepLinkedResident.name, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: `Journal for ${deepLinkedResident.name}`, exact: true })).toBeAttached();
+    await expect(page.getByRole('tabpanel', { name: 'Conversations' }).getByText('Read-only archive', { exact: true })).toBeVisible();
 
     await selector.selectOption(otherResident.instanceId);
     await expect(selector).toHaveValue(otherResident.instanceId);
-    await expect(inspector.getByRole('heading', { name: otherResident.name, exact: true })).toBeVisible();
-    await expect(inspector.getByRole('heading', { name: deepLinkedResident.name, exact: true })).toHaveCount(0);
-    await expect(page.getByRole('heading', { name: `Talk with ${otherResident.name}`, exact: true })).toBeAttached();
+    await expect(page.getByRole('heading', { name: otherResident.name, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: deepLinkedResident.name, exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: `Journal for ${otherResident.name}`, exact: true })).toBeAttached();
+    await page.getByRole('tablist', { name: 'Past resident sections' }).getByRole('tab', { name: 'About' }).click();
     await expect(inspector.getByRole('button', { name: 'Confirm dismissal' })).toHaveCount(0);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

@@ -3,7 +3,7 @@
   import type { BarSnapshot, Patron } from '$lib/game/serving';
   import { relationshipStageFor } from '$lib/game/relationships';
 
-  let { selected, journal, stock, archived = false, disabled = false, archiveHref = null, onarchive }: {
+  let { selected, journal, stock, archived = false, disabled = false, archiveHref = null, onarchive, embedded = false, includeArchive = true, archiveOnly = false }: {
     selected: Patron | null;
     journal: Journal | null;
     stock: BarSnapshot;
@@ -11,6 +11,9 @@
     disabled?: boolean;
     archiveHref?: string | null;
     onarchive: (archived: boolean) => void;
+    embedded?: boolean;
+    includeArchive?: boolean;
+    archiveOnly?: boolean;
   } = $props();
   let actionMessage = $state('');
   let reportOpen = $state(false);
@@ -42,11 +45,13 @@
   async function share() { if (!sharePreview || !selected) return; const result = await npcAction({ action: 'share', instanceId: selected.instanceId, contentHash: sharePreview.contentHash, includeDisplayName }); if (result) actionMessage = `Share link: /shares/${result.token}`; }
 </script>
 
-<aside class="tavern-rail guest-inspector" aria-labelledby="current-guest-title">
-  <div class="rail-title"><p class="eyebrow">{archived ? 'Past resident' : 'Current guest'}</p><h2 id="current-guest-title">{selected?.name ?? (archived ? 'No past resident selected' : 'No guest at the bar')}</h2><p>{selected?.title ?? (archived ? 'Choose a resident from the archive.' : 'The common room is quiet.')}</p></div>
-  <button class="text-button" type="button" onclick={() => onarchive(!archived)}>{archived ? 'Back to active guests' : 'View dismissed guests'}</button>
+<aside class="guest-inspector" class:tavern-rail={!embedded} class:embedded class:archive-only={archiveOnly}
+  aria-labelledby={!embedded && !archiveOnly ? 'current-guest-title' : undefined}
+  aria-label={embedded ? `About ${selected?.name ?? 'the guest'}` : archiveOnly ? 'Guest journal archive' : undefined}>
+  {#if !embedded && !archiveOnly}<div class="rail-title"><p class="eyebrow">{archived ? 'Past resident' : 'Current guest'}</p><h2 id="current-guest-title">{selected?.name ?? (archived ? 'No past resident selected' : 'No guest at the bar')}</h2><p>{selected?.title ?? (archived ? 'Choose a resident from the archive.' : 'The common room is quiet.')}</p></div>
+  <button class="text-button" type="button" onclick={() => onarchive(!archived)}>{archived ? 'Back to active guests' : 'View dismissed guests'}</button>{/if}
   {#if selected && journal}
-    <section class="guest-section" aria-label="Relationship">
+    {#if !archiveOnly}<section class="guest-section" aria-label="Relationship">
       <div class="relationship-label"><span>Relationship</span><strong>{selected.relationshipStage ?? relationshipStageFor(selected.relationship)}</strong></div>
       {#if selected.recentRelationshipChange && selected.recentRelationshipChange.delta < 0}
         <p class="consequence-warning" role="status">Trust was hurt on day {selected.recentRelationshipChange.dayNumber}.</p>
@@ -72,8 +77,8 @@
         <ul>{#each currentQuestSetbacks as event (`${event.day}:${event.text}`)}<li><small>Day {event.day}</small> <span class="consequence-warning">{event.text}</span></li>{/each}</ul>
       </div>
     {/if}
-    </section>
-    {#if journal.questArchive.items.length}
+    </section>{/if}
+    {#if (includeArchive || archiveOnly) && journal.questArchive.items.length}
       <section class="guest-section" aria-label="Quest archive">
         <p class="eyebrow">Quest archive</p>
         {#each journal.questArchive.items as quest (quest.id)}
@@ -86,35 +91,64 @@
         {#if journal.questArchive.nextCursor && archiveHref}<a class="text-button" href={archiveHref}>Earlier quests</a>{/if}
       </section>
     {/if}
-    {#if journal.disposition}
+    {#if !embedded && !archiveOnly && journal.disposition}
       <section class="guest-section" aria-label="How they seem lately">
         <p class="eyebrow">How they seem lately</p>
         <p>{journal.disposition.summary}</p>
       </section>
     {/if}
-    {#if journal.evolution.length}
+    {#if !embedded && !archiveOnly && journal.evolution.length}
       <section class="guest-section" aria-label="What shaped them">
         <p class="eyebrow">What shaped them</p>
         <ul>{#each journal.evolution as entry (`${entry.createdAt}:${entry.profileRevision}`)}<li><small>Day {entry.day}</small> {entry.disposition.summary}</li>{/each}</ul>
       </section>
     {/if}
-    <section class="guest-section">
+    {#if !archiveOnly}<section class="guest-section">
     <p class="eyebrow">Conversation context</p>
     <p>{selected.description}</p>
     {#if selected.creator}<p class="eyebrow story-origin">Community NPC</p><p class="muted">Created by <a href={`/creators/${selected.creator.profile}`}>{selected.creator.displayName}</a></p>{:else}<p class="eyebrow story-origin">Tavern resident</p>{/if}
-    </section>
+    </section>{/if}
   {:else}
     <section class="guest-section"><p class="muted">Choose a guest in the illustrated room to see their relationship, quest, and conversation context.</p></section>
   {/if}
-  {#if !archived}<section class="guest-section hospitality-counts" aria-label="Hospitality inventory">
+  {#if !embedded && !archiveOnly && !archived}<section class="guest-section hospitality-counts" aria-label="Hospitality inventory">
     <p class="eyebrow">Ready to offer</p>
     <div><span><strong>{stock.beverages.length}</strong> drinks</span><span><strong>{stock.foods.length}</strong> foods</span></div>
   </section>{/if}
-  {#if selected && !archived}<section class="guest-section guest-safety" aria-label="Guest controls">
+  {#if selected && !archived && !archiveOnly}<section class="guest-section guest-safety" aria-label="Guest controls">
     <p class="eyebrow">Guest controls</p>
-    <details><summary>Dismiss from this tavern</summary><p class="muted">This removes this resident from this save. Their historical record remains.</p><button type="button" class="text-button danger" onclick={dismiss}>Confirm dismissal</button></details>
-    <details bind:open={reportOpen}><summary>Report this NPC</summary><p class="consequence-warning" role="note">Submitting attaches the full conversation transcript and frozen encountered-version metadata for reviewer evidence.</p><label for="npc-report">What needs review?</label><textarea id="npc-report" bind:value={reportEvidence} maxlength="2000" rows="3"></textarea><button type="button" class="text-button" disabled={!reportEvidence.trim()} onclick={report}>Submit report</button></details>
-    <details><summary>Share conversation</summary><p class="muted">Preview the exact transcript before sharing. A created link is immutable and cannot be revoked.</p>{#if !sharePreview}<button type="button" class="text-button" onclick={previewShare}>Preview share</button>{:else}<p>{sharePreview.transcript.length} transcript entries will be shared exactly as shown.</p><div class="share-preview" aria-label="Exact conversation share preview">{#each sharePreview.transcript as entry,index (index)}<pre>{JSON.stringify(entry, null, 2)}</pre>{/each}</div><label><input type="checkbox" bind:checked={includeDisplayName} /> Include my display name</label><button type="button" class="text-button" onclick={share}>Create immutable link</button>{/if}</details>
+    <details><summary>Dismiss from this tavern</summary><p class="muted">This removes this resident from this save. Their historical record remains.</p><button type="button" class="text-button danger" disabled={disabled} onclick={dismiss}>Confirm dismissal</button></details>
+    <details bind:open={reportOpen}><summary>Report this NPC</summary><p class="consequence-warning" role="note">Submitting attaches the full conversation transcript and frozen encountered-version metadata for reviewer evidence.</p><label for="npc-report">What needs review?</label><textarea id="npc-report" bind:value={reportEvidence} maxlength="2000" rows="3" disabled={disabled}></textarea><button type="button" class="text-button" disabled={disabled || !reportEvidence.trim()} onclick={report}>Submit report</button></details>
+    <details><summary>Share conversation</summary><p class="muted">Preview the exact transcript before sharing. A created link is immutable and cannot be revoked.</p>{#if !sharePreview}<button type="button" class="text-button" disabled={disabled} onclick={previewShare}>Preview share</button>{:else}<p>{sharePreview.transcript.length} transcript entries will be shared exactly as shown.</p><div class="share-preview" aria-label="Exact conversation share preview">{#each sharePreview.transcript as entry,index (index)}<pre>{JSON.stringify(entry, null, 2)}</pre>{/each}</div><label><input type="checkbox" bind:checked={includeDisplayName} disabled={disabled} /> Include my display name</label><button type="button" class="text-button" disabled={disabled} onclick={share}>Create immutable link</button>{/if}</details>
     {#if actionMessage}<p class="form-message" role="status">{actionMessage}</p>{/if}
   </section>{/if}
 </aside>
+
+<style>
+  .guest-inspector.embedded {
+    display: block;
+    grid-area: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .guest-inspector.embedded .guest-section {
+    padding: .8rem 0;
+    border-bottom-color: rgb(146 118 86 / 28%);
+  }
+
+  .guest-inspector.embedded .guest-section:first-of-type {
+    padding-top: 0;
+  }
+
+  .guest-inspector.embedded .guest-section:last-of-type {
+    border-bottom: 0;
+  }
+
+  .guest-inspector.embedded .guest-section > p {
+    line-height: 1.45;
+  }
+</style>
