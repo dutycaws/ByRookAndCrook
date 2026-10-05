@@ -95,7 +95,7 @@ export const SCENE_COMPOSITIONS: Readonly<Record<ComposedSceneId, SceneCompositi
     background: {
       kind: 'background', key: 'bar-background', alt: 'The candlelit common room of the tavern',
       x: 0, y: 0, width: 1672, height: 941, depth: 0,
-      compact: { x: -286, y: 0, width: 1672, height: 941 },
+      compact: { x: -100, y: 0, width: 1672, height: 941 },
       entrance: { x: 0, y: 0 }, exit: { x: 0, y: 0 }
     },
     actors: [
@@ -118,7 +118,7 @@ export const SCENE_COMPOSITIONS: Readonly<Record<ComposedSceneId, SceneCompositi
       {
         kind: 'foreground', key: 'bar-counter-occlusion', alt: '',
         x: 0, y: 665, width: 1672, height: 276, depth: 8,
-        compact: { x: -286, y: 665, width: 1672, height: 276 },
+        compact: { x: -100, y: 665, width: 1672, height: 276 },
         entrance: { x: 0, y: 40 }, exit: { x: 0, y: 40 }
       }
     ]

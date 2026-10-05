@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { BAR_SCENE_TOUCH_TARGET_CAPACITY, barSceneCameraForFocus, barScenePatronPlacements, presentBarPatrons, reconcileBarSceneSelection, selectedBarPatron } from '$lib/game/bar-scene';
+import { getSceneComposition } from '$lib/presentation/scene-composition';
 
 const patrons = [{ instanceId: 'lira' }, { instanceId: 'torvin' }];
+
+describe('Bar compact scene art bounds', () => {
+  it.each([372, 320])('covers the full %ipx 3:2 overview frame without moving actors', (viewportWidth) => {
+    const { plane, background, foreground, actors } = getSceneComposition('bar');
+    const viewportHeight = viewportWidth * 2 / 3;
+    const scale = viewportHeight / plane.height;
+    const planeLeft = (viewportWidth - plane.width * scale) / 2;
+    const visibleLeft = -planeLeft / scale;
+    const visibleRight = (viewportWidth - planeLeft) / scale;
+    const artLayers = [background, ...foreground];
+
+    for (const layer of artLayers) {
+      expect(layer.compact.x).toBeLessThanOrEqual(visibleLeft);
+      expect(layer.compact.x + layer.compact.width).toBeGreaterThanOrEqual(visibleRight);
+    }
+    expect(actors.map(({ compact }) => compact.x)).toEqual([148, 500]);
+  });
+});
 
 describe('Bar scene selection', () => {
   it('keeps selection and focus independent while both guests remain present', () => {

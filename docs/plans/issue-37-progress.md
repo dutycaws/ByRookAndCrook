@@ -37,7 +37,7 @@ Numbers correspond to the ordered issue checkboxes. All groups are implemented; 
 ## Verification
 
 - Svelte/type check: zero errors and warnings. Production build passed.
-- Unit suite: 83 files, 703 tests passed.
+- Unit suite: 83 files, 705 tests passed.
 - Integration suite: 12 files, 37 tests passed.
 - Fresh isolated migration replay/database suite: 88 SQL files, 2,413 assertions passed.
 - Scoped desktop/mobile E2E: 20 tests passed across Bar journey, archives, keepsakes, notifications and settlement realtime.
@@ -59,7 +59,7 @@ Screenshots/videos are ignored local artifacts, never committed. The historical 
 
 ## Review iteration and limits
 
-Rendered review identified desktop journal overflow, dialog positioning, excessive keepsake containers and missing authored Codex portraits. Repairs use a bounded journal surface, shared Dialog centering, flat contextual slot management and a neutral portrait fallback. Final desktop/mobile inspection verifies those repairs, connected card/composer behavior and no horizontal page overflow.
+Rendered review identified desktop journal overflow, dialog positioning, excessive keepsake containers and missing authored Codex portraits, and a compact overview artwork gap. Repairs use a bounded journal surface, shared Dialog centering, flat contextual slot management a neutral portrait fallback, and corrected compact background/counter bounds with a geometry regression test. Final desktop/mobile inspection verifies those repairs, connected card/composer behavior and no horizontal page overflow.
 
 Mobile area navigation remains horizontally scrollable. Long journals intentionally scroll within their destination. Dialogue/settlement tests use deterministic providers; they verify UI/transactional contracts but are not a live provider quality evaluation. The legacy serving RPC remains for compatibility although its standalone playable action is removed.
 
