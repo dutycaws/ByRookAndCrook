@@ -236,8 +236,9 @@ Keep credentials in the Git-ignored root `.env` with mode `0600`. Add `OPENAI_AP
 | Setting | Default / behavior |
 | --- | --- |
 | `NPC_PROVIDER` | `openai`; `local` explicitly returns not implemented. |
-| `NPC_CONTEXT_MODEL` | `gpt-5.6-luna`: investigation, review, memory. |
-| `NPC_CHARACTER_MODEL` | `gpt-5.6-terra`: deliberation and response. |
+| `NPC_CONTEXT_MODEL` | `gpt-6-luna`: investigation, review, world context, and memory. |
+| `NPC_CHARACTER_MODEL` | `gpt-6-luna`: deliberation, response, and creative world stages. |
+| `NPC_AUTHORING_MODEL` | `gpt-6-luna`: authoring assistance and sandbox replies. |
 | `NPC_MAX_CALLS` | 8; may reduce the app cap, never exceed the database cap. |
 | `NPC_INVESTIGATION_ROUNDS` | 2; clamped to 1–2. |
 | `NPC_DEADLINE_MS` | 90000; clamped to 1000–90000, below the 120-second database lease. |

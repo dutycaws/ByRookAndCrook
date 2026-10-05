@@ -24,7 +24,7 @@ export type SceneRuntimeAsset = (typeof SCENE_RUNTIME_ASSETS)[number];
 function isLocalSupabaseUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === '57321';
+    return ['http:', 'https:'].includes(url.protocol) && ['127.0.0.1', 'localhost'].includes(url.hostname);
   } catch {
     return false;
   }

@@ -46,8 +46,8 @@
       ? `${cell.layoutKey}, empty garden plot`
       : cell.kind === 'beehive'
         ? `${cell.layoutKey}, beehive`
-        : `${cell.layoutKey}, ${cell.plantName}, growth stage ${cell.stage}${cell.harvestable ? ', ready to harvest' : ''}`;
-    const attention = cell.attention ? `, needs attention: ${cell.attention.causes.join(', ')}` : '';
+        : `${cell.layoutKey}, ${cell.plantName}${cell.harvestable ? ', ready to harvest' : ''}`;
+    const attention = cell.attention ? ', needs a closer look' : '';
     const batch = batchMode && batchTargetIds.has(cell.id) ? `, selected for batch ${batchMode}` : '';
     return `${base}${attention}${batch}`;
   }

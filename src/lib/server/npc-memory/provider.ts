@@ -1,4 +1,5 @@
 import type { NpcMemoryEmbeddingPrepared, NpcMemoryEmbeddingProvider, NpcMemorySummaryV2Provider, NpcMemorySummaryV2Prepared } from './contracts';
+import { parseTextProviderUsage } from '$lib/server/provider-usage';
 
 export class NpcMemorySummaryProviderError extends Error {
   constructor(public readonly code: 'provider_unavailable' | 'provider_failed' | 'provider_timeout' | 'provider_malformed', message: string) { super(message); }
@@ -30,7 +31,7 @@ const freeze = <T>(value: T): T => { if (value && typeof value === 'object' && !
 function resultSchema(maxSummaryChars: number, maxCitations: number) {
   const leaf = { type: 'object', additionalProperties: false, required: ['ordinal', 'sourceKind', 'sourceId', 'sourceVersion', 'sourceHash', 'ledgerSequence'], properties: { ordinal: { type: 'integer', minimum: 0 }, sourceKind: { type: 'string', minLength: 1 }, sourceId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' }, sourceVersion: { type: 'integer', minimum: 1 }, sourceHash: { type: 'string', pattern: '^[0-9a-f]{64}$' }, ledgerSequence: { type: 'integer', minimum: 0 } } };
   const citation = { type: 'object', additionalProperties: false, required: ['leafOrdinal', 'recordId', 'speaker', 'quote', 'sourceKind', 'sourceId', 'sourceVersion', 'sourceHash'], properties: { leafOrdinal: { type: 'integer', minimum: 0 }, recordId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' }, speaker: { type: 'string' }, quote: { type: 'string', minLength: 1, maxLength: 12000 }, sourceKind: { type: 'string', minLength: 1 }, sourceId: { type: 'string', pattern: '^[0-9a-fA-F-]{36}$' }, sourceVersion: { type: 'integer', minimum: 0 }, sourceHash: { type: 'string', pattern: '^[0-9a-f]{64}$' } } };
-  return { type: 'object', additionalProperties: false, required: ['version', 'mode', 'summary', 'citations', 'protectedRefs', 'leaves'], properties: { version: { const: 'npc-memory-summary-v2' }, mode: { const: 'model' }, summary: { type: 'string', minLength: 1, maxLength: maxSummaryChars }, citations: { type: 'array', maxItems: maxCitations, items: citation }, protectedRefs: { type: 'array', items: leaf }, leaves: { type: 'array', items: leaf } } };
+  return { type: 'object', additionalProperties: false, required: ['version', 'mode', 'summary', 'citations', 'protectedRefs', 'leaves'], properties: { version: { type: 'string', const: 'npc-memory-summary-v2' }, mode: { type: 'string', const: 'model' }, summary: { type: 'string', minLength: 1, maxLength: maxSummaryChars }, citations: { type: 'array', maxItems: maxCitations, items: citation }, protectedRefs: { type: 'array', items: leaf }, leaves: { type: 'array', items: leaf } } };
 }
 export function createNpcMemorySummaryV2Provider(config: Record<string, string | undefined>): NpcMemorySummaryV2Provider {
   const key = config.OPENAI_API_KEY, configuredModel = config.NPC_CONTEXT_MODEL, capacity = Number(config.NPC_MODEL_INPUT_CAPACITY);
@@ -58,7 +59,11 @@ export function createNpcMemorySummaryV2Provider(config: Record<string, string |
       const providerJson = json as Record<string, unknown>; const usage = providerJson.usage as Record<string, unknown>; const parts = (Array.isArray(providerJson.output) ? providerJson.output : []).filter(isObject).filter((x: Record<string, unknown>) => x.type === 'message').flatMap((x: Record<string, unknown>) => Array.isArray(x.content) ? x.content : []).filter(isObject).filter((x: Record<string, unknown>) => x.type === 'output_text' && typeof x.text === 'string').map((x: Record<string, unknown>) => x.text as string);
       if (parts.length !== 1) fail('provider_malformed', 'Summary provider output was malformed.'); let result: unknown; try { result = JSON.parse(parts[0]); } catch { fail('provider_malformed', 'Summary provider output was malformed.'); } if (!isObject(result)) fail('provider_malformed', 'Summary provider output was malformed.');
       const requestId = generatedResponse.headers.get('x-request-id'); if (requestId !== null && (!requestId || requestId.length > 200)) fail('provider_malformed', 'Summary provider request ID was malformed.');
-      return { result: result as Record<string, unknown>, model: prepared.model, providerRequestId: requestId ?? undefined, inputTokens: usage.input_tokens as number, outputTokens: usage.output_tokens as number, durationMs: Math.round(performance.now() - started) };
+      const tokenUsage = parseTextProviderUsage(usage);
+      return { result: result as Record<string, unknown>, model: prepared.model, providerRequestId: requestId ?? undefined, inputTokens: tokenUsage.input, outputTokens: tokenUsage.output,
+        ...(tokenUsage.cachedInputTokens !== undefined ? { cachedInputTokens: tokenUsage.cachedInputTokens } : {}),
+        ...(tokenUsage.cacheWriteInputTokens !== undefined ? { cacheWriteInputTokens: tokenUsage.cacheWriteInputTokens } : {}),
+        durationMs: Math.round(performance.now() - started) };
     }
   };
 }

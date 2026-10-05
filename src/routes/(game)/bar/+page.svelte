@@ -103,7 +103,9 @@
     finally { pending = false; }
   }
 
-  function signed(value: number) { return value > 0 ? `+${value}` : String(value); }
+  function relationshipFeedback(value: number) {
+    return value > 0 ? 'Trust grew' : value < 0 ? 'Trust was hurt' : 'Trust held steady';
+  }
   function archivePageHref(cursor: string) {
     const params = new URLSearchParams();
     if (data.archived) params.set('archive', '1');
@@ -147,6 +149,9 @@
         </section>
       {:else}
         <TavernScene patrons={data.snapshot.patrons} selected={patron} focusedKey={focusedInstanceId} journals={data.journals} day={data.snapshot.save.currentDay}
+        trinkets={data.snapshot.trinkets?.collection ?? []}
+        saveId={data.snapshot.save.id}
+        revision={data.snapshot.save.revision}
           disabled={!hydrated || pending || !!unresolved}
           onselect={(instanceId) => { if (!unresolved) selectedInstanceId = instanceId; }}
           onfocus={(instanceId) => { focusedInstanceId = instanceId; }} />
@@ -204,7 +209,7 @@
       <section class="panel serving-history" aria-labelledby="history-title">
         <p class="eyebrow">The keeper's journal</p><h2 id="history-title">Recent hospitality</h2>
         {#if data.snapshot.history.length === 0}<p class="muted">Your first serving will begin the journal.</p>
-        {:else}<ol>{#each data.snapshot.history as event (event.actionId)}<li><div><strong>{event.itemName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}</small></div><p class="serve-effects">+{event.goldEarned} gold · Relationship {signed(event.relationshipChange)}</p></li>{/each}</ol>{/if}
+        {:else}<ol>{#each data.snapshot.history as event (event.actionId)}<li><div><strong>{event.itemName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}</small></div><p class="serve-effects">+{event.goldEarned} gold · {relationshipFeedback(event.relationshipChange)}</p></li>{/each}</ol>{/if}
       </section>
     </div>{/if}
   {/if}

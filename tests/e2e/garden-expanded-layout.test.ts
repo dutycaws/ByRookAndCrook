@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { advanceDay, commitGardenCommand, getSnapshot, harvestCrop, startBrew } from '../../src/lib/server/game';
-import { createTestPlayer } from '../helpers/local-supabase';
+import { createTestPlayer, getLocalTestDatabaseContainer } from '../helpers/local-supabase';
 
 async function loginAndCreate(page: Page, email: string, password: string) {
   await page.goto('/login');
@@ -46,7 +46,7 @@ test('floating plot menus branch through plant, water, fertilize, and move previ
     const state = await getSnapshot(player.client);
     if (!state) throw new Error('Expected a garden snapshot.');
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `insert into public.garden_inventory(save_id,item_key,quantity) values ('${state.save.id}'::uuid,'amendment_n',3) on conflict(save_id,item_key) do update set quantity=excluded.quantity`
     ]);
     await page.reload();
@@ -66,8 +66,12 @@ test('floating plot menus branch through plant, water, fertilize, and move previ
     await desktopParent.getByRole('button', { name: 'Water' }).click();
     await expect(page.locator('[data-garden-action-menu][data-menu-pane="water"]')).toBeVisible();
     await desktopParent.getByRole('button', { name: 'Plant' }).click();
+    await page.getByLabel('Seed').selectOption('seed_clover');
     await page.getByRole('button', { name: 'Preview planting' }).click();
-    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Plant');
+    const previewMenu = page.locator('[data-garden-action-menu][data-menu-pane="preview"]');
+    await expect(previewMenu).toContainText('Confirm Plant');
+    await expect(previewMenu).toContainText(/Plant .+ in plot c3\./);
+    await expect(previewMenu).not.toContainText(/authoritative preview|requiresAuthoritativeValidation|seedItemKey/i);
     await page.getByRole('button', { name: 'Close plot actions' }).click();
 
     await page.locator('[data-garden-cell][data-layout-key="c4"]').click();
@@ -78,8 +82,12 @@ test('floating plot menus branch through plant, water, fertilize, and move previ
     await page.locator('[data-garden-cell][data-layout-key="c3"]').click();
     await page.getByRole('button', { name: 'Done', exact: true }).click();
     await page.getByRole('button', { name: 'Preview water' }).click();
-    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Water');
+    await expect(previewMenu).toContainText('Confirm Water');
+    await expect(previewMenu).toContainText('Increase moisture by 17 per plot across 2 plots.');
     await expect(page.locator('[data-garden-preview-targets]')).toContainText('c4, c3');
+    await expect(previewMenu.locator('.preview-detail')).toContainText(/soil moisture will increase/i);
+    await expect(previewMenu.locator('.preview-detail')).not.toContainText(/\d+%|→/);
+    await expect(previewMenu).not.toContainText(/soil_n|soil_p|soil_k|before|after|overwatering|nutrient-excess/i);
     await page.getByRole('button', { name: 'Close plot actions' }).click();
 
     await page.locator('[data-garden-cell][data-layout-key="c3"]').click();
@@ -87,7 +95,11 @@ test('floating plot menus branch through plant, water, fertilize, and move previ
     await page.getByLabel('Fertilizer strength').fill('3');
     await expect(page.getByText('Heavy · 3')).toBeVisible();
     await page.getByRole('button', { name: 'Preview fertilize' }).click();
-    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Fertilize');
+    await expect(previewMenu).toContainText('Confirm Fertilize');
+    await expect(previewMenu).toContainText(/Apply .+ to 1 plot: 3 units per plot \(3 units total\)\./);
+    await expect(previewMenu.locator('.preview-detail')).toContainText(/soil nutrient levels will change/i);
+    await expect(previewMenu.locator('.preview-detail')).not.toContainText(/\d+\s*→\s*\d+/);
+    await expect(previewMenu).not.toContainText(/nitrogen|phosphorus|potassium|preferred range|before|after|warning/i);
     await page.getByRole('button', { name: 'Close plot actions' }).click();
 
     const planted = page.locator('[data-garden-cell][data-layout-key="c1"]');
@@ -116,7 +128,7 @@ test('floating menu exposes contextual clover, removal, and compost previews', a
       commandKind: 'plant', payload: { cellId: cloverCell.id, seedItemKey: 'seed_clover' }
     });
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.garden_plants set growth_progress=60,age_days=3 where save_id='${state.save.id}'::uuid and cell_id='${cloverCell.id}'::uuid`
     ]);
     await harvestCrop(player.client, {
@@ -195,7 +207,7 @@ test('the garden preserves keyboard geometry while expanding from 12 to 24 plots
     const initialState = await getSnapshot(player.client);
     if (!initialState) throw new Error('Expected a tavern snapshot after creation.');
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.tavern_saves set gold=240 where id='${initialState.save.id}'::uuid`
     ]);
     const expanded16 = await commitGardenCommand(player.client, {
@@ -338,46 +350,46 @@ test('a floating menu follows a transformed plot anchor and dismisses once it le
   }
 });
 
-test('keyboard inspection exposes soil, plant, colony, forecast, and daily-report causes', async ({ page }) => {
+test('keyboard inspection shows garden clues without exact living-state values or diagnoses', async ({ page }) => {
   const player = await createTestPlayer('garden-inspection');
   try {
     await loginAndCreate(page, player.email, player.password);
     const plant = page.locator('[data-garden-cell][data-layout-key="c1"]');
     await plant.focus();
     await page.keyboard.press('Space');
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Fennel');
-    await expect(page.locator('[data-soil-diagnostic]')).toContainText('Nitrogen');
-    await expect(page.locator('[data-soil-diagnostic]')).toContainText('Site light');
+    const inspector = page.locator('[data-garden-inspector]');
+    await expect(inspector).toContainText('Fennel');
+    await expect(inspector.locator('[data-garden-observations]')).toContainText('What you notice');
+    await expect(inspector).not.toContainText(/Health|Nitrogen|moisture|growth progress|%|Diagnosed symptoms/i);
     await closeMobileGardenActions(page);
     let status = await visibleGardenStatus(page);
     await expect(status.getByRole('region', { name: 'Three-day forecast' })).toBeVisible();
     await expect(status.getByRole('region', { name: 'Threatened plots' })).toHaveCount(0);
 
     const waterlogged = page.locator('[data-garden-cell][data-layout-key="c4"]');
-    await expect(waterlogged).toHaveAttribute('aria-label', /needs attention: Waterlogged soil/i);
+    await expect(waterlogged).toHaveAttribute('aria-label', /needs a closer look/i);
+    await expect(waterlogged).not.toHaveAttribute('aria-label', /Waterlogged|stage \d/i);
     await expect(waterlogged.locator('[data-garden-attention]')).toHaveText('!');
     await waterlogged.focus();
     await page.keyboard.press('Enter');
     await openGardenActions(page);
     await expect(page.locator('[data-garden-action-menu]')).toContainText('Plot actions');
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Pepper');
-    await expect(page.locator('[data-garden-symptom]')).toContainText('Waterlogged soil');
-    await expect(page.locator('[data-garden-symptom]')).toContainText("Moisture is above this species' preferred range; more water will increase stress.");
+    await expect(inspector).toContainText('Pepper');
+    await expect(inspector.locator('[data-garden-observations]')).toContainText('The soil stays heavy, and lower leaves are turning yellow.');
+    await expect(inspector).not.toContainText(/Waterlogged soil|preferred range|more water will/i);
 
     const hive = page.locator('[data-garden-cell][data-layout-key="c2"]');
     await hive.focus();
     await page.keyboard.press('Enter');
-    await expect(page.locator('[data-apiary-inspector]')).toContainText('Equipment');
-    await expect(page.getByLabel('Colony health pressures')).toContainText('Varroa');
-    await expect(page.getByLabel('Colony health pressures')).toContainText('Chalkbrood');
-    await expect(page.getByLabel('Colony health pressures')).toContainText('Nosema');
+    await expect(inspector).toContainText('A colony is active in this hive.');
+    await expect(inspector).not.toContainText(/Varroa|Chalkbrood|Nosema|Health|pressure|\d+%/i);
 
     const state = await getSnapshot(player.client);
     if (!state) throw new Error('Expected a tavern snapshot before day advance.');
     const colonyId = state.cells.find((cell) => cell.layoutKey === 'c2')?.hive?.colony?.id;
     if (!colonyId) throw new Error('Expected the starter colony.');
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.apiary_colonies set health=20,varroa_pressure=70,threat_days=1 where id='${colonyId}'::uuid`
     ]);
     await page.reload();
@@ -385,12 +397,14 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
     await expect(page.locator('[data-area-scene="garden"]')).toHaveAttribute('data-scene-ready', 'true');
     status = await visibleGardenStatus(page);
     const threatenedColony = page.locator('[data-garden-cell][data-layout-key="c2"]');
-    await expect(threatenedColony).toHaveAttribute('aria-label', /needs attention:.*colony-loss warning/i);
+    await expect(threatenedColony).toHaveAttribute('aria-label', /needs a closer look/i);
+    await expect(threatenedColony).not.toHaveAttribute('aria-label', /colony-loss warning/i);
     await threatenedColony.focus();
     await expect(threatenedColony).toBeFocused();
     await threatenedColony.press('Enter');
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Colony loss warning');
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Sustained starvation or severe untreated illness can permanently remove this colony.');
+    await expect(inspector.locator('[data-garden-observations]')).toContainText('Few workers are coming and going at the entrance.');
+    await expect(inspector.locator('[data-garden-observations]')).toContainText('Some workers move slowly across the hive entrance.');
+    await expect(inspector).not.toContainText(/Colony loss warning|Sustained starvation|severe untreated illness|varroa pressure/i);
 
     const stressedState = await getSnapshot(player.client);
     if (!stressedState) throw new Error('Expected the stressed garden snapshot.');
@@ -404,6 +418,10 @@ test('keyboard inspection exposes soil, plant, colony, forecast, and daily-repor
     status = await visibleGardenStatus(page);
     await expect(status.getByText('Latest garden report')).toBeVisible();
     await expect(status.locator('.daily-report')).toContainText('The colony may be lost after another day without corrective care.');
+    const inspectedHive = page.locator('[data-garden-cell][data-layout-key="c2"]');
+    await inspectedHive.focus();
+    await page.keyboard.press('Enter');
+    await expect(inspector.locator('[data-garden-history]')).toContainText('Day 1');
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -452,7 +470,7 @@ test('garden controls preview and recover replayable planting and batch care', a
     const state = await getSnapshot(player.client);
     if (!state) throw new Error('Expected a tavern snapshot for care controls.');
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `insert into public.garden_inventory(save_id,item_key,quantity) values ('${state.save.id}'::uuid,'amendment_n',3) on conflict(save_id,item_key) do update set quantity=excluded.quantity`
     ]);
     await page.reload();
@@ -463,6 +481,9 @@ test('garden controls preview and recover replayable planting and batch care', a
     await expect(cloverCell).toHaveAttribute('aria-pressed', 'true');
     await openGardenActions(page);
     await page.locator('[data-garden-action="plant"]').click();
+    await page.getByLabel('Seed').selectOption('seed_clover');
+    await expect(page.locator('[data-seed-guidance]')).toContainText('flowers offer forage for bees');
+    await expect(page.locator('[data-seed-guidance]')).not.toContainText(/\d+%|preferred range/i);
     await page.getByRole('button', { name: 'Preview planting' }).click();
     await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).toContainText('Confirm Plant');
     await page.locator('[data-garden-confirm="plant"]').click();
@@ -486,6 +507,7 @@ test('garden controls preview and recover replayable planting and batch care', a
     await page.getByLabel('Water amount').fill('7');
     await page.getByRole('button', { name: 'Preview water' }).click();
     await expect(page.locator('[data-garden-preview-targets]')).toContainText('c3, c4');
+    await expect(page.locator('[data-garden-action-menu][data-menu-pane="preview"]')).not.toContainText(/soil_n|soil_p|soil_k|before|after|overwatering|nutrient-excess/i);
 
     await page.route(
       (url) => url.pathname === '/garden' && url.search === '?/command',
@@ -507,6 +529,15 @@ test('garden controls preview and recover replayable planting and batch care', a
     await expect(page.locator('[data-garden-action-menu]').getByRole('status')).toContainText(/watered|complete/i);
     await expect(cloverCell).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-garden-action-menu]')).toBeVisible();
+    await expect(page.locator('[data-garden-history]')).toContainText('Planted Clover');
+    await expect(page.locator('[data-garden-history]')).toContainText('Watered');
+    await expect(page.locator('[data-garden-history]')).toContainText('7 water applied');
+    await page.reload();
+    await expect(page.locator('main')).toHaveAttribute('data-hydrated', 'true');
+    await page.locator('[data-garden-cell][data-layout-key="c3"]').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-garden-history]')).toContainText('Planted Clover');
+    await expect(page.locator('[data-garden-history]')).toContainText('7 water applied');
     expect(actionIds).toHaveLength(2);
     expect(actionIds[0]).not.toBe('');
     expect(actionIds[1]).toBe(actionIds[0]);
@@ -532,7 +563,7 @@ test('garden lifecycle controls stay reachable and protect craft-reserved compos
       payload: { cellId: c3.id, seedItemKey: 'seed_clover' }
     });
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.garden_plants set growth_progress=60,age_days=3 where save_id='${state.save.id}'::uuid and cell_id='${c3.id}'::uuid`
     ]);
     await page.reload();
@@ -600,7 +631,7 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     const starterColony = state.cells.find((cell) => cell.layoutKey === 'c2')?.hive?.colony;
     if (!starterColony) throw new Error('Expected the starter colony.');
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.tavern_saves set gold=150 where id='${state.save.id}'::uuid; insert into public.garden_inventory(save_id,item_key,quantity) values ('${state.save.id}'::uuid,'hive_equipment',2),('${state.save.id}'::uuid,'replacement_colony',1),('${state.save.id}'::uuid,'bee_feed',2),('${state.save.id}'::uuid,'treatment_varroa',1) on conflict(save_id,item_key) do update set quantity=excluded.quantity; update public.apiary_colonies set adults=12000,brood=3000,food_stores=100,floral_honey=12 where id='${starterColony.id}'::uuid`
     ]);
     await page.reload();
@@ -612,14 +643,15 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     await page.locator('[data-garden-action="apiary"]').click();
     await page.getByRole('button', { name: 'Preview hive installation' }).click();
     await expect(page.locator('[data-provision-preview]')).toContainText('available Equipment2');
+    await expect(page.locator('[data-provision-preview]')).not.toContainText(/equipment\s*\d+%|condition/i);
     await page.getByRole('button', { name: 'Apply install hive' }).click();
     await expect(c3).toHaveAttribute('aria-label', /beehive/);
-    await expect(page.locator('[data-apiary-inspector]')).toContainText('Empty');
+    await expect(page.locator('[data-garden-inspector]')).toContainText('Empty hive');
 
     await page.getByRole('button', { name: 'Preview colony installation' }).click();
     await expect(page.locator('[data-provision-preview]')).toContainText('available Colonies1');
     await page.getByRole('button', { name: 'Apply install colony' }).click();
-    await expect(page.locator('[data-apiary-inspector]')).toContainText('Installed');
+    await expect(page.locator('[data-garden-inspector]')).toContainText('A colony is active in this hive.');
 
     await closeMobileGardenActions(page);
     const c5 = page.locator('[data-garden-cell][data-layout-key="c5"]');
@@ -629,7 +661,7 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     await page.locator('[data-garden-action="apiary"]').click();
     await page.getByRole('button', { name: 'Preview hive installation' }).click();
     await page.getByRole('button', { name: 'Apply install hive' }).click();
-    await expect(page.locator('[data-apiary-inspector]')).toContainText('Empty');
+    await expect(page.locator('[data-garden-inspector]')).toContainText('Empty hive');
 
     await closeMobileGardenActions(page);
     const c2 = page.locator('[data-garden-cell][data-layout-key="c2"]');
@@ -638,9 +670,10 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     await page.locator('[data-garden-action="apiary"]').click();
     await page.getByRole('button', { name: 'Preview feeding' }).click();
     await expect(page.locator('[data-provision-preview]')).toContainText('floral Honey After12');
+    await expect(page.locator('[data-provision-preview]')).not.toContainText(/food stores|before.*100|after.*100/i);
     await page.getByRole('button', { name: 'Apply feed colony' }).click();
     await expect(page.locator('[data-provision-preview]')).toHaveCount(0);
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Purchased feed18');
+    await expect(page.locator('[data-garden-inspector]')).toContainText('A colony is active in this hive.');
     const afterFeed = await getSnapshot(player.client);
     const fedColony = afterFeed?.cells.find((cell) => cell.layoutKey === 'c2')?.hive?.colony;
     expect(fedColony?.floralHoney).toBe(12);
@@ -659,7 +692,7 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     const splitPreview = page.getByRole('button', { name: 'Preview colony split' });
     await splitPreview.focus();
     await splitPreview.press('Enter');
-    await expect(page.locator('[data-provision-preview]')).toContainText('"adults":10000');
+    await expect(page.locator('[data-provision-preview]')).not.toContainText(/"adults"|"brood"|foodStores|health/i);
     await page.getByRole('button', { name: 'Apply split colony' }).press('Enter');
     await expect(page.locator('[data-provision-preview]')).toHaveCount(0);
     const afterSplit = await getSnapshot(player.client);
@@ -668,8 +701,8 @@ test('contextual apiary controls preserve equipment, colony, feed, honey, and tr
     await page.getByRole('button', { name: 'Preview treatment' }).click();
     await expect(page.locator('[data-provision-preview]')).toContainText('no-honey-production-or-extraction');
     await page.getByRole('button', { name: 'Apply treat colony' }).click();
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Varroa active');
-    await expect(page.locator('[data-garden-inspector]')).toContainText('Honey production and extraction are paused.');
+    await expect(page.locator('[data-garden-inspector]')).toContainText('A colony is active in this hive.');
+    await expect(page.locator('[data-garden-inspector]')).not.toContainText(/Varroa|health|food stores|pressure/i);
 
     await page.getByRole('button', { name: 'Preview safe extraction' }).click();
     await expect(page.locator('[data-provision-preview]').getByRole('alert')).toContainText('cannot be completed');

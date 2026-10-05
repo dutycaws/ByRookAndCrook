@@ -71,11 +71,12 @@ function publicQuestHistory(value: unknown): PublicQuestHistoryEntry[] {
   return value.flatMap((entry) => {
     const candidate = record(entry);
     const id = shortText(candidate?.id, 80);
+    const questId = shortText(candidate?.questId, 80);
     const day = nonNegativeInteger(candidate?.day);
     const outcome = shortText(candidate?.outcome, 64);
     const text = shortText(candidate?.text, 1000);
     if (!id || day === null || !outcome || !text) return [];
-    return [{ id, day, outcome, text, publicNews: candidate?.publicNews === true }];
+    return [{ id, ...(questId ? { questId } : {}), day, outcome, text, publicNews: candidate?.publicNews === true }];
   });
 }
 
@@ -183,9 +184,9 @@ export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
           availability:lifecycle === 'departed' ? 'departed' : ['active','between','failed','settled','abandoned'].includes(journal.status) ? 'present' : journal.status,
           questLifecycleStatus: lifecycle,
           currentQuest: currentQuest(journal.currentQuest),
-          // Archive pages come from the separately paged RPC below. Never
-          // display the compact journal's legacy event window as history.
-          questHistory: [],
+          // This bounded event window lets the active quest explain recent setbacks.
+          // Complete terminal history comes from the separately paged archive RPC.
+          questHistory: publicQuestHistory(journal.questHistory),
           questArchive: { items: [], nextCursor: null },
           farewellText: shortText(journal.farewellText, 1000),
           turns:(journal.turns ?? []).map((turn:any)=>({id:turn.turnId, message:turn.keeper, reply:turn.npc, day:turn.day})),

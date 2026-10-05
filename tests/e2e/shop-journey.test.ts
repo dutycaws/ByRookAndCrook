@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { createTestPlayer } from '../helpers/local-supabase';
+import { createTestPlayer, getLocalTestDatabaseContainer } from '../helpers/local-supabase';
 
 async function loginAndCreate(page: Page, email: string, password: string) {
   await page.goto('/login');
@@ -12,13 +12,13 @@ async function loginAndCreate(page: Page, email: string, password: string) {
 }
 
 async function fundPlayer(page: Page, saveId: string, gold = 500) {
-  execFileSync('docker', ['exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.tavern_saves set gold=${gold} where id='${saveId}'::uuid`]);
+  execFileSync('docker', ['exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.tavern_saves set gold=${gold} where id='${saveId}'::uuid`]);
   await page.reload();
 }
 
 function updateStock(saveId: string, quantity: number, itemKey?: string) {
   const itemClause = itemKey ? ` and item_key='${itemKey}'` : '';
-  execFileSync('docker', ['exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.garden_shop_stock set remaining_quantity=${quantity},restock_day=2 where save_id='${saveId}'::uuid${itemClause}`]);
+  execFileSync('docker', ['exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.garden_shop_stock set remaining_quantity=${quantity},restock_day=2 where save_id='${saveId}'::uuid${itemClause}`]);
 }
 
 async function saveIdFor(player: Awaited<ReturnType<typeof createTestPlayer>>) {

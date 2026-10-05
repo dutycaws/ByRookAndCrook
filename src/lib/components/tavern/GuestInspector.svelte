@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Journal } from '$lib/game/dialogue';
   import type { BarSnapshot, Patron } from '$lib/game/serving';
+  import { relationshipStageFor } from '$lib/game/relationships';
 
   let { selected, journal, stock, archived = false, disabled = false, archiveHref = null, onarchive }: {
     selected: Patron | null;
@@ -16,6 +17,16 @@
   let reportEvidence = $state('');
   let sharePreview = $state<{ contentHash: string; transcript: unknown[] } | null>(null);
   let includeDisplayName = $state(false);
+  let currentQuestSetbacks = $derived.by(() => {
+    const currentQuest = journal?.currentQuest;
+    if (!selected || !currentQuest || journal?.questLifecycleStatus !== 'active') return [];
+
+    return (journal?.questHistory ?? [])
+      .filter((event) => event.questId === currentQuest.id
+        && event.outcome === 'setback')
+      .sort((left, right) => left.day - right.day)
+      .slice(-3);
+  });
   async function npcAction(payload: Record<string, unknown>) {
     actionMessage = '';
     try {
@@ -36,8 +47,15 @@
   <button class="text-button" type="button" onclick={() => onarchive(!archived)}>{archived ? 'Back to active guests' : 'View dismissed guests'}</button>
   {#if selected && journal}
     <section class="guest-section" aria-label="Relationship">
-      <div class="relationship-label"><span>Relationship</span><strong>{selected.relationship} / 100</strong></div>
-    <meter min="0" max="100" value={selected.relationship}>{selected.relationship}</meter>
+      <div class="relationship-label"><span>Relationship</span><strong>{selected.relationshipStage ?? relationshipStageFor(selected.relationship)}</strong></div>
+      {#if selected.recentRelationshipChange && selected.recentRelationshipChange.delta < 0}
+        <p class="consequence-warning" role="status">Trust was hurt on day {selected.recentRelationshipChange.dayNumber}.</p>
+      {:else if selected.recentRelationshipChange && selected.recentRelationshipChange.delta > 0}
+        <p class="muted" role="status">Trust grew on day {selected.recentRelationshipChange.dayNumber}.</p>
+      {/if}
+      {#if selected.relationshipRepair && selected.relationshipRepair.distinctFollowThroughDays < selected.relationshipRepair.requiredDays}
+        <p class="muted">Trust can begin to recover after meaningful follow-through on {selected.relationshipRepair.requiredDays} later days ({selected.relationshipRepair.distinctFollowThroughDays} of {selected.relationshipRepair.requiredDays} so far). An apology alone does not count.</p>
+      {/if}
     </section>
     <section class="guest-section">
     <p class="eyebrow">Current quest</p>
@@ -48,6 +66,12 @@
     {#if journal.questLifecycleStatus === 'awaiting_transition'}<p class="muted">Considering their next step.</p>{/if}
     {#if journal.questLifecycleStatus === 'departing'}<p class="consequence-warning" role="note">Leaving after the tavern closes.</p>{/if}
     {#if journal.farewellText}<p class="consequence-warning" role="note">{journal.farewellText}</p>{/if}
+    {#if currentQuestSetbacks.length}
+      <div class="quest-setbacks" aria-label="Recent quest setbacks">
+        <p class="eyebrow">Recent setbacks</p>
+        <ul>{#each currentQuestSetbacks as event (`${event.day}:${event.text}`)}<li><small>Day {event.day}</small> <span class="consequence-warning">{event.text}</span></li>{/each}</ul>
+      </div>
+    {/if}
     </section>
     {#if journal.questArchive.items.length}
       <section class="guest-section" aria-label="Quest archive">

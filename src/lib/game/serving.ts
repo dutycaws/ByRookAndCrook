@@ -1,5 +1,6 @@
 import type { Json } from '$lib/database.types';
 import type { IntentCard, QualityIndex } from './contracts';
+import type { OwnedTrinket } from './trinkets';
 
 export interface Patron {
   instanceId: string;
@@ -9,6 +10,13 @@ export interface Patron {
   title: string | null;
   description: string | null;
   relationship: number;
+  relationshipStage?: 'strained' | 'acquaintance' | 'familiar' | 'trusted' | 'close';
+  relationshipRepair?: {
+    offenseDay: number | null;
+    distinctFollowThroughDays: number;
+    requiredDays: 2;
+  };
+  recentRelationshipChange?: { delta: number; dayNumber: number } | null;
   status: string;
   rating: 'standard' | 'mature';
   origin: 'first_party' | 'community' | 'procedural';
@@ -43,6 +51,7 @@ export interface ServeReceipt {
 }
 
 export interface BarSnapshot {
+  trinkets?: { collection: OwnedTrinket[] };
   save: { id: string; revision: number; gold: number; currentDay: number };
   patrons: Patron[];
   beverages: Array<{ id: string; kind: 'beverage'; name: string; qualityIndex: QualityIndex }>;
@@ -50,7 +59,7 @@ export interface BarSnapshot {
   intentCards: Array<Pick<IntentCard, 'id' | 'cardKey' | 'displayName' | 'description' | 'tier'>>;
   roster: Patron[];
   history: ServeReceipt[];
-  news: Array<{ instanceId: string; day: number; outcome: string; text: string }>;
+  news: Array<{ instanceId: string; questId?: string; day: number; outcome: string; text: string }>;
   latestArrival: unknown | null;
   /** @deprecated Legacy serving fixture shape. */
   legacyCards?: Array<Pick<IntentCard, 'id' | 'displayName' | 'tier'>>;
@@ -89,6 +98,7 @@ export function parseBarSnapshot(value: Json): BarSnapshot | null {
   if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid bar snapshot');
   const raw = value as any;
   const candidate = {
+    trinkets: raw.trinkets ?? { collection: [] },
     save: raw.save,
     roster: raw.roster ?? [], patrons: raw.patrons ?? [],
     beverages: raw.offerings?.beverages ?? raw.beverages ?? [], foods: raw.offerings?.foods ?? raw.foods ?? [], intentCards: raw.offerings?.intentCards ?? raw.intentCards ?? [],

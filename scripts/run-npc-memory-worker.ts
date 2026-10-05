@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { env as privateEnv } from '$env/dynamic/private';
 import { getSupabaseConfig } from '$lib/server/config';
-import { createNpcMemorySummaryV2Provider, drainNpcMemoryQueue, type NpcMemoryOutcome, type NpcMemoryWorkerClient, type NpcMemoryWorkerRuntime } from '$lib/server/npc-memory';
+import { createNpcMemorySummaryV2Provider, drainNpcMemoryQueue, runNpcMemorySummaryJobById, type NpcMemoryOutcome, type NpcMemoryWorkerClient, type NpcMemoryWorkerRuntime } from '$lib/server/npc-memory';
 import { privateRuntimeEnvironment } from '$lib/server/private-runtime-environment';
 import { releaseTextPrompt, type PromptSnapshot } from '$lib/server/prompt-registry';
 import { PromptRegistryService, promptRegistryService, type PromptRegistryClient } from '$lib/server/prompt-registry/service';
@@ -17,15 +17,16 @@ const SAFE_STATUS = new Set<SafeStatus>(['completed', 'failed', 'reused', 'skipp
 const SAFE_ERROR_CODES = new Set(['provider_unavailable', 'provider_timeout', 'provider_malformed', 'provider_failed', 'quota_exceeded', 'stale', 'cancelled', 'lease_expired', 'storage_failed', 'moderation_failed', 'registry_unavailable']);
 
 type SummaryConfig = Record<string, string | undefined>;
-type SummaryDrain = (limit: number, signal: AbortSignal) => Promise<NpcMemoryOutcome[]>;
+type SummaryDrain = (limit: number, signal: AbortSignal, jobId?: string) => Promise<NpcMemoryOutcome[]>;
 type QueueDrainer = (limit: number, client: NpcMemoryWorkerClient, runtime: NpcMemoryWorkerRuntime) => Promise<NpcMemoryOutcome[]>;
-type SafeEvent = Readonly<{ jobId: string; batchOrdinal?: number; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; errorCode?: string }>;
+type SafeEvent = Readonly<{ jobId: string; batchOrdinal?: number; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; errorCode?: string }>;
 
 export type NpcMemoryWorkerOptions = {
   drain?: SummaryDrain;
   createDrain?: () => SummaryDrain | null;
   pollMs?: number;
   deadlineMs?: number;
+  jobId?: string;
   signal?: AbortSignal;
   once?: boolean;
   log?: Pick<Console, 'info' | 'warn'>;
@@ -73,13 +74,18 @@ export function createNpcMemorySummaryDrain(client: NpcMemoryWorkerClient & Prom
     let prompt = snapshots.get(event.promptReleaseId);
     if (!prompt) { prompt = releaseTextPrompt(await activeRegistry.resolve(event.promptReleaseId), PROMPT_KEY); snapshots.set(event.promptReleaseId, prompt); }
     if (prompt.releaseId !== event.promptReleaseId || prompt.revisionId !== event.promptRevisionId || prompt.key !== event.promptKey) return;
-    await activeRegistry.recordSafeRun({ executionId: event.jobId, attempt: npcMemoryRegistryAttempt(event.batchOrdinal), workflow: 'npc_memory_summary', nodeKey: PROMPT_KEY, prompt, status: event.status as 'completed' | 'failed' | 'reused' | 'skipped', model: event.model, durationMs: event.durationMs, inputTokens: event.inputTokens, outputTokens: event.outputTokens, errorCode: npcMemoryRegistryErrorCode(event.errorCode) });
+    await activeRegistry.recordSafeRun({ executionId: event.jobId, attempt: npcMemoryRegistryAttempt(event.batchOrdinal), workflow: 'npc_memory_summary', nodeKey: PROMPT_KEY, prompt, status: event.status as 'completed' | 'failed' | 'reused' | 'skipped', model: event.model, durationMs: event.durationMs, inputTokens: event.inputTokens, outputTokens: event.outputTokens, cachedInputTokens: event.cachedInputTokens, cacheWriteInputTokens: event.cacheWriteInputTokens, errorCode: npcMemoryRegistryErrorCode(event.errorCode) });
   };
-  return (limit, signal) => queueDrainer(limit, client, {
-    processorKind: 'summary', processorVersion: 'npc-memory-summary-v2', summaryV2: provider, summaryV2Model: config.NPC_CONTEXT_MODEL!, summaryV2Signal: signal,
+  const runtime: NpcMemoryWorkerRuntime = {
+    processorKind: 'summary', processorVersion: 'npc-memory-summary-v2', summaryV2: provider, summaryV2Model: config.NPC_CONTEXT_MODEL!,
     loadSource: async () => { throw new Error('Legacy NPC memory source loading is unavailable for summary-v2.'); },
     resolvePinnedPrompt, recordTelemetry
-  });
+  };
+  return (limit, signal, jobId) => {
+    const activeRuntime = { ...runtime, summaryV2Signal: signal };
+    if (jobId) return runNpcMemorySummaryJobById(client, jobId, activeRuntime).then((outcome) => [outcome]);
+    return queueDrainer(limit, client, activeRuntime);
+  };
 }
 
 function defaultDrain(): SummaryDrain | null {
@@ -103,10 +109,13 @@ export async function runNpcMemorySummaryWorker(options: NpcMemoryWorkerOptions 
   do {
     const deadline = childDeadline(signal, deadlineMs);
     try {
-      const outcomes = await drain(DRAIN_LIMIT, deadline.signal);
+      const outcomes = options.jobId
+        ? await drain(1, deadline.signal, options.jobId)
+        : await drain(DRAIN_LIMIT, deadline.signal);
       if (outcomes.length) log.info(`[npc-memory:worker] processed ${outcomes.length} summary job(s): ${statusClasses(outcomes)}.`);
     } catch { if (!signal?.aborted) log.warn('[npc-memory:worker] summary poll failed; retrying.'); }
     finally { deadline.close(); }
+    if (options.jobId) return;
     if (!options.once && !signal?.aborted) { try { await delay(pollMs, signal); } catch { /* signal cancellation exits promptly */ } }
   } while (!options.once && !signal?.aborted);
 }

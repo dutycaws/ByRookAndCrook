@@ -11,6 +11,7 @@ import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-regis
 import type { PromptRegistryService } from '$lib/server/prompt-registry/service';
 import { retrieveNpcMemoryEvidence, type NpcMemoryEvidenceClient } from '$lib/server/npc-memory/retrieval';
 import type { NpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/contracts';
+import { isEmptySocialTurn } from '$lib/game/relationships';
 
 export class DialogueError extends Error { constructor(message:string,public status=500,public code='DIALOGUE_FAILED'){super(message);} }
 export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink; promptRegistry?: PromptRegistryService; embeddingProvider?: NpcMemoryEmbeddingProvider };
@@ -180,6 +181,7 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
   const fallback:Decision={stance:'clarify',reaction:0,subject:'quest',evidence:'',intention:null};
   if(!matchesSchema(raw,schemas.deliberate)) return fallback;
   const d=structuredClone(raw) as Decision;
+  if(d.reaction>0&&isEmptySocialTurn(message)) d.reaction=0;
   if(d.reaction && (d.evidence.length<3||!message.includes(d.evidence))) d.reaction=0;
   const p=d.intention;
   const activeIntention=base.intention;

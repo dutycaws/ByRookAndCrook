@@ -74,6 +74,7 @@ export interface CurrentQuest {
 }
 export interface PublicQuestHistoryEntry {
   id: string;
+  questId?: string;
   day: number;
   outcome: string;
   text: string;
@@ -102,7 +103,7 @@ export interface Journal {
   availability: 'present' | 'dead' | 'departed' | 'dismissed' | 'removed' | 'quarantined';
   questLifecycleStatus: QuestLifecycleStatus;
   currentQuest: CurrentQuest | null;
-  /** @deprecated Compact legacy journal events; use questArchive for history. */
+  /** Bounded safe events used to explain setbacks on the active quest. */
   questHistory: PublicQuestHistoryEntry[];
   questArchive: PublicQuestArchive;
   farewellText: string | null;

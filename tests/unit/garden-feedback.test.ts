@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiarySuccessFeedback, gardenSuccessFeedback } from '../../src/lib/game/garden-feedback';
+import { apiarySuccessFeedback, gardenCommandPreviewFeedback, gardenSuccessFeedback } from '../../src/lib/game/garden-feedback';
 
 const labels: Record<string, string> = {
   'cell-11': 'C11',
@@ -7,6 +7,77 @@ const labels: Record<string, string> = {
   'cell-5': 'C5'
 };
 const options = { cellLabel: (cellId: string) => labels[cellId] };
+
+describe('Garden action preview feedback', () => {
+  const previewOptions = {
+    ...options,
+    itemName: (itemKey: string) => ({ pumpkin_seed: 'Pumpkin Seeds', soil_blend: 'Soil Blend' })[itemKey]
+  };
+
+  it('describes planting with the selected seed and plot names', () => {
+    expect(gardenCommandPreviewFeedback({
+      commandKind: 'plant', basedOnRevision: 4, rulesVersion: 'garden-v1',
+      normalizedPayload: { cellId: 'cell-11', seedItemKey: 'pumpkin_seed' },
+      requiresAuthoritativeValidation: true
+    }, previewOptions)).toEqual({
+      summary: 'Plant Pumpkin Seeds in plot C11.', targets: ['C11'], details: []
+    });
+  });
+
+  it('summarizes watering dose, moisture changes, and a translated care warning', () => {
+    expect(gardenCommandPreviewFeedback({
+      commandKind: 'water', basedOnRevision: 4, rulesVersion: 'garden-v1',
+      normalizedPayload: { cellIds: ['cell-11', 'cell-5'], dose: 7 },
+      sameDosePerTarget: 7, targetCount: 2, resourceCost: 0, canCommit: true,
+      targets: [
+        { cellId: 'cell-11', before: 32, after: 39, warning: null },
+        { cellId: 'cell-5', before: 83, after: 90, warning: 'overwatering' }
+      ]
+    }, previewOptions)).toEqual({
+      summary: 'Increase moisture by 7 per plot across 2 plots.',
+      targets: ['C11', 'C5'],
+      details: ['C11: soil moisture will increase.', 'C5: soil moisture will increase.'],
+      resourceWarning: "C5: additional water may leave the soil too wet for this plant."
+    });
+  });
+
+  it('shows amendment quantities, soil changes, and missing inventory in player language', () => {
+    expect(gardenCommandPreviewFeedback({
+      commandKind: 'amend', basedOnRevision: 4, rulesVersion: 'garden-v1',
+      normalizedPayload: { cellIds: ['cell-3', 'cell-5'], itemKey: 'soil_blend', dose: 2 },
+      itemKey: 'soil_blend', sameDosePerTarget: 2, targetCount: 2,
+      resourceCost: 4, available: 3, canCommit: false,
+      targets: [{
+        cellId: 'cell-3', before: { n: 10, p: 20, k: 30, quality: 40 },
+        after: { n: 14, p: 22, k: 33, quality: 42 }, warning: 'nutrient-excess'
+      }]
+    }, previewOptions)).toEqual({
+      summary: 'Apply Soil Blend to 2 plots: 2 units per plot (4 units total).',
+      targets: ['C3', 'C5'],
+      details: ['C3: soil nutrients and quality will change.'],
+      resourceWarning: 'Need 4 units of Soil Blend; 3 units available.'
+    });
+    expect(gardenCommandPreviewFeedback({
+      commandKind: 'amend', basedOnRevision: 4, rulesVersion: 'garden-v1',
+      normalizedPayload: { cellIds: ['cell-3'], itemKey: 'soil_blend', dose: 1 },
+      sameDosePerTarget: 1, targetCount: 1, resourceCost: 1, available: 3, canCommit: true,
+      targets: [{ cellId: 'cell-3', before: { n: 10 }, after: { n: 14 }, warning: null }]
+    }, previewOptions).summary).toContain('1 unit per plot (1 unit total)');
+  });
+
+  it('translates excessive amendment warnings when inventory is sufficient', () => {
+    const result = gardenCommandPreviewFeedback({
+      commandKind: 'amend', basedOnRevision: 4, rulesVersion: 'garden-v1',
+      normalizedPayload: { cellIds: ['cell-3'], itemKey: 'soil_blend', dose: 1 },
+      sameDosePerTarget: 1, targetCount: 1, resourceCost: 1, available: 3, canCommit: true,
+      targets: [{ cellId: 'cell-3', before: { n: 10 }, after: { n: 14 }, warning: 'nutrient-excess' }]
+    }, previewOptions);
+
+    expect(result.details).toEqual(['C3: soil nutrient levels will change.']);
+    expect(result.resourceWarning).toBe('C3: the added nutrients may be too much for this plant.');
+    expect(JSON.stringify(result)).not.toMatch(/\d+%|→|nutrient-excess|requiresAuthoritativeValidation/i);
+  });
+});
 
 describe('confirmed Garden feedback', () => {
   it('uses the authoritative receipt fields for every Garden command', () => {

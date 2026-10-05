@@ -24,6 +24,8 @@ select throws_ok($$update private.prompt_revisions set body='nope'$$,'55000',nul
 select throws_ok($$delete from private.prompt_releases$$,'55000',null,'releases are immutable');
 select extensions.hasnt_column('private','prompt_governance_audit','body','audit has no prompt body column');
 select extensions.hasnt_column('private','prompt_execution_ledger','payload','ledger has no arbitrary payload column');
+select ok(exists(select 1 from information_schema.columns where table_schema='private' and table_name='prompt_execution_ledger' and column_name='cached_input_tokens'), 'ledger records optional cached input token usage');
+select ok(exists(select 1 from information_schema.columns where table_schema='private' and table_name='prompt_execution_ledger' and column_name='cache_write_input_tokens'), 'ledger records optional cache-write input token usage');
 
 select set_config('test.active_release',(select release_id::text from private.prompt_registry_active_release),true);
 select set_config('test.speak_revision',(select e.revision_id::text from private.prompt_registry_active_release a join private.prompt_release_entries e on e.release_id=a.release_id where e.prompt_key='dialogue.speak'),true);
@@ -64,7 +66,9 @@ set local role service_role;
 set local request.jwt.claim.role='service_role';
 select set_config('test.resolved',(public.prompt_registry_service_resolve(current_setting('test.restored_release')::uuid))::text,true);
 select is((select count(*) from jsonb_object_keys(current_setting('test.resolved')::jsonb->'prompts')),32::bigint,'service resolver returns complete immutable snapshot');
-select lives_ok(format($sql$select public.prompt_registry_service_record_run('fixture:dialogue:turn',1,'dialogue','dialogue.speak','dialogue.speak',%L::uuid,%L::uuid,'completed','fixture',10,1,1,null)$sql$,current_setting('test.restored_release'),current_setting('test.speak_revision')),'service records allow-listed safe event');
+select lives_ok(format($sql$select public.prompt_registry_service_record_run('fixture:dialogue:turn',1,'dialogue','dialogue.speak','dialogue.speak',%L::uuid,%L::uuid,'completed','fixture',10,10,1,null,0,3)$sql$,current_setting('test.restored_release'),current_setting('test.speak_revision')),'service records explicit zero cached and cache-write token usage');
+select lives_ok(format($sql$select public.prompt_registry_service_record_run('fixture:dialogue:unknown-cache',1,'dialogue','dialogue.speak','dialogue.speak',%L::uuid,%L::uuid,'completed','fixture',10,10,1,null)$sql$,current_setting('test.restored_release'),current_setting('test.speak_revision')),'service records legacy calls with unknown cache usage as null');
+select throws_ok(format($sql$select public.prompt_registry_service_record_run('fixture:dialogue:invalid-cache',1,'dialogue','dialogue.speak','dialogue.speak',%L::uuid,%L::uuid,'completed','fixture',10,10,1,null,8,3)$sql$,current_setting('test.restored_release'),current_setting('test.speak_revision')),'PT400',null,'service rejects a breakdown larger than total input tokens');
 reset role;
 reset request.jwt.claim.role;
 set local role authenticated;
@@ -77,14 +81,15 @@ run_items as (
 )
 select ok(
   jsonb_typeof(run_list.runs)='array'
-  and exists(select 1 from run_items where item->>'executionId'='fixture:dialogue:turn')
+  and exists(select 1 from run_items where item->>'executionId'='fixture:dialogue:turn' and item->>'cachedInputTokens'='0' and item->>'cacheWriteInputTokens'='3')
+  and exists(select 1 from run_items where item->>'executionId'='fixture:dialogue:unknown-cache' and item->'cachedInputTokens'='null'::jsonb and item->'cacheWriteInputTokens'='null'::jsonb)
   and not exists(
     select 1 from run_items
     where case when jsonb_typeof(run_items.item)='object' then
-      (select count(*) from jsonb_object_keys(run_items.item))<>14
+      (select count(*) from jsonb_object_keys(run_items.item))<>16
       or exists(
         select 1 from jsonb_object_keys(run_items.item) as field(key)
-        where key not in ('executionId','attempt','workflow','node','promptKey','releaseId','revisionId','status','model','durationMs','inputTokens','outputTokens','errorCode','occurredAt')
+        where key not in ('executionId','attempt','workflow','node','promptKey','releaseId','revisionId','status','model','durationMs','inputTokens','outputTokens','cachedInputTokens','cacheWriteInputTokens','errorCode','occurredAt')
       )
     else true end
   ),

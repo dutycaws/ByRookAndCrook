@@ -95,7 +95,7 @@ select is(
   (select array_agg(key order by key)
     from pg_temp.journal,
     lateral jsonb_object_keys(result#>array[(select instance_id::text from pg_temp.resident),'questHistory','0']) key),
-  array['day','id','outcome','publicNews','text']::text[],
+  array['day','id','outcome','publicNews','questId','text']::text[],
   'journal history exposes only the player-safe event fields'
 );
 select is((select public.world_generated_shop_projection('74000000-0000-4000-8000-000000000011') ? 'successorQuest'),false,'generated shop no longer projects a quest attachment');

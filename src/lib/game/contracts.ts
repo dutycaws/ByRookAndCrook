@@ -21,6 +21,14 @@ export interface HarvestPreview {
 }
 
 export interface GardenCell {
+  observations?: string[];
+  careHistory?: Array<{
+    dayNumber: number;
+    kind: 'planting' | 'removal' | 'watering' | 'fertilizer' | 'daily_observation';
+    label: string;
+    quantity?: number;
+    unit?: string;
+  }>;
   id: string;
   layoutKey: string;
   col: number;
@@ -100,6 +108,7 @@ export interface IngredientBatch {
 }
 
 export interface GardenInventoryItem {
+  guidance?: string[];
   itemKey: string;
   name: string;
   kind: 'seed' | 'amendment' | 'feed' | 'treatment' | 'equipment' | 'colony';
@@ -233,6 +242,7 @@ export interface BakeryRules {
 }
 
 export interface GameSnapshot {
+  trinkets?: { collection: import('./trinkets').OwnedTrinket[] };
   save: {
     id: string;
     rulesVersion: string;

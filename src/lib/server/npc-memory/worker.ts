@@ -40,7 +40,7 @@ export type NpcMemoryWorkerRuntime = Readonly<{
   /** Caller-owned deadline; v2 provider work is never allowed an unbounded controller. */
   summaryV2Signal?: AbortSignal;
   resolvePinnedPrompt?(releaseId: string): Promise<{ releaseId: string; revisionId: string; key: string; contractId: string; contractHash: string; body: string }>;
-  recordTelemetry?(event: Readonly<{ jobId: string; batchOrdinal?: number; planHash?: string; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; errorCode?: string }>): Promise<void> | void;
+  recordTelemetry?(event: Readonly<{ jobId: string; batchOrdinal?: number; planHash?: string; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; errorCode?: string }>): Promise<void> | void;
 }>;
 
 function embeddingPlan(value: unknown, job: NpcMemoryClaim, version: string): Record<string, unknown> | null {
@@ -64,7 +64,7 @@ async function runEmbeddingV3(client: NpcMemoryWorkerClient, job: NpcMemoryClaim
 }
 
 const V2_HASH = 'f279a108f11e212c77e4876521e9ee47092171b6d2a820d83a245d57a3c64e03';
-type SafeTelemetry = { jobId: string; batchOrdinal?: number; planHash?: string; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; errorCode?: string };
+type SafeTelemetry = { jobId: string; batchOrdinal?: number; planHash?: string; promptReleaseId?: string; promptRevisionId?: string; promptKey?: string; status: string; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; errorCode?: string };
 const telemetry = async (runtime: NpcMemoryWorkerRuntime, event: SafeTelemetry) => { try { await runtime.recordTelemetry?.(event); } catch { /* telemetry is never durable-work control flow */ } };
 function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> { return object(value) && Object.keys(value).length === keys.length && keys.every((key) => key in value); }
 const integer = (value: unknown, min = 0): value is number => Number.isSafeInteger(value) && (value as number) >= min;
@@ -142,9 +142,14 @@ async function runSummaryV2(client: NpcMemoryWorkerClient, job: NpcMemoryClaim, 
       if (!validPrepared(preflight, runtime.summaryV2Model, rawBatch.maxSummaryChars as number, maxCitations)) return await final('provider_malformed');
       await rpc(client, 'world_npc_memory_summary_mark_dispatched', { p_job_id: job.id, p_fence: job.fence, p_batch_ordinal: ordinal, p_provider_request_id: null });
       const result = await runtime.summaryV2.generate({ prepared: preflight.prepared, signal: runtime.summaryV2Signal });
-      if (result.model !== runtime.summaryV2Model || !integer(result.inputTokens, 0) || !integer(result.outputTokens, 0) || !integer(result.durationMs, 0) || !validBatchResult(result.result, load, rawBatch)) return await final('provider_malformed');
+      if (result.model !== runtime.summaryV2Model || !integer(result.inputTokens, 0) || !integer(result.outputTokens, 0)
+        || (result.cachedInputTokens !== undefined && (!integer(result.cachedInputTokens, 0) || result.cachedInputTokens > result.inputTokens))
+        || (result.cacheWriteInputTokens !== undefined && (!integer(result.cacheWriteInputTokens, 0) || result.cacheWriteInputTokens > result.inputTokens))
+        || !integer(result.durationMs, 0) || !validBatchResult(result.result, load, rawBatch)) return await final('provider_malformed');
       await rpc(client, 'world_npc_memory_summary_record_dispatch_result', { p_job_id: job.id, p_fence: job.fence, p_batch_ordinal: ordinal, p_result: result.result, p_model: result.model, p_provider_request_id: result.providerRequestId ?? null });
-      await telemetry(runtime, { jobId: job.id, batchOrdinal: ordinal, ...safe, status: 'completed', model: result.model, durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      await telemetry(runtime, { jobId: job.id, batchOrdinal: ordinal, ...safe, status: 'completed', model: result.model, durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+        ...(result.cachedInputTokens !== undefined ? { cachedInputTokens: result.cachedInputTokens } : {}),
+        ...(result.cacheWriteInputTokens !== undefined ? { cacheWriteInputTokens: result.cacheWriteInputTokens } : {}) });
     }
     return await final();
   } catch (error) { if (stale(error)) return { status: 'lease_lost' }; if (finalizerAttempted) return { status: 'failed', errorCode: 'worker_failed' }; try { return await final(error instanceof Error && 'code' in error ? String((error as { code: unknown }).code) : 'worker_failed'); } catch (finalError) { return stale(finalError) ? { status: 'lease_lost' } : { status: 'failed', errorCode: 'worker_failed' }; } }
@@ -174,6 +179,21 @@ export async function runNpcMemoryClaim(client: NpcMemoryWorkerClient, rawClaim:
     catch (completeError) { if (stale(completeError)) return { status: 'lease_lost' }; }
     return { status: 'failed', errorCode };
   }
+}
+
+/** Claims one explicitly selected summary-v2 job, then uses the normal fenced worker path. */
+export async function runNpcMemorySummaryJobById(client: NpcMemoryWorkerClient, jobId: string, runtime: NpcMemoryWorkerRuntime): Promise<NpcMemoryOutcome> {
+  if (!uuid.test(jobId)) return { status: 'failed', errorCode: 'claim_malformed' };
+  if ((runtime.processorKind ?? 'extract') !== 'summary' || runtime.processorVersion !== 'npc-memory-summary-v2') {
+    return { status: 'failed', errorCode: 'worker_misconfigured' };
+  }
+  let selected: unknown;
+  try {
+    selected = await rpc(client, 'world_npc_memory_claim_selected', { p_job_id: jobId });
+  } catch {
+    return { status: 'failed', errorCode: 'claim_failed' };
+  }
+  return runNpcMemoryClaim(client, selected ?? { status: 'idle' }, runtime);
 }
 
 /** Claims a bounded number of jobs through the server-private outbox contract. */

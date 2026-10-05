@@ -1,4 +1,4 @@
-import type { ApiaryCommandKind, GardenCommandKind } from './contracts';
+import type { ApiaryCommandKind, GardenCommandKind, GardenCommandPreview } from './contracts';
 
 type ReceiptFields = {
   normalizedPayload: unknown;
@@ -12,6 +12,17 @@ type ReceiptFields = {
  */
 export type GardenFeedbackOptions = {
   cellLabel?: (cellId: string) => string | undefined;
+};
+
+export type GardenPreviewFeedbackOptions = GardenFeedbackOptions & {
+  itemName?: (itemKey: string) => string | undefined;
+};
+
+export type GardenPreviewFeedback = {
+  summary: string;
+  targets: string[];
+  details: string[];
+  resourceWarning?: string;
 };
 
 function fields(value: unknown): Record<string, unknown> {
@@ -61,6 +72,151 @@ function targetCount(receipt: ReceiptFields): number | undefined {
 
 function plural(quantity: number, singular: string, pluralForm = `${singular}s`): string {
   return `${quantity} ${quantity === 1 ? singular : pluralForm}`;
+}
+
+function number(value: unknown, key: string): number | undefined {
+  const entry = fields(value)[key];
+  return typeof entry === 'number' && Number.isFinite(entry) ? entry : undefined;
+}
+
+function array(value: unknown, key: string): unknown[] {
+  const entry = fields(value)[key];
+  return Array.isArray(entry) ? entry : [];
+}
+
+function plotIdList(preview: GardenCommandPreview): string[] {
+  const fromPayload = array(preview.normalizedPayload, 'cellIds')
+    .filter((id): id is string => typeof id === 'string');
+  if (fromPayload.length) return fromPayload;
+  const direct = text(preview.normalizedPayload, 'cellId');
+  if (direct) return [direct];
+  return array(preview, 'targets')
+    .map((target) => text(target, 'cellId'))
+    .filter((id): id is string => !!id);
+}
+
+function plotNames(ids: string[], options: GardenPreviewFeedbackOptions): string[] {
+  return ids.map((id) => options.cellLabel?.(id)).filter((name): name is string => !!name);
+}
+
+function itemName(preview: GardenCommandPreview, options: GardenPreviewFeedbackOptions, key: string): string | undefined {
+  const itemKey = text(preview.normalizedPayload, key);
+  return itemKey ? options.itemName?.(itemKey) ?? displayName(itemKey) : undefined;
+}
+
+function targetChanges(
+  preview: GardenCommandPreview,
+  options: GardenPreviewFeedbackOptions,
+  kind: 'water' | 'amend'
+): { details: string[]; warnings: string[] } {
+  const details: string[] = [];
+  const warnings: string[] = [];
+
+  for (const target of array(preview, 'targets')) {
+    const id = text(target, 'cellId');
+    const label = id ? options.cellLabel?.(id) : undefined;
+    if (!label) continue;
+    const before = fields(target).before;
+    const after = fields(target).after;
+    if (kind === 'water') {
+      const moistureBefore = number(before, 'value') ?? (typeof before === 'number' ? before : undefined);
+      const moistureAfter = number(after, 'value') ?? (typeof after === 'number' ? after : undefined);
+      if (moistureBefore !== undefined && moistureAfter !== undefined) {
+        details.push(moistureAfter > moistureBefore
+          ? `${label}: soil moisture will increase.`
+          : moistureAfter < moistureBefore
+            ? `${label}: soil moisture will decrease.`
+            : `${label}: soil moisture is already saturated; additional water may have little effect.`);
+      }
+      if (text(target, 'warning') === 'overwatering') {
+        warnings.push(`${label}: additional water may leave the soil too wet for this plant.`);
+      }
+      continue;
+    }
+
+    const changed = (key: 'n' | 'p' | 'k' | 'quality') => {
+      const from = number(before, key);
+      const to = number(after, key);
+      return from !== undefined && to !== undefined && from !== to;
+    };
+    const nutrientChanges = (['n', 'p', 'k'] as const).some(changed);
+    const qualityChanges = changed('quality');
+    if (nutrientChanges && qualityChanges) details.push(`${label}: soil nutrients and quality will change.`);
+    else if (nutrientChanges) details.push(`${label}: soil nutrient levels will change.`);
+    else if (qualityChanges) details.push(`${label}: soil quality will change.`);
+    else if (number(before, 'n') !== undefined && number(after, 'n') !== undefined) {
+      details.push(`${label}: no visible soil changes are expected.`);
+    }
+    if (text(target, 'warning') === 'nutrient-excess') {
+      warnings.push(`${label}: the added nutrients may be too much for this plant.`);
+    }
+  }
+
+  return { details, warnings };
+}
+
+/**
+ * Turns the Garden RPC's authoritative planting, watering, and amendment
+ * previews into player-facing copy without exposing its internal field names.
+ */
+export function gardenCommandPreviewFeedback(
+  preview: GardenCommandPreview,
+  options: GardenPreviewFeedbackOptions = {}
+): GardenPreviewFeedback {
+  const ids = plotIdList(preview);
+  const names = plotNames(ids, options);
+  const targetCount = count(preview, 'targetCount') ?? ids.length;
+  const plots = plural(targetCount, 'plot');
+
+  if (preview.commandKind === 'plant') {
+    const seed = itemName(preview, options, 'seedItemKey');
+    const target = names[0];
+    return {
+      summary: seed
+        ? `Plant ${seed} in ${target ? `plot ${target}` : 'the selected plot'}.`
+        : `Plant a seed in ${target ? `plot ${target}` : 'the selected plot'}.`,
+      targets: names,
+      details: []
+    };
+  }
+
+  if (preview.commandKind === 'water') {
+    const dose = number(preview, 'sameDosePerTarget') ?? number(preview.normalizedPayload, 'dose');
+    const changes = targetChanges(preview, options, 'water');
+    return {
+      summary: dose === undefined
+        ? `Water ${plots}.`
+        : `Increase moisture by ${dose} per plot across ${plots}.`,
+      targets: names,
+      details: changes.details,
+      ...(changes.warnings.length ? { resourceWarning: changes.warnings.join(' ') } : {})
+    };
+  }
+
+  if (preview.commandKind === 'amend') {
+    const amendment = itemName(preview, options, 'itemKey');
+    const dose = number(preview, 'sameDosePerTarget') ?? number(preview.normalizedPayload, 'dose');
+    const required = number(preview, 'resourceCost');
+    const available = number(preview, 'available');
+    const changes = targetChanges(preview, options, 'amend');
+    const quantity = required ?? (dose === undefined ? undefined : dose * targetCount);
+    const summary = dose !== undefined && quantity !== undefined
+      ? `Apply ${amendment ?? 'fertilizer'} to ${plots}: ${plural(dose, 'unit')} per plot (${plural(quantity, 'unit')} total).`
+      : `Fertilize ${plots}${amendment ? ` with ${amendment}` : ''}.`;
+    const resourceWarning = preview.canCommit === false
+      ? required !== undefined && available !== undefined
+        ? `Need ${plural(required, 'unit')} of ${amendment ?? 'this amendment'}; ${plural(available, 'unit')} available.`
+        : 'There is not enough amendment for every selected plot.'
+      : changes.warnings.length ? changes.warnings.join(' ') : undefined;
+    return {
+      summary,
+      targets: names,
+      details: changes.details,
+      ...(resourceWarning ? { resourceWarning } : {})
+    };
+  }
+
+  return { summary: `Review the ${preview.commandKind.replaceAll('_', ' ')} action before applying it.`, targets: names, details: [] };
 }
 
 function targetsCopy(verb: string, receipt: ReceiptFields, options: GardenFeedbackOptions): string {

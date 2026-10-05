@@ -1055,6 +1055,50 @@ export type Database = {
           },
         ]
       }
+      garden_plot_history: {
+        Row: {
+          cell_id: string
+          created_at: string
+          day_number: number
+          event_kind: string
+          id: number
+          label: string
+          quantity: number | null
+          save_id: string
+          unit: string | null
+        }
+        Insert: {
+          cell_id: string
+          created_at?: string
+          day_number: number
+          event_kind: string
+          id?: never
+          label: string
+          quantity?: number | null
+          save_id: string
+          unit?: string | null
+        }
+        Update: {
+          cell_id?: string
+          created_at?: string
+          day_number?: number
+          event_kind?: string
+          id?: never
+          label?: string
+          quantity?: number | null
+          save_id?: string
+          unit?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "garden_plot_history_save_id_cell_id_fkey"
+            columns: ["save_id", "cell_id"]
+            isOneToOne: false
+            referencedRelation: "garden_cells"
+            referencedColumns: ["save_id", "id"]
+          },
+        ]
+      }
       garden_shop_stock: {
         Row: {
           daily_cap: number
@@ -2270,6 +2314,16 @@ export type Database = {
       }
       npc_share_preview: { Args: { p_instance: string }; Returns: Json }
       npc_share_view: { Args: { p_token: string }; Returns: Json }
+      npc_swap_trinket: {
+        Args: {
+          p_action_id: string
+          p_expected_revision: number
+          p_save_id: string
+          p_target_slot: number
+          p_trinket_id: string
+        }
+        Returns: Json
+      }
       npc_update_community_settings: {
         Args: {
           p_attest_adult: boolean
@@ -2338,6 +2392,8 @@ export type Database = {
       prompt_registry_service_record_run: {
         Args: {
           p_attempt: number
+          p_cache_write_input_tokens?: number
+          p_cached_input_tokens?: number
           p_duration_ms?: number
           p_error_code?: string
           p_execution_id: string
@@ -2472,6 +2528,14 @@ export type Database = {
       }
       world_npc_memory_claim: {
         Args: { p_processor_kind: string; p_processor_version: string }
+        Returns: Json
+      }
+      world_npc_memory_claim_selected: {
+        Args: { p_job_id: string }
+        Returns: Json
+      }
+      world_npc_memory_claim_selected_extract: {
+        Args: { p_job_id: string }
         Returns: Json
       }
       world_npc_memory_complete: {
