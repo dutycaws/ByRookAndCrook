@@ -8,18 +8,18 @@ The app uses SvelteKit server loads and form actions, Supabase Auth, Postgres ro
 
 ## Verified local toolchain
 
-- Node.js 22.20.0
-- npm 11.18.0
+- Node.js 22.23.3
+- npm 12.2.0 (npm >=11.18.0 is accepted; use `npm@latest` locally)
 - Supabase CLI 2.114.0
 - Docker Engine with Compose support
 - Linux `flock` from `util-linux` (the launcher’s advisory session lock)
 - Playwright 1.63.0 with Chromium
 
-The JavaScript package versions and npm version are pinned in `package.json` and `package-lock.json`. The project enforces compatible Node and npm versions through `.npmrc`; dependency install scripts require explicit approval in `package.json` (`esbuild` is approved; the optional macOS `fsevents` install script remains disabled). Use `npm ci` for a checkout and `npm install <package>` when adding dependencies, committing the resulting `package-lock.json`. Supabase CLI is intentionally a host prerequisite because it manages the local Docker stack.
+The JavaScript package versions are pinned in `package.json` and `package-lock.json`. The `packageManager` field declares the tested npm 12.2.0 baseline, and CI uses Node 22.23.3 with that version, while `engines` accepts compatible Node and npm versions, including npm >=11.18.0. npm 12 requires Node `^22.22.2 || ^24.15.0 || >=26.0.0`, so Node 22.23.3 supports the current tested npm baseline. The project enforces those engine requirements through `.npmrc`; dependency install scripts require explicit approval in `package.json` (`esbuild` is approved; the optional macOS `fsevents` install script remains disabled). Use `npm ci` for a checkout and `npm install <package>` when adding dependencies, committing the resulting `package-lock.json`. Supabase CLI is intentionally a host prerequisite because it manages the local Docker stack.
 
 ## First-time setup and normal local startup
 
-Select Node 22.20.0 and install the pinned npm version with `npm install --global npm@11.18.0`. Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
+Select Node 22.23.3 and install the latest npm with `npm install --global npm@latest` (npm >=11.18.0 is accepted). Install the checkout dependencies with `npm ci`. Install Supabase CLI, Docker Engine with Compose support, and Info-ZIP's `zip` and `unzip` commands as host prerequisites; the launcher and media archive tooling never install or change host tools automatically.
 
 Create the ignored root `.env` and add a nonempty `OPENAI_API_KEY`. `NPC_PROVIDER` defaults to `openai`; if present, it must be `openai`. Community portrait generation uses `NPC_IMAGE_API_KEY` when it is populated and otherwise falls back to `OPENAI_API_KEY`; its provider, model, and deadline default to `openai`, `gpt-image-2.5-sunburst`, and 60 seconds. Existing ignored `.env` files explicitly pinned to `NPC_IMAGE_MODEL=gpt-image-2` must be updated to the Sunburst alias; the source default cannot replace an explicit local value. Let any claimed or dispatched portrait-generation attempts finish or drain before changing the environment, then restart the web and worker processes so new attempts use the same model. Setup, fixture seeding, and normal automated tests do not make a billable provider request.
 
