@@ -1,16 +1,16 @@
 <script lang="ts">
   import { PUBLIC_SUPABASE_URL } from '$env/static/public';
-  import { tick, untrack } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import type { GameSnapshot } from '$lib/game/contracts';
   import { shopItemAssetPublicUrl } from '$lib/game/shop-runtime-assets';
   import { sceneRuntimeAssetPublicUrl, type SceneRuntimeAssetId } from '$lib/game/scene-runtime-assets';
-  import type { PrototypeModel, ShopCategoryKey, ShopCategory, ShopEntry, ShopStage, ShopVariant } from './types';
+  import { BURN_TREATMENTS, type BurnTreatment, type PrototypeModel, type ShopCategoryKey, type ShopCategory, type ShopEntry, type ShopStage, type ShopVariant } from './types';
   import VariantA from './VariantA.svelte';
   import VariantB from './VariantB.svelte';
   import VariantC from './VariantC.svelte';
 
-  type Props = { snapshot: GameSnapshot; variant: ShopVariant };
-  let { snapshot, variant }: Props = $props();
+  type Props = { snapshot: GameSnapshot; variant: ShopVariant; burnTreatment: BurnTreatment };
+  let { snapshot, variant, burnTreatment }: Props = $props();
 
   const definitions: Omit<ShopCategory, 'count'>[] = [
     { key: 'seeds', label: 'Seeds', icon: '✿', description: 'Start something growing.' },
@@ -36,6 +36,30 @@
   let burningCategory = $state<ShopCategoryKey | null>(null);
   let leavingCategory = $state<ShopCategory | null>(null);
   let burnTimer: ReturnType<typeof setTimeout> | undefined;
+  let burnSequence = 0;
+  let previousVariant = untrack(() => variant);
+  let previousBurnTreatment = untrack(() => burnTreatment);
+
+  $effect(() => {
+    const nextVariant = variant;
+    const nextTreatment = burnTreatment;
+    if (nextVariant !== previousVariant || nextTreatment !== previousBurnTreatment) {
+      const wasBurning = burningCategory !== null;
+      cancelPendingTransition();
+      if (wasBurning) {
+        const pendingHistory = history[history.length - 1];
+        if (pendingHistory?.stage === 'categories') history.pop();
+        stage = 'categories';
+        selectedKey = null;
+        result = null;
+        announcement = 'Choose a shop shelf.';
+      }
+    }
+    previousVariant = nextVariant;
+    previousBurnTreatment = nextTreatment;
+  });
+
+  onDestroy(cancelPendingTransition);
 
   const categories = $derived(definitions.map((category) => ({
     ...category,
@@ -93,19 +117,67 @@
     history.push({ stage, focusId });
   }
 
+  function cancelPendingTransition() {
+    burnSequence += 1;
+    if (burnTimer) clearTimeout(burnTimer);
+    burnTimer = undefined;
+    burningCategory = null;
+    leavingCategory = null;
+  }
+
+  function finishCategoryBurn(key: ShopCategoryKey) {
+    if (burningCategory !== key) return;
+    if (burnTimer) clearTimeout(burnTimer);
+    burnTimer = undefined;
+    burnSequence += 1;
+    burningCategory = null;
+    leavingCategory = null;
+    stage = 'items';
+    announcement = `${currentCategory.label}: ${entries.length} ${entries.length === 1 ? 'item' : 'items'}.`;
+    void tick().then(() => focusWithoutScroll(entries.length ? `shop-item-${safeId(entries[0].key)}` : 'prototype-back'));
+  }
+
+  function finishCategoryBurnFallback(sequence: number, key: ShopCategoryKey) {
+    if (sequence !== burnSequence || burningCategory !== key) return;
+    if (document.visibilityState === 'hidden') {
+      burnTimer = setTimeout(() => finishCategoryBurnFallback(sequence, key), 100);
+      return;
+    }
+    finishCategoryBurn(key);
+  }
+
   function chooseCategory(key: ShopCategoryKey, triggerId: string) {
+    if (burningCategory) return;
+    cancelPendingTransition();
     pushHistory(triggerId);
     selectedCategory = key;
     selectedKey = null;
     result = null;
+    const category = categories.find((entry) => entry.key === key) ?? null;
+
+    if (variant === 'C' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      burningCategory = key;
+      leavingCategory = null;
+      const sequence = ++burnSequence;
+      const duration = BURN_TREATMENTS.find((treatment) => treatment.value === burnTreatment)?.durationMs ?? 1000;
+      announcement = `${category?.label ?? 'Category'} burns with the ${burnTreatment} treatment.`;
+      burnTimer = setTimeout(() => finishCategoryBurnFallback(sequence, key), duration + 100);
+      return;
+    }
+
     stage = 'items';
     announcement = `${currentCategory.label}: ${entries.length} ${entries.length === 1 ? 'item' : 'items'}.`;
-    leavingCategory = categories.find((category) => category.key === key) ?? null;
-    burningCategory = variant === 'C' ? key : null;
-    if (burnTimer) clearTimeout(burnTimer);
+    leavingCategory = category;
+    if (variant === 'C') {
+      leavingCategory = null;
+      void tick().then(() => focusWithoutScroll(entries.length ? `shop-item-${safeId(entries[0].key)}` : 'prototype-back'));
+      return;
+    }
+
     burnTimer = setTimeout(() => {
       burningCategory = null;
       leavingCategory = null;
+      burnTimer = undefined;
     }, 210);
     void tick().then(() => focusWithoutScroll(entries.length ? `shop-item-${safeId(entries[0].key)}` : 'prototype-back'));
   }
@@ -120,11 +192,14 @@
   }
 
   function goBack() {
+    const wasBurning = burningCategory !== null;
+    cancelPendingTransition();
     const previous = history.pop();
     if (!previous) return;
     stage = previous.stage;
     if (previous.stage === 'categories') selectedKey = null;
     result = null;
+    if (wasBurning) announcement = 'Burn canceled. Choose a shop shelf.';
     void tick().then(() => focusWithoutScroll(previous.focusId));
   }
 
@@ -143,7 +218,7 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Escape' || stage === 'categories') return;
+    if (event.key !== 'Escape' || (stage === 'categories' && burningCategory === null)) return;
     event.preventDefault();
     goBack();
   }
@@ -159,6 +234,7 @@
 
   const model: PrototypeModel = $derived({
     variant,
+    burnTreatment,
     stage,
     categories,
     category: currentCategory,
@@ -174,6 +250,7 @@
     result,
     burningCategory,
     leavingCategory,
+    onBurnComplete: finishCategoryBurn,
     onCategory: chooseCategory,
     onEntry: chooseEntry,
     onBack: goBack,
@@ -196,8 +273,8 @@
   </header>
 
   <div class="prototype-nav">
-    {#if stage !== 'categories'}
-      <button id="prototype-back" type="button" onclick={goBack}>← {stage === 'items' ? 'All shelves' : stage === 'preview' ? 'Back to items' : 'Back to preview'}</button>
+    {#if stage !== 'categories' || burningCategory}
+      <button id="prototype-back" type="button" onclick={goBack}>{burningCategory ? 'Cancel burn' : `← ${stage === 'items' ? 'All shelves' : stage === 'preview' ? 'Back to items' : 'Back to preview'}`}</button>
     {:else}
       <span aria-hidden="true"></span>
     {/if}

@@ -1,10 +1,17 @@
 <script lang="ts">
-  import { dev } from '$app/environment';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/state';
+import { dev } from '$app/environment';
+import { goto } from '$app/navigation';
+import { page } from '$app/state';
+import { BURN_TREATMENTS, DEFAULT_BURN_TREATMENT, type BurnTreatment } from '$lib/components/shop/prototype/types';
 
-  type Props<T extends string> = { variants: readonly T[]; current: T; variantNames?: Partial<Record<T, string>> };
-  let { variants, current, variantNames = {} }: Props<string> = $props();
+type Props<T extends string> = {
+  variants: readonly T[];
+  current: T;
+  variantNames?: Partial<Record<T, string>>;
+  burnTreatment?: BurnTreatment;
+  onBurnTreatmentChange?: (treatment: BurnTreatment) => void;
+};
+let { variants, current, variantNames = {}, burnTreatment, onBurnTreatmentChange }: Props<string> = $props();
 
   function select(next: string) {
     const url = new URL(page.url);
@@ -30,17 +37,38 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#if dev}
-  <nav class="prototype-switcher" aria-label="Prototype layout variants">
-    <button type="button" aria-label="Previous layout" onclick={() => step(-1)}>←</button>
-    <span aria-live="polite">{current}{variantNames[current] ? ` · ${variantNames[current]}` : ''}</span>
-    <button type="button" aria-label="Next layout" onclick={() => step(1)}>→</button>
+  <nav class="prototype-switcher" class:has-burn-treatment={current === 'C' && !!onBurnTreatmentChange} aria-label="Prototype layout variants">
+    {#if current === 'C' && onBurnTreatmentChange}
+      <label class="burn-treatment-choice">
+        <span>C burn</span>
+        <select
+          aria-label="C burn treatment"
+          value={burnTreatment ?? DEFAULT_BURN_TREATMENT}
+          onchange={(event) => onBurnTreatmentChange?.(event.currentTarget.value as BurnTreatment)}
+        >
+          {#each BURN_TREATMENTS as treatment}
+            <option value={treatment.value}>{treatment.name} · {treatment.preview}</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
+    <div class="variant-controls">
+      <button type="button" aria-label="Previous layout" onclick={() => step(-1)}>←</button>
+      <span aria-live="polite">{current}{variantNames[current] ? ` · ${variantNames[current]}` : ''}</span>
+      <button type="button" aria-label="Next layout" onclick={() => step(1)}>→</button>
+    </div>
   </nav>
 {/if}
 
 <style>
   .prototype-switcher { position: fixed; z-index: 100; left: 50%; bottom: max(.8rem, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: .55rem; min-height: 2.65rem; padding: .3rem .42rem; border: 1px solid rgba(233, 196, 119, .7); border-radius: 999px; color: #f1e5c8; background: rgba(20, 15, 9, .94); box-shadow: 0 8px 28px rgba(0,0,0,.5); transform: translateX(-50%); backdrop-filter: blur(10px); }
-  .prototype-switcher span { min-width: 7rem; text-align: center; font-size: .72rem; font-weight: 650; }
-  .prototype-switcher button { display: grid; width: 1.9rem; height: 1.9rem; place-items: center; border: 0; border-radius: 50%; color: #21180d; background: #dfbd76; font-size: 1rem; }
-  .prototype-switcher button:hover { background: #f2d794; }
-  .prototype-switcher button:focus-visible { outline: 2px solid #fff1cb; outline-offset: 2px; }
+  .prototype-switcher.has-burn-treatment { flex-direction: column; gap: .25rem; max-width: calc(100vw - 1rem); border-radius: 1.15rem; }
+  .variant-controls { display: flex; align-items: center; justify-content: center; gap: .55rem; }
+  .variant-controls > span { min-width: 7rem; text-align: center; font-size: .72rem; font-weight: 650; }
+  .burn-treatment-choice { display: flex; align-items: center; gap: .45rem; color: #e9d7ae; font-size: .65rem; font-weight: 650; }
+  .burn-treatment-choice select { max-width: min(15rem, calc(100vw - 8rem)); padding: .28rem .45rem; border: 1px solid rgba(233, 196, 119, .55); border-radius: .55rem; color: #f4e7c8; background: #271c10; font: inherit; }
+  .burn-treatment-choice select:focus-visible { outline: 2px solid #fff1cb; outline-offset: 2px; }
+  .variant-controls button { display: grid; width: 1.9rem; height: 1.9rem; place-items: center; border: 0; border-radius: 50%; color: #21180d; background: #dfbd76; font-size: 1rem; }
+  .variant-controls button:hover { background: #f2d794; }
+  .variant-controls button:focus-visible { outline: 2px solid #fff1cb; outline-offset: 2px; }
 </style>

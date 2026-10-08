@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { PrototypeModel, ShopCategoryKey } from './types';
+  import CategoryBurn from './CategoryBurn.svelte';
+  import { BURN_TREATMENTS, type PrototypeModel, type ShopCategoryKey } from './types';
   let { model }: { model: PrototypeModel } = $props();
   const leaving = $derived(model.stage === 'items' && !!model.leavingCategory);
   function safeId(value: string) { return value.replace(/[^a-zA-Z0-9_-]/g, '-'); }
@@ -11,7 +12,26 @@
     const shift = 0;
     return `--tilt:${angle}deg;--lift:${lift}px;--shift:${shift}px;--deal-delay:${Math.abs(distance) * 18}ms`;
   }
-  function chooseCategory(key: ShopCategoryKey, id: string) { model.onCategory(key, id); }
+  const burnDuration = $derived(BURN_TREATMENTS.find((treatment) => treatment.value === model.burnTreatment)?.durationMs ?? 1000);
+  const burnPadding = $derived(BURN_TREATMENTS.find((treatment) => treatment.value === model.burnTreatment)?.fanPaddingRem ?? 3.8);
+  function chooseCategory(key: ShopCategoryKey, id: string) {
+    if (model.burningCategory) return;
+    model.onCategory(key, id);
+  }
+  function handleCategoryAnimationEnd(event: AnimationEvent, key: ShopCategoryKey) {
+    const card = event.currentTarget;
+    if (!(card instanceof HTMLElement)) return;
+    const expectedAnimation = `category-${model.burnTreatment}-away`;
+    const activeAnimations = getComputedStyle(card).animationName.split(',').map((name) => name.trim());
+    if (
+      event.target === event.currentTarget &&
+      activeAnimations.some((name) => name.includes(expectedAnimation) && name === event.animationName) &&
+      model.variant === 'C' &&
+      model.burningCategory === key
+    ) {
+      model.onBurnComplete(key);
+    }
+  }
 </script>
 
 <section class="fan-stage" aria-label={model.stage === 'categories' ? 'Shop category hand' : `${model.category.label} hand`}>
@@ -20,7 +40,7 @@
       <span>{model.leavingCategory.icon}</span><strong>{model.leavingCategory.label}</strong>
     </div>
   {/if}
-  <div class="fan-viewport" data-prototype-wheel class:fade-hand={model.stage === 'preview' || model.stage === 'result'}>
+  <div class="fan-viewport" data-prototype-wheel class:fade-hand={model.stage === 'preview' || model.stage === 'result'} class:ember-hand={model.variant === 'C'} style={model.variant === 'C' ? `--fan-pad-block:${burnPadding}rem` : undefined}>
     <div class="fan-track" class:category-fan={model.stage === 'categories'}>
       {#if model.stage === 'categories'}
         {#each model.categories as category, index (category.key)}
@@ -28,14 +48,29 @@
             id={`shop-category-${category.key}`}
             class="fan-card category-card"
             class:burning={model.burningCategory === category.key}
-            style={fanStyle(index, model.categories.length)}
+            class:burn-dimmed={model.variant === 'C' && model.burningCategory !== null && model.burningCategory !== category.key}
+            class:burn-crawl={model.burningCategory === category.key && model.burnTreatment === 'crawl'}
+            class:burn-drip={model.burningCategory === category.key && model.burnTreatment === 'drip'}
+            class:burn-ash={model.burningCategory === category.key && model.burnTreatment === 'ash'}
+            style={`${fanStyle(index, model.categories.length)};--burn-duration:${burnDuration}ms`}
+            aria-hidden={model.variant === 'C' && model.burningCategory !== null && model.burningCategory !== category.key}
+            aria-disabled={model.burningCategory !== null}
+            tabindex={model.burningCategory !== null ? -1 : undefined}
             type="button"
             onclick={(event) => chooseCategory(category.key, (event.currentTarget as HTMLButtonElement).id)}
           >
-            <span class="card-icon">{category.icon}</span>
-            <strong>{category.label}</strong>
-            <small>{category.count} {category.count === 1 ? 'item' : 'items'}</small>
-            <span class="card-note">{category.description}</span>
+            <span
+              class="category-card-face"
+              onanimationend={(event) => handleCategoryAnimationEnd(event, category.key)}
+            >
+              <span class="card-icon">{category.icon}</span>
+              <strong>{category.label}</strong>
+              <small>{category.count} {category.count === 1 ? 'item' : 'items'}</small>
+              <span class="card-note">{category.description}</span>
+            </span>
+            {#if model.variant === 'C' && model.burningCategory === category.key}
+              <CategoryBurn treatment={model.burnTreatment} durationMs={burnDuration} />
+            {/if}
           </button>
         {/each}
       {:else if model.stage === 'items' || model.stage === 'preview' || model.stage === 'result'}
@@ -65,12 +100,26 @@
 <style>
   .fan-stage { position: relative; z-index: 2; min-width: 0; padding: .2rem 0 1.2rem; }
   .fan-viewport { min-width: 0; overflow-x: auto; overflow-y: visible; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scrollbar-color: #806332 transparent; scrollbar-width: thin; padding: 1.7rem .35rem .7rem; transition: opacity .2s ease; }
+  .fan-viewport.ember-hand { overflow-y: hidden; padding-block: var(--fan-pad-block, 3.8rem); }
   .fan-viewport.fade-hand { opacity: .32; }
   .fan-track { display: flex; width: max-content; min-width: 100%; align-items: end; justify-content: center; padding-inline: 1.6rem; }
   .fan-card { position: relative; flex: 0 0 124px; display: grid; min-height: 178px; margin-inline: -25px; padding: .7rem .58rem; align-content: center; justify-items: center; gap: .28rem; border: 1px solid rgba(211, 171, 96, .68); border-radius: 1rem; color: #f1e4c4; background: linear-gradient(155deg, #493018, #20160e 68%, #110d08); box-shadow: 0 10px 18px rgba(0,0,0,.36); text-align: center; transform: translate(var(--shift), var(--lift)) rotate(var(--tilt)); transform-origin: 50% 112%; transition: transform .19s ease, opacity .19s ease, box-shadow .19s ease, border-color .19s ease; scroll-snap-align: center; animation: card-deal .22s ease both; animation-delay: var(--deal-delay); }
   .category-fan .fan-card { flex-basis: 150px; min-height: 207px; margin-inline: -18px; }
+  .category-card { display: block; padding: 0; border: 0; color: inherit; background: transparent; box-shadow: none; }
+  .category-card-face { position: absolute; inset: 0; display: grid; min-height: 0; padding: .7rem .58rem; align-content: center; justify-items: center; gap: .28rem; border: 1px solid rgba(211, 171, 96, .68); border-radius: 1rem; color: #f1e4c4; background: linear-gradient(155deg, #493018, #20160e 68%, #110d08); box-shadow: 0 10px 18px rgba(0,0,0,.36); text-align: center; transform: none; transition: box-shadow .19s ease, border-color .19s ease; }
   .fan-card:hover, .fan-card:focus-visible { z-index: 6; border-color: #f2d080; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 14px 23px rgba(0,0,0,.48); transform: translate(var(--shift), calc(var(--lift) - .55rem)) rotate(0deg); }
+  .category-card:hover, .category-card:focus-visible { border-color: transparent; box-shadow: none; }
+  .category-card:hover .category-card-face, .category-card:focus-visible .category-card-face { border-color: #f2d080; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 14px 23px rgba(0,0,0,.48); }
   .fan-card:focus-visible { outline: 2px solid #f1ce7d; outline-offset: 3px; }
+  .fan-card.burn-dimmed { opacity: 0; filter: blur(1px); pointer-events: none; animation: none; }
+  .category-card.burning { z-index: 8; pointer-events: none; }
+  .category-card.burning .category-card-face { border-color: #f3a84e; animation: category-burn-away var(--burn-duration) ease-in forwards; }
+  .category-card.burning.burn-crawl .category-card-face { animation-name: category-crawl-away; }
+  .category-card.burning.burn-drip .category-card-face { animation-name: category-drip-away; }
+  .category-card.burning.burn-ash .category-card-face { animation-name: category-ash-away; }
+  .category-card.burning:hover, .category-card.burning:focus-visible { transform: translate(var(--shift), var(--lift)) rotate(var(--tilt)); }
+  .category-card.burning:focus-visible { outline: none; box-shadow: none; }
+  .category-card.burning:hover .category-card-face, .category-card.burning:focus-visible .category-card-face { border-color: #f3a84e; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 0 16px rgba(244, 125, 36, .5); }
   .fan-card img { width: 58px; height: 66px; object-fit: contain; filter: drop-shadow(0 3px 5px rgba(0,0,0,.55)); }
   .fan-card strong { display: -webkit-box; max-width: 100%; overflow: hidden; font-size: .77rem; line-height: 1.12; line-clamp: 2; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .fan-card small { color: #dccda9; font-size: .67rem; }
@@ -85,6 +134,23 @@
   @keyframes card-deal { from { opacity: 0; transform: translate(var(--shift), calc(var(--lift) + .55rem)) rotate(var(--tilt)); } to { opacity: 1; } }
   @keyframes ash-away { to { opacity: 0; transform: translate(-50%, -1.2rem) rotate(-4deg); filter: blur(2px); } }
   @keyframes ember { to { opacity: 0; transform: translateY(-1rem); } }
+  @keyframes category-burn-away { 0%, 65% { opacity: 1; filter: brightness(1.05); } 100% { opacity: 0; filter: brightness(.55) grayscale(.85); } }
+  @keyframes category-crawl-away {
+    0%, 18% { clip-path: inset(0 round 1rem); opacity: 1; }
+    72% { clip-path: inset(30% round 1rem); opacity: .88; }
+    100% { clip-path: inset(50% round 1rem); opacity: 0; filter: brightness(.45) grayscale(.8); }
+  }
+  @keyframes category-drip-away {
+    0%, 14% { clip-path: inset(0 0 0 0 round 1rem); opacity: 1; }
+    56% { clip-path: inset(45% 0 0 0 round 1rem); opacity: 1; }
+    82% { clip-path: inset(78% 0 0 0 round 1rem); opacity: .8; }
+    100% { clip-path: inset(100% 0 0 0 round 1rem); opacity: 0; filter: brightness(.35) grayscale(.9); }
+  }
+  @keyframes category-ash-away {
+    0%, 17% { clip-path: polygon(0 0,42% 0,50% 8%,58% 0,100% 0,100% 42%,92% 50%,100% 58%,100% 100%,58% 100%,50% 92%,42% 100%,0 100%,0 58%,8% 50%,0 42%); opacity: 1; }
+    64% { clip-path: polygon(40% 40%,46% 41%,50% 36%,54% 41%,60% 40%,60% 46%,64% 50%,60% 54%,60% 60%,54% 59%,50% 64%,46% 59%,40% 60%,40% 54%,36% 50%,40% 46%); opacity: .85; }
+    100% { clip-path: polygon(50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%,50% 50%); opacity: 0; filter: grayscale(.9) blur(1px); }
+  }
   @media (max-width: 700px) {
     .fan-track { min-width: 100%; justify-content: flex-start; padding-inline: 2rem 3.25rem; }
     .fan-card { flex-basis: 108px; min-height: 156px; margin-inline: -30px; }
@@ -94,7 +160,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .fan-viewport, .fan-card { transition: none; }
-    .fan-card { animation: none; }
+    .fan-card { animation: none; animation-delay: 0ms; }
     .leaving-card, .leaving-card.burning::after { animation: none; }
     .leaving-card { opacity: .72; border-color: #edca79; filter: none; }
   }
