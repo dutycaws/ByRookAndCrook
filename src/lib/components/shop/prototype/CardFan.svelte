@@ -13,24 +13,10 @@
     return `--tilt:${angle}deg;--lift:${lift}px;--shift:${shift}px;--deal-delay:${Math.abs(distance) * 18}ms`;
   }
   const burnDuration = $derived(BURN_TREATMENTS.find((treatment) => treatment.value === model.burnTreatment)?.durationMs ?? 1000);
-  const burnPadding = $derived(BURN_TREATMENTS.find((treatment) => treatment.value === model.burnTreatment)?.fanPaddingRem ?? 3.8);
+  const burnPadding = '4.2rem';
   function chooseCategory(key: ShopCategoryKey, id: string) {
-    if (model.burningCategory) return;
+    if (model.transitionPhase !== 'idle') return;
     model.onCategory(key, id);
-  }
-  function handleCategoryAnimationEnd(event: AnimationEvent, key: ShopCategoryKey) {
-    const card = event.currentTarget;
-    if (!(card instanceof HTMLElement)) return;
-    const expectedAnimation = `category-${model.burnTreatment}-away`;
-    const activeAnimations = getComputedStyle(card).animationName.split(',').map((name) => name.trim());
-    if (
-      event.target === event.currentTarget &&
-      activeAnimations.some((name) => name.includes(expectedAnimation) && name === event.animationName) &&
-      model.variant === 'C' &&
-      model.burningCategory === key
-    ) {
-      model.onBurnComplete(key);
-    }
   }
 </script>
 
@@ -40,7 +26,7 @@
       <span>{model.leavingCategory.icon}</span><strong>{model.leavingCategory.label}</strong>
     </div>
   {/if}
-  <div class="fan-viewport" data-prototype-wheel class:fade-hand={model.stage === 'preview' || model.stage === 'result'} class:ember-hand={model.variant === 'C'} style={model.variant === 'C' ? `--fan-pad-block:${burnPadding}rem` : undefined}>
+  <div class="fan-viewport" data-prototype-wheel class:fade-hand={model.stage === 'preview' || model.stage === 'result'} class:ember-hand={model.variant === 'C'} style={model.variant === 'C' ? `--fan-pad-block:${burnPadding}` : undefined}>
     <div class="fan-track" class:category-fan={model.stage === 'categories'}>
       {#if model.stage === 'categories'}
         {#each model.categories as category, index (category.key)}
@@ -48,20 +34,21 @@
             id={`shop-category-${category.key}`}
             class="fan-card category-card"
             class:burning={model.burningCategory === category.key}
-            class:burn-dimmed={model.variant === 'C' && model.burningCategory !== null && model.burningCategory !== category.key}
+            class:burn-dimmed={model.transitionPhase === 'category-burn' && model.burningCategory !== category.key}
             class:burn-crawl={model.burningCategory === category.key && model.burnTreatment === 'crawl'}
             class:burn-drip={model.burningCategory === category.key && model.burnTreatment === 'drip'}
             class:burn-ash={model.burningCategory === category.key && model.burnTreatment === 'ash'}
             style={`${fanStyle(index, model.categories.length)};--burn-duration:${burnDuration}ms`}
-            aria-hidden={model.variant === 'C' && model.burningCategory !== null && model.burningCategory !== category.key}
-            aria-disabled={model.burningCategory !== null}
-            tabindex={model.burningCategory !== null ? -1 : undefined}
+            data-burn-treatment={model.transitionPhase === 'category-burn' && model.burningCategory === category.key ? model.burnTreatment : undefined}
+            data-burn-duration={model.transitionPhase === 'category-burn' && model.burningCategory === category.key ? burnDuration : undefined}
+            aria-hidden={model.transitionPhase === 'category-burn' && model.burningCategory !== category.key}
+            aria-disabled={model.transitionPhase !== 'idle'}
+            tabindex={model.transitionPhase === 'category-burn' && model.burningCategory !== category.key ? -1 : undefined}
             type="button"
             onclick={(event) => chooseCategory(category.key, (event.currentTarget as HTMLButtonElement).id)}
           >
             <span
               class="category-card-face"
-              onanimationend={(event) => handleCategoryAnimationEnd(event, category.key)}
             >
               <span class="card-icon">{category.icon}</span>
               <strong>{category.label}</strong>
@@ -78,14 +65,29 @@
           <button
             id={`shop-item-${safeId(entry.key)}`}
             class="fan-card item-card"
-            style={fanStyle(index, model.entries.length)}
+            class:sibling-burning={model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key}
+            class:burned-item={model.burnedEntryKeys.includes(entry.key) && model.transitionPhase !== 'item-burn'}
+            class:previewed-item={model.variant === 'C' && (model.stage === 'preview' || model.stage === 'result') && model.selectedEntry?.key === entry.key}
+            class:burn-crawl={model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key && model.burnTreatment === 'crawl'}
+            class:burn-drip={model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key && model.burnTreatment === 'drip'}
+            class:burn-ash={model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key && model.burnTreatment === 'ash'}
+            style={`${fanStyle(index, model.entries.length)};--burn-duration:${burnDuration}ms`}
+            data-burn-treatment={model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key ? model.burnTreatment : undefined}
+            data-burn-duration={model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key ? burnDuration : undefined}
             type="button"
-            disabled={model.stage === 'preview' || model.stage === 'result'}
+            aria-hidden={(model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key) || model.burnedEntryKeys.includes(entry.key) || (model.variant === 'C' && (model.stage === 'preview' || model.stage === 'result') && model.selectedEntry?.key === entry.key)}
+            aria-disabled={model.stage !== 'items' || model.transitionPhase !== 'idle'}
+            tabindex={(model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key) || model.burnedEntryKeys.includes(entry.key) || (model.variant === 'C' && (model.stage === 'preview' || model.stage === 'result') && model.selectedEntry?.key === entry.key) ? -1 : undefined}
             onclick={(event) => model.onEntry(entry, (event.currentTarget as HTMLButtonElement).id)}
           >
-            {#if entry.art}<img src={entry.art} alt="" loading="lazy" />{:else}<span class="card-icon">{entry.icon}</span>{/if}
-            <strong>{entry.name}</strong>
-            <small>{entry.price} gold</small>
+            <span class="item-card-face">
+              {#if entry.art}<img src={entry.art} alt="" loading="lazy" />{:else}<span class="card-icon">{entry.icon}</span>{/if}
+              <strong>{entry.name}</strong>
+              <small>{entry.price} gold</small>
+            </span>
+            {#if model.transitionPhase === 'item-burn' && model.transitionKey !== entry.key}
+              <CategoryBurn treatment={model.burnTreatment} durationMs={burnDuration} />
+            {/if}
           </button>
         {/each}
         {#if !model.entries.length}<p class="empty-hand">This shelf is empty for now.</p>{/if}
@@ -100,16 +102,19 @@
 <style>
   .fan-stage { position: relative; z-index: 2; min-width: 0; padding: .2rem 0 1.2rem; }
   .fan-viewport { min-width: 0; overflow-x: auto; overflow-y: visible; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scrollbar-color: #806332 transparent; scrollbar-width: thin; padding: 1.7rem .35rem .7rem; transition: opacity .2s ease; }
-  .fan-viewport.ember-hand { overflow-y: hidden; padding-block: var(--fan-pad-block, 3.8rem); }
+  .fan-viewport.ember-hand { overflow-y: hidden; padding-block: var(--fan-pad-block, 4.2rem); }
   .fan-viewport.fade-hand { opacity: .32; }
   .fan-track { display: flex; width: max-content; min-width: 100%; align-items: end; justify-content: center; padding-inline: 1.6rem; }
   .fan-card { position: relative; flex: 0 0 124px; display: grid; min-height: 178px; margin-inline: -25px; padding: .7rem .58rem; align-content: center; justify-items: center; gap: .28rem; border: 1px solid rgba(211, 171, 96, .68); border-radius: 1rem; color: #f1e4c4; background: linear-gradient(155deg, #493018, #20160e 68%, #110d08); box-shadow: 0 10px 18px rgba(0,0,0,.36); text-align: center; transform: translate(var(--shift), var(--lift)) rotate(var(--tilt)); transform-origin: 50% 112%; transition: transform .19s ease, opacity .19s ease, box-shadow .19s ease, border-color .19s ease; scroll-snap-align: center; animation: card-deal .22s ease both; animation-delay: var(--deal-delay); }
   .category-fan .fan-card { flex-basis: 150px; min-height: 207px; margin-inline: -18px; }
   .category-card { display: block; padding: 0; border: 0; color: inherit; background: transparent; box-shadow: none; }
   .category-card-face { position: absolute; inset: 0; display: grid; min-height: 0; padding: .7rem .58rem; align-content: center; justify-items: center; gap: .28rem; border: 1px solid rgba(211, 171, 96, .68); border-radius: 1rem; color: #f1e4c4; background: linear-gradient(155deg, #493018, #20160e 68%, #110d08); box-shadow: 0 10px 18px rgba(0,0,0,.36); text-align: center; transform: none; transition: box-shadow .19s ease, border-color .19s ease; }
+  .item-card { display: block; padding: 0; border-color: transparent; background: transparent; box-shadow: none; }
+  .item-card-face { position: absolute; inset: 0; display: grid; padding: .7rem .58rem; align-content: center; justify-items: center; gap: .28rem; border: 1px solid rgba(211, 171, 96, .68); border-radius: 1rem; color: #f1e4c4; background: linear-gradient(155deg, #493018, #20160e 68%, #110d08); box-shadow: 0 10px 18px rgba(0,0,0,.36); text-align: center; transition: box-shadow .19s ease, border-color .19s ease; }
   .fan-card:hover, .fan-card:focus-visible { z-index: 6; border-color: #f2d080; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 14px 23px rgba(0,0,0,.48); transform: translate(var(--shift), calc(var(--lift) - .55rem)) rotate(0deg); }
   .category-card:hover, .category-card:focus-visible { border-color: transparent; box-shadow: none; }
   .category-card:hover .category-card-face, .category-card:focus-visible .category-card-face { border-color: #f2d080; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 14px 23px rgba(0,0,0,.48); }
+  .item-card:hover .item-card-face, .item-card:focus-visible .item-card-face { border-color: #f2d080; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 14px 23px rgba(0,0,0,.48); }
   .fan-card:focus-visible { outline: 2px solid #f1ce7d; outline-offset: 3px; }
   .fan-card.burn-dimmed { opacity: 0; filter: blur(1px); pointer-events: none; animation: none; }
   .category-card.burning { z-index: 8; pointer-events: none; }
@@ -120,6 +125,12 @@
   .category-card.burning:hover, .category-card.burning:focus-visible { transform: translate(var(--shift), var(--lift)) rotate(var(--tilt)); }
   .category-card.burning:focus-visible { outline: none; box-shadow: none; }
   .category-card.burning:hover .category-card-face, .category-card.burning:focus-visible .category-card-face { border-color: #f3a84e; box-shadow: 0 0 0 2px rgba(236, 197, 111, .28), 0 0 16px rgba(244, 125, 36, .5); }
+  .item-card.sibling-burning { z-index: 8; pointer-events: none; animation: none; transform: translate(var(--shift), var(--lift)) rotate(var(--tilt)); }
+  .item-card.sibling-burning .item-card-face { border-color: #f3a84e; animation: category-burn-away var(--burn-duration) ease-in forwards; }
+  .item-card.sibling-burning.burn-crawl .item-card-face { animation-name: category-crawl-away; }
+  .item-card.sibling-burning.burn-drip .item-card-face { animation-name: category-drip-away; }
+  .item-card.sibling-burning.burn-ash .item-card-face { animation-name: category-ash-away; }
+  .item-card.burned-item, .item-card.previewed-item { visibility: hidden; opacity: 0; pointer-events: none; animation: none; }
   .fan-card img { width: 58px; height: 66px; object-fit: contain; filter: drop-shadow(0 3px 5px rgba(0,0,0,.55)); }
   .fan-card strong { display: -webkit-box; max-width: 100%; overflow: hidden; font-size: .77rem; line-height: 1.12; line-clamp: 2; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .fan-card small { color: #dccda9; font-size: .67rem; }

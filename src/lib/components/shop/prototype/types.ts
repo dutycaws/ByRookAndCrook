@@ -3,12 +3,16 @@ import type { SceneRuntimeAsset } from '$lib/components/scene/ComposedScene.svel
 
 export type ShopVariant = 'A' | 'B' | 'C';
 export type BurnTreatment = 'crawl' | 'drip' | 'ash';
+export type BurnStyle = BurnTreatment | 'random';
+export type ShopTransitionPhase = 'idle' | 'category-burn' | 'item-burn' | 'item-zoom' | 'order-burn';
+export type PreviewBridgeTransform = { translateX: number; translateY: number; scaleX: number; scaleY: number };
 export const DEFAULT_BURN_TREATMENT: BurnTreatment = 'drip';
+export const DEFAULT_BURN_STYLE: BurnStyle = DEFAULT_BURN_TREATMENT;
 export const BURN_TREATMENTS = [
-  { value: 'crawl', name: 'Crawl', durationMs: 700, fanPaddingRem: 3.5, preview: '0.7s · snug' },
-  { value: 'drip', name: 'Drip', durationMs: 1000, fanPaddingRem: 3.8, preview: '1.0s · generous' },
-  { value: 'ash', name: 'Ash', durationMs: 1300, fanPaddingRem: 4.2, preview: '1.3s · airy' }
-] as const satisfies readonly { value: BurnTreatment; name: string; durationMs: number; fanPaddingRem: number; preview: string }[];
+  { value: 'crawl', name: 'Crawl', durationMs: 700, preview: '0.7s' },
+  { value: 'drip', name: 'Drip', durationMs: 1000, preview: '1.0s' },
+  { value: 'ash', name: 'Ash', durationMs: 1300, preview: '1.3s' }
+] as const satisfies readonly { value: BurnTreatment; name: string; durationMs: number; preview: string }[];
 export type ShopCategoryKey = 'seeds' | 'garden' | 'apiary';
 export type ShopStage = 'categories' | 'items' | 'preview' | 'result';
 
@@ -52,7 +56,13 @@ export type PrototypeModel = {
   result: string | null;
   burningCategory: ShopCategoryKey | null;
   leavingCategory: ShopCategory | null;
-  onBurnComplete: (category: ShopCategoryKey) => void;
+  transitionPhase: ShopTransitionPhase;
+  transitionKey: string | null;
+  transitionSequence: number;
+  burnedEntryKeys: string[];
+  previewBridgeTransform: PreviewBridgeTransform | null;
+  previewBridgeAnimating: boolean;
+  previewBridgeMeasuring: boolean;
   onCategory: (category: ShopCategoryKey, triggerId: string) => void;
   onEntry: (entry: ShopEntry, triggerId: string) => void;
   onBack: () => void;

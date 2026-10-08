@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite dev",
-    "prototype:shop": "vite --open /shop?variant=A",
+    "prototype:shop": "vite --open /shop",
     "brac-app:dev": "node --import tsx scripts/brac-app-dev.ts",
     "build": "vite build",
     "preview": "node build",
