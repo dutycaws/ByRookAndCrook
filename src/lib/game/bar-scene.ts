@@ -112,7 +112,7 @@ export function barSceneCameraForFocus(input: BarSceneCameraInput): BarSceneCame
   const fitScale = mobile ? viewportHeight / designHeight : viewportWidth / designWidth;
   if (!Number.isFinite(fitScale) || fitScale <= 0) return { scale: 1, x: 0, y: 0 };
 
-  const zoom = mobile ? 1.42 : 1.6;
+  const zoom = mobile ? 1.42 : 1.3;
   const areaOffsetX = mobile ? (viewportWidth - designWidth * fitScale) / 2 : 0;
   const visibleLeft = Math.max(0, -areaOffsetX / fitScale);
   const visibleTop = 0;

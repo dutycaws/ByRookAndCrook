@@ -24,6 +24,7 @@
 
   let selectedInstanceId = $state<string | null>(validInitialSelection());
   let focusedInstanceId = $state<string | null>(validInitialSelection());
+  let journalOpen = $state(false);
   let talkOpen = $state(false);
   let deckOpen = $state(false);
   let cardSelected = $state(false);
@@ -52,6 +53,7 @@
   $effect(() => {
     if (selectedInstanceId && !patrons.some((resident) => resident.instanceId === selectedInstanceId)) {
       selectedInstanceId = null;
+      journalOpen = false;
       talkOpen = false;
       deckOpen = false;
       cardSelected = false;
@@ -74,6 +76,7 @@
       talkOpen = false;
       deckOpen = false;
       cardSelected = false;
+      journalOpen = false;
     };
     window.addEventListener('popstate', syncBrowserSelection);
     return () => window.removeEventListener('popstate', syncBrowserSelection);
@@ -91,6 +94,7 @@
     if (interactionBlocked || !patrons.some((resident) => resident.instanceId === instanceId)) return;
     selectedInstanceId = instanceId;
     focusedInstanceId = instanceId;
+    journalOpen = false;
     talkOpen = false;
     deckOpen = false;
     cardSelected = false;
@@ -100,6 +104,7 @@
     if (interactionBlocked) return;
     const returningInstanceId = selectedInstanceId;
     selectedInstanceId = null;
+    journalOpen = false;
     talkOpen = false;
     deckOpen = false;
     cardSelected = false;
@@ -107,7 +112,7 @@
     await tick();
     if (!returningInstanceId) return;
     const actorKey = `patron:${returningInstanceId}`;
-    const target = [...document.querySelectorAll<HTMLButtonElement>('[data-scene-actor]')]
+    const target = [...document.querySelectorAll<HTMLButtonElement>('button[data-scene-actor]')]
       .find((button) => button.dataset.sceneActor === actorKey);
     target?.focus({ preventScroll: true });
   }
@@ -115,6 +120,7 @@
   async function toggleTalk() {
     if (interactionBlocked || !patron) return;
     const opening = !talkOpen;
+    journalOpen = false;
     talkOpen = opening;
     deckOpen = false;
     if (opening) {
@@ -126,6 +132,7 @@
   async function toggleDeck() {
     if (interactionBlocked || !patron) return;
     const opening = !deckOpen;
+    journalOpen = false;
     deckOpen = opening;
     talkOpen = false;
     if (opening) {
@@ -134,9 +141,27 @@
     }
   }
 
+  function setJournalOpen(open: boolean) {
+    journalOpen = open;
+    if (open) {
+      talkOpen = false;
+      deckOpen = false;
+    }
+  }
+
   async function handleEscape(event: KeyboardEvent) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return;
+
+    if (journalOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      journalOpen = false;
+      await tick();
+      document.querySelector<HTMLElement>('[data-bar-control="journal"]')?.focus({ preventScroll: true });
+      return;
+    }
+
     if (dialogueBusy) return;
 
     if (talkOpen || deckOpen) {
@@ -259,7 +284,7 @@
       <button class="text-button" type="button" disabled={pending} onclick={refreshBar}>Refresh the bar</button>
     </section>
   {:else}
-    <div class="bar-shell" class:has-patron={!!patron}>
+    <div class="bar-shell">
       <TavernScene
         {patrons}
         selected={patron}
@@ -280,7 +305,45 @@
         ondeck={toggleDeck}
         onclose={() => { closeError = null; closeDialogOpen = true; }}
         onkeepsake={openKeepsake}
-      />
+      >
+        {#snippet interaction()}
+          {#if patron && data.snapshot && journal}
+            <NpcDialogue
+              npcId={patron.npcId}
+              instanceId={patron.instanceId}
+              saveId={data.snapshot.save.id}
+              name={patron.name}
+              {journal}
+              stock={data.snapshot}
+              unavailable={data.dialogueUnavailable}
+              archiveHref={null}
+              embedded={true}
+              blocked={pending || !!closeCommand}
+              focusActive={true}
+              composerOpen={talkOpen}
+              deckOpen={deckOpen}
+              onbusychange={(busy) => (dialogueBusy = busy)}
+              oncomposerchange={(open) => {
+                talkOpen = open;
+                if (open) {
+                  journalOpen = false;
+                  deckOpen = false;
+                }
+              }}
+              ondeckchange={(open) => {
+                deckOpen = open;
+                if (open) {
+                  journalOpen = false;
+                  talkOpen = false;
+                }
+              }}
+              onselectionchange={(selected) => (cardSelected = selected)}
+            />
+          {:else if patron}
+            <p class="quiet-line" role="status">This resident’s journal is unavailable right now.</p>
+          {/if}
+        {/snippet}
+      </TavernScene>
 
       {#if patron}
         {@const snapshot = data.snapshot}
@@ -290,36 +353,10 @@
           history={snapshot.history}
           archiveHref={codexCursorHref}
           {codexHref}
-        >
-          {#snippet interaction()}
-            {#if journal}
-              <NpcDialogue
-                npcId={patron.npcId}
-                instanceId={patron.instanceId}
-                saveId={snapshot.save.id}
-                name={patron.name}
-                {journal}
-                stock={snapshot}
-                unavailable={data.dialogueUnavailable}
-                archiveHref={null}
-                embedded={true}
-                blocked={pending || !!closeCommand}
-                focusActive={true}
-                composerOpen={talkOpen}
-                deckOpen={deckOpen}
-                onbusychange={(busy) => (dialogueBusy = busy)}
-                oncomposerchange={(open) => (talkOpen = open)}
-                ondeckchange={(open) => (deckOpen = open)}
-                onselectionchange={(selected) => (cardSelected = selected)}
-              />
-              {#if !talkOpen && !deckOpen}
-                <p class="interaction-prompt">Choose <strong>Talk</strong> or <strong>Card Deck</strong> to start.</p>
-              {/if}
-            {:else}
-              <p class="quiet-line" role="status">This resident’s journal is unavailable right now.</p>
-            {/if}
-          {/snippet}
-        </ResidentInspector>
+          {journalOpen}
+          interactionOpen={talkOpen || deckOpen}
+          onjournalchange={setJournalOpen}
+        />
       {:else if patrons.length === 0}
         <p class="quiet-room" role="status">The common room is quiet. The scene’s keepsake slots still open their manager; past residents are in the Codex.</p>
       {/if}
@@ -362,8 +399,7 @@
 
 <style>
   .bar-page { width: min(100%, 100rem); margin-inline: auto; padding: clamp(.5rem, 1.8vw, 1.25rem); }
-  .bar-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0fr); column-gap: 0; row-gap: .9rem; min-width: 0; transition: grid-template-columns 220ms cubic-bezier(.2,.7,.2,1), column-gap 220ms ease; }
-  .bar-shell.has-patron { grid-template-columns: minmax(0, 1.72fr) minmax(18rem, .78fr); align-items: start; column-gap: clamp(1rem, 2.2vw, 2rem); }
+  .bar-shell { position: relative; min-width: 0; }
   .return-link:focus-visible, .text-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
   .quiet-room { margin: 0; padding: .3rem 0; color: #b9aa88; font-size: .9rem; }
   .codex-transfer { display: grid; justify-items: start; gap: .65rem; max-width: 40rem; margin: clamp(2rem, 12vh, 7rem) auto; color: #e8ddc4; }
@@ -377,11 +413,4 @@
   .dialog-copy { color: #d6c8a6; line-height: 1.5; }
   .full-button { width: 100%; }
   .primary-button:focus-visible, .inline-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
-  @media (max-width: 860px) {
-    .bar-shell { grid-template-columns: minmax(0, 1fr); column-gap: 0; row-gap: .8rem; }
-    .bar-shell.has-patron { grid-template-columns: minmax(0, 1fr); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .bar-shell { transition: none; }
-  }
 </style>

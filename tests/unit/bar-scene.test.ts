@@ -131,6 +131,23 @@ describe('Bar scene selection', () => {
     }
   });
 
+  it('keeps Torvin’s corrected head visible in the focused desktop scene', () => {
+    const target = { x: 730, y: 104, width: 590, height: 720 };
+    const viewport = { viewportWidth: 1100, viewportHeight: 618 };
+    const transform = barSceneCameraForFocus({
+      ...viewport,
+      designWidth: 1672,
+      designHeight: 941,
+      mobile: false,
+      target
+    });
+    const fitScale = viewport.viewportWidth / 1672;
+    const alphaHeadTop = target.y + 8 / 900 * target.height;
+    const sceneTop = transform.y + alphaHeadTop * transform.scale;
+
+    expect(sceneTop * fitScale).toBeGreaterThan(0);
+  });
+
   it('keeps the unfocused camera settled when there is no selected resident', () => {
     expect(barSceneCameraForFocus({
       viewportWidth: 1100, viewportHeight: 620, designWidth: 1672, designHeight: 941,

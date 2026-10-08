@@ -46,11 +46,15 @@
         offsetX: sceneFirstPhone ? (bounds.width - designSize.width * scale) / 2 : 0,
         offsetY: 0
       };
-      transformReady = false;
-      cancelAnimationFrame(readyFrame);
-      readyFrame = requestAnimationFrame(() => {
-        readyFrame = requestAnimationFrame(() => (transformReady = true));
-      });
+      // Keep the initial scene inert until its first measured transform has settled.
+      // Later resizes update the transform immediately, so temporarily inerting the
+      // scene would interrupt keyboard focus while the player returns to an actor.
+      if (!transformReady) {
+        cancelAnimationFrame(readyFrame);
+        readyFrame = requestAnimationFrame(() => {
+          readyFrame = requestAnimationFrame(() => (transformReady = true));
+        });
+      }
     });
     const updateVisibility = () => {
       visible = document.visibilityState === 'visible';

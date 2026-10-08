@@ -28,6 +28,7 @@
     focusedActorKey?: string | null;
     departingActorKey?: string | null;
     disabled?: boolean;
+    showSelectionHalo?: boolean;
     class?: string;
     onactorselect?: (actorKey: string) => void;
     onactorfocus?: (actorKey: string) => void;
@@ -43,6 +44,7 @@
     focusedActorKey = null,
     departingActorKey = null,
     disabled = false,
+    showSelectionHalo = true,
     class: className = '',
     onactorselect,
     onactorfocus,
@@ -89,6 +91,13 @@
   function actorArtStyle(actor: SceneActorDefinition) {
     return `left:${(actor.x - actor.hitBounds.x) / actor.hitBounds.width * 100}%;top:${(actor.y - actor.hitBounds.y) / actor.hitBounds.height * 100}%;`
       + `width:${actor.width / actor.hitBounds.width * 100}%;height:${actor.height / actor.hitBounds.height * 100}%;`;
+  }
+
+  function hitAreaStyle(actor: SceneActorDefinition) {
+    const points = actor.hitAreaPolygon;
+    return points
+      ? `clip-path:polygon(${points.map(([x, y]) => `${x * 100}% ${y * 100}%`).join(',')})`
+      : '';
   }
 
   function parallaxStyle(layer: SceneDecorDefinition | SceneActorDefinition) {
@@ -211,6 +220,8 @@
         {#if interactiveActors && !departing}
         <button
           class:selected={selectedActorKey === actor.key}
+          class:selection-halo={showSelectionHalo && selectedActorKey === actor.key}
+          class:polygon-hit={Boolean(actor.hitAreaPolygon)}
           class:departing={departing}
           class="scene-actor"
           type="button"
@@ -238,6 +249,9 @@
               <span class="actor-placeholder" aria-hidden="true" style={actorArtStyle(actor)}>{actorNames[actor.key] ?? actor.placeholder}</span>
             {/if}
           </span>
+          {#if actor.hitAreaPolygon}
+            <span class="scene-actor-hit-area" aria-hidden="true" style={hitAreaStyle(actor)}></span>
+          {/if}
         </button>
         {:else}
         <div
@@ -278,17 +292,19 @@
   .scene-image { pointer-events: none; transition: transform 120ms linear; }
   .scene-art-fallback { display: grid; place-items: center; color: #ead8a6; background: radial-gradient(circle at 50% 30%, #5b3b1c, #130d08 72%); }
   .scene-actors { position: absolute; inset: 0; z-index: 5; }
-  .scene-actor { padding: 0; border: 0; background: transparent; transition: transform 120ms linear; }
+  .scene-actor { padding: 0; border: 0; background: transparent; transition: transform 120ms linear; animation: scene-actor-arrive 450ms ease-out both; }
   button.scene-actor { cursor: pointer; }
+  .scene-actor.polygon-hit { pointer-events: none; }
+  .scene-actor-hit-area { position: absolute; inset: 0; display: block; cursor: pointer; pointer-events: auto; }
   .scene-actor-static { pointer-events: none; }
-  .scene-actor-visual { position: absolute; inset: 0; display: block; pointer-events: none; animation: scene-actor-arrive 450ms ease-out both; }
-  .scene-actor img { position: absolute; display: block; object-fit: contain; object-position: center bottom; pointer-events: none; }
+  .scene-actor-visual { position: absolute; inset: 0; display: block; pointer-events: none; }
+  .scene-actor img { position: absolute; display: block; max-width: none; object-fit: contain; object-position: center bottom; pointer-events: none; }
   .scene-actor:focus-visible { outline: 3px solid #f3c95f; outline-offset: 4px; }
-  .scene-actor.selected::after { content: ''; position: absolute; inset: 7%; border: 2px solid #f3c95f; border-radius: 50%; box-shadow: 0 0 18px #f3c95f99; }
+  .scene-actor.selection-halo::after { content: ''; position: absolute; inset: 7%; border: 2px solid #f3c95f; border-radius: 50%; box-shadow: 0 0 18px #f3c95f99; }
   .actor-placeholder { position: absolute; display: grid; place-items: center; padding: 1rem; color: #ead8a6; background: linear-gradient(140deg, #382816cc, #120c07cc); border: 1px dashed #c89435; font-family: 'Cinzel', serif; text-align: center; }
   .scene-actor.departing { pointer-events: none; }
-  .scene-actor.departing .scene-actor-visual { animation: scene-actor-depart 300ms ease-in both; }
-  @keyframes scene-actor-arrive { from { opacity: 0; transform: translate(var(--scene-entrance-x), var(--scene-entrance-y)); } to { opacity: 1; transform: translate(0, 0); } }
-  @keyframes scene-actor-depart { from { opacity: 1; transform: translate(0, 0); } to { opacity: 0; transform: translate(var(--scene-exit-x), var(--scene-exit-y)); } }
+  .scene-actor.departing { animation: scene-actor-depart 300ms ease-in both; }
+  @keyframes scene-actor-arrive { from { opacity: 0; translate: var(--scene-entrance-x) var(--scene-entrance-y); } to { opacity: 1; translate: 0 0; } }
+  @keyframes scene-actor-depart { from { opacity: 1; translate: 0 0; } to { opacity: 0; translate: var(--scene-exit-x) var(--scene-exit-y); } }
   @media (prefers-reduced-motion: reduce) { .scene-image, .scene-actor, .scene-actor-visual { transition: none; animation: none; } }
 </style>

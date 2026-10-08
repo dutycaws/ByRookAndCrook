@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Snippet } from 'svelte';
   import { PUBLIC_SUPABASE_URL } from '$env/static/public';
   import ComposedScene from '$lib/components/scene/ComposedScene.svelte';
   import { getSceneComposition, type SceneActorDefinition } from '$lib/presentation/scene-composition';
@@ -9,6 +10,7 @@
   import { TRINKET_ARTWORK, TRINKET_EFFECT_CATALOG, type OwnedTrinket, type TrinketSlot } from '$lib/game/trinkets';
   import BarStatusRail from './BarStatusRail.svelte';
   import TavernDeckBack from './TavernDeckBack.svelte';
+  import FloatingSurface from '$lib/components/ui/FloatingSurface.svelte';
 
   type Props = {
     patrons: Patron[];
@@ -23,6 +25,7 @@
     cardSelected?: boolean;
     composerOpen?: boolean;
     deckOpen?: boolean;
+    interaction: Snippet;
     onselect: (instanceId: string) => void;
     onfocus: (instanceId: string) => void;
     onback: () => void;
@@ -45,6 +48,7 @@
     cardSelected = false,
     composerOpen = false,
     deckOpen = false,
+    interaction,
     onselect,
     onfocus,
     onback,
@@ -144,6 +148,7 @@
       {selectedActorKey}
       {focusedActorKey}
       {disabled}
+      showSelectionHalo={false}
       onactorselect={(key) => { const instanceId = instanceForActor(key); if (instanceId) onselect(instanceId); }}
       onactorfocus={(key) => { const instanceId = instanceForActor(key); if (instanceId) onfocus(instanceId); }}
     />
@@ -208,6 +213,17 @@
   {:else}
     <a class="archive-link" href={archiveHref}>Past residents</a>
   {/if}
+
+  <FloatingSurface
+    as="section"
+    class="scene-interaction"
+    id="resident-conversation"
+    aria-label={selected ? `Interaction with ${selected.name}` : 'Resident interaction'}
+    hidden={!selected || (!composerOpen && !deckOpen)}
+    inert={!selected || (!composerOpen && !deckOpen)}
+  >
+    {@render interaction()}
+  </FloatingSurface>
 </div>
 
 <style>
@@ -225,7 +241,8 @@
   .scene-keepsake-art, .scene-keepsake-empty { position: relative; z-index: 1; display: grid; width: 100%; height: 100%; place-items: center; }
   .scene-keepsake-art img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .6)); }
   .scene-keepsake-empty { color: #dfbf72; font: 1.55rem Georgia, serif; }
-  .scene-actions { position: absolute; z-index: 14; grid-area: auto; right: .9rem; bottom: .9rem; left: .9rem; display: flex; align-items: end; justify-content: space-between; gap: .65rem; pointer-events: none; }
+  :global(.scene-interaction) { position: absolute; z-index: 16; right: .9rem; bottom: 4.15rem; width: min(clamp(20rem, 34vw, 34rem), calc(100% - 1.8rem)); max-height: min(52vh, calc(100% - 16rem), 460px); padding: .75rem .85rem; overflow: auto; }
+  .scene-actions { position: absolute; z-index: 14; right: .9rem; bottom: .9rem; left: .9rem; display: flex; align-items: end; justify-content: space-between; gap: .65rem; pointer-events: none; }
   .scene-actions button { min-height: 2.65rem; border: 1px solid #806631; padding: .55rem .8rem; color: #efdfb7; background: rgb(17 12 6 / .92); font: inherit; font-weight: 650; cursor: pointer; pointer-events: auto; transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease; }
   .scene-actions button:hover, .scene-actions button.active, .scene-actions button.has-selection { border-color: #d3ae57; background: rgb(61 43 17 / .95); }
   .scene-actions button:hover { transform: translateY(-1px); }
@@ -236,7 +253,8 @@
   .archive-link { position: absolute; z-index: 14; right: 1rem; bottom: 1rem; color: #f0d27a; font-size: .83rem; text-decoration: underline; text-underline-offset: .18em; }
   .archive-link:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
   @media (max-width: 820px) { .tavern-scene-stack .tavern-scene { aspect-ratio: 3 / 2; } }
-  @media (max-width: 620px) {
+  @media (max-width: 1000px) {
+    :global(.scene-interaction) { position: static; width: auto; max-height: none; margin-top: .55rem; padding: .55rem .65rem; overflow: visible; }
     .scene-actions { position: static; align-items: center; margin-top: .55rem; }
     .scene-actions button { min-height: 2.8rem; padding-inline: .65rem; font-size: .9rem; }
     .archive-link { position: static; justify-self: start; margin-top: .45rem; }
