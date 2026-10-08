@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "vite dev",
+    "prototype:bar": "vite --host 0.0.0.0 --port 3003 --strictPort",
     "brac-app:dev": "node --import tsx scripts/brac-app-dev.ts",
     "build": "vite build",
     "preview": "node build",

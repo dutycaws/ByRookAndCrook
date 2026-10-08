@@ -11,9 +11,19 @@
   import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
   import TavernScene from '$lib/components/tavern/TavernScene.svelte';
   import TrinketCollection from '$lib/components/tavern/TrinketCollection.svelte';
+  import BarInteractionPrototype from './prototype/BarInteractionPrototype.svelte';
+  import type { BarPrototypeVariant } from './prototype/types';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
+
+  function parsePrototypeVariant(value: string | null): BarPrototypeVariant | null {
+    return value === 'A' || value === 'B' || value === 'C' ? value : null;
+  }
+
+  let prototypeVariant = $state<BarPrototypeVariant | null>(
+    import.meta.env.DEV ? parsePrototypeVariant(page.url.searchParams.get('variant')) : null
+  );
 
   function validInitialSelection() {
     const requested = data.selectedNpcInstanceId;
@@ -150,6 +160,7 @@
   }
 
   async function handleEscape(event: KeyboardEvent) {
+    if (prototypeVariant) return;
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return;
 
@@ -275,6 +286,16 @@
       <a class="primary-button inline-button" href={codexHref}>Open the Codex</a>
       <a class="return-link" href="/bar">Return to the common room</a>
     </section>
+  {:else if prototypeVariant && data.snapshot}
+    <BarInteractionPrototype
+      variant={prototypeVariant}
+      patrons={data.snapshot.patrons}
+      trinkets={data.snapshot.trinkets?.collection ?? []}
+      day={data.snapshot.save.currentDay}
+      gold={data.snapshot.save.gold}
+      archiveHref={codexHref}
+      onvariantchange={(variant) => (prototypeVariant = variant)}
+    />
   {:else if !data.snapshot}
     <section class="empty-state bar-empty-state" aria-labelledby="bar-empty-title">
       <p class="eyebrow">The tavern is waiting</p>
@@ -364,6 +385,7 @@
   {/if}
 </main>
 
+{#if !prototypeVariant}
 <Dialog id="close-tavern" title="End evening?" bind:open={closeDialogOpen}>
   <p class="dialog-copy">Your regulars will follow their intentions overnight. You can close without crafting today.</p>
   {#if closeError}
@@ -396,6 +418,7 @@
     />
   {/if}
 </Dialog>
+{/if}
 
 <style>
   .bar-page { width: min(100%, 100rem); margin-inline: auto; padding: clamp(.5rem, 1.8vw, 1.25rem); }
