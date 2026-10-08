@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../src/lib/database.types';
 import { commitGardenCommand, getSnapshot } from '../../src/lib/server/game';
-import { createTestPlayer, getLocalSupabase } from '../helpers/local-supabase';
+import { createTestPlayer, getLocalSupabase, getLocalTestDatabaseContainer } from '../helpers/local-supabase';
 import { assertRpcSuccess } from '../helpers/rpc-diagnostics';
 
 const createdUsers: Array<{ admin: SupabaseClient<Database>; userId: string }> = [];
@@ -33,7 +33,7 @@ describe('Shop stock RPC', () => {
 
     const beforeRace = (await getSnapshot(player.client))!;
     execFileSync('docker', [
-      'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
       '-c', `update public.tavern_saves set gold=100 where id='${beforeRace.save.id}'`
     ], { stdio: 'pipe' });
     const fundedRace = (await getSnapshot(player.client))!;

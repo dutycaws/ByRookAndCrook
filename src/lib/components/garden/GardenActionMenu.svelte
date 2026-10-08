@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
   import type { GameSnapshot, GardenCell, GardenCommandKind, GardenCommandPayload, GardenCommandPreview } from '$lib/game/contracts';
+  import { gardenCommandPreviewFeedback } from '$lib/game/garden-feedback';
   import GardenProvisionPanel from './GardenProvisionPanel.svelte';
 
   type Pane = 'root' | 'plant' | 'water' | 'amend' | 'move' | 'remove' | 'clover' | 'compost' | 'apiary' | 'preview';
@@ -37,6 +38,7 @@
   let lastSelected = $state<string | null>(null);
 
   const seeds = $derived(snapshot.garden?.inventory.filter((item) => item.kind === 'seed' && item.quantity > 0) ?? []);
+  const selectedSeed = $derived(seeds.find((seed) => seed.itemKey === (seedItemKey || seeds[0]?.itemKey)) ?? null);
   const amendments = $derived(snapshot.garden?.inventory.filter((item) => item.kind === 'amendment' && item.quantity > 0) ?? []);
   const targets = $derived(batchMode ? [...batchTargetIds] : selected ? [selected.id] : []);
   const compostableBatches = $derived(snapshot.ingredients.filter((batch) => {
@@ -192,6 +194,12 @@
       </div>
     {:else if pane === 'plant'}
       <h2>Plant</h2><form method="POST" action="?/preview" use:enhance={previewAction('plant')}><label>Seed<select bind:value={seedItemKey} aria-label="Seed">{#each seeds as seed}<option value={seed.itemKey}>{seed.name} · {seed.quantity}</option>{/each}</select></label><button type="submit" data-garden-command="plant" disabled={!!pending || !seeds.length}>Preview planting</button></form>
+      {#if selectedSeed?.guidance?.length}
+        <section class="seed-guidance" data-seed-guidance aria-label="Seed growing guidance">
+          <p class="eyebrow">Before you plant</p>
+          <ul>{#each selectedSeed.guidance as note}<li>{note}</li>{/each}</ul>
+        </section>
+      {/if}
     {:else if pane === 'water'}
       <h2>Water</h2><p class="help">{targets.length} plot{targets.length === 1 ? '' : 's'} selected.</p><label>Amount <output>{waterDose}</output><input aria-label="Water amount" type="range" min="1" max="40" step="1" bind:value={waterDose} /></label><div class="batch-row">{#if !batchMode}<button type="button" class="plain" data-batch-start="water" onclick={() => startBatch('water')}>Add plots</button>{:else}<button type="button" class="plain" onclick={oncancelbatch}>Cancel selection</button>{/if}<form method="POST" action="?/preview" use:enhance={previewAction('water')}><button type="submit" data-garden-command="water" disabled={!!pending}>Preview water</button></form></div>
     {:else if pane === 'amend'}
@@ -208,7 +216,31 @@
       <GardenProvisionPanel {snapshot} {selected} />
     {:else if pane === 'preview' && preview}
       {@const currentPreview = preview}
-      <h2>Confirm {label(currentPreview.commandKind)}</h2><p class="help">Authoritative preview · revision {currentPreview.basedOnRevision}</p>{#if 'cellIds' in (previewPayload ?? {})}<p class="help" data-garden-preview-targets>Targets: {(previewPayload as { cellIds: string[] }).cellIds.map((id) => snapshot.cells.find((cell) => cell.id === id)?.layoutKey ?? id).join(', ')}</p>{/if}<dl>{#each Object.entries(currentPreview).filter(([key]) => !['commandKind','basedOnRevision','rulesVersion','normalizedPayload','targets','canCommit'].includes(key)) as [key,value]}<div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>{/each}</dl>{#if currentPreview.canCommit === false}<p class="error" role="alert">This cannot be completed with the current resources.</p>{:else}<form method="POST" action="?/command" use:enhance={commit}><button type="submit" data-garden-confirm={currentPreview.commandKind} disabled={!!pending}>{pending?.startsWith('commit:') ? 'Applying…' : pendingAction && messageError ? `Retry ${label(currentPreview.commandKind)}` : label(currentPreview.commandKind)}</button></form>{/if}
+      {@const previewFeedback = gardenCommandPreviewFeedback(currentPreview, {
+        cellLabel: (cellId) => snapshot.cells.find((cell) => cell.id === cellId)?.layoutKey,
+        itemName: (itemKey) => snapshot.garden?.inventory.find((item) => item.itemKey === itemKey)?.name
+      })}
+      {@const gardenPreview = ['plant', 'water', 'amend'].includes(currentPreview.commandKind)}
+      <h2>Confirm {label(currentPreview.commandKind)}</h2>
+      <p class="help">{previewFeedback.summary}</p>
+      {#if 'cellIds' in (previewPayload ?? {})}
+        <p class="help" data-garden-preview-targets>Targets: {(previewPayload as { cellIds: string[] }).cellIds.map((id) => snapshot.cells.find((cell) => cell.id === id)?.layoutKey ?? id).join(', ')}</p>
+      {/if}
+      {#if gardenPreview}
+        {#each previewFeedback.details as detail}
+          <p class="preview-detail">{detail}</p>
+        {/each}
+        {#if previewFeedback.resourceWarning && currentPreview.canCommit !== false}
+          <p class="preview-warning" role="status">{previewFeedback.resourceWarning}</p>
+        {/if}
+      {:else}
+        <dl>{#each Object.entries(currentPreview).filter(([key]) => !['commandKind','basedOnRevision','rulesVersion','normalizedPayload','targets','before','after','warning','warningCount','canCommit','requiresAuthoritativeValidation'].includes(key)) as [key,value]}<div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd></div>{/each}</dl>
+      {/if}
+      {#if currentPreview.canCommit === false}
+        <p class="error" role="alert">{previewFeedback.resourceWarning ?? 'This cannot be completed with the current resources.'}</p>
+      {:else}
+        <form method="POST" action="?/command" use:enhance={commit}><button type="submit" data-garden-confirm={currentPreview.commandKind} disabled={!!pending}>{pending?.startsWith('commit:') ? 'Applying…' : pendingAction && messageError ? `Retry ${label(currentPreview.commandKind)}` : label(currentPreview.commandKind)}</button></form>
+      {/if}
     {/if}
     {#if message}<p class:error={messageError} class="feedback" role={messageError ? 'alert' : 'status'}>{message}</p>{/if}
     </div>
@@ -220,5 +252,5 @@
   .menu-card { box-sizing: border-box; position: relative; z-index: 1; max-height: min(75vh, calc(100vh - 1rem), 30rem); overflow-y: auto; padding: .6rem; border: 1px solid #b1863c; border-radius: 4px; background: linear-gradient(135deg,#241708f7,#100a05fa); box-shadow: 0 12px 30px #000b, inset 0 0 0 1px #523516; }
   .parent-pane { position:absolute; right:calc(100% + 10px); top:0; z-index:0; display:grid; gap:.3rem; width:8.5rem; padding:.55rem; border:1px solid #956c2b; border-radius:4px; background:#160d06f5; box-shadow:0 8px 20px #0009; } .parent-pane .eyebrow { margin:0 0 .2rem; } .parent-pane button { min-height:29px; border:1px solid #5e421d; color:#d9bf80; background:#211407; font:inherit; font-size:.65rem; text-align:left; cursor:pointer; } .parent-pane button:hover,.parent-pane button:focus-visible { background:#624518; outline:1px solid #f9e1a0; } .flipped .parent-pane { right:auto; left:calc(100% + 10px); }
   header { display:flex; align-items:center; min-height: 24px; gap:.4rem; border-bottom:1px solid #5c401d; } .eyebrow { margin-right:auto; color:#cda54e; font-size:.62rem; letter-spacing:.1em; } .dismiss,.back,.plain { border:0; color:#dcc384; background:transparent; cursor:pointer; } .dismiss { font-size:1.2rem; } .back { font-size:.7rem; }
-  h2 { margin:.55rem 0; color:#f3d991; font-size:.92rem; } .menu-actions { display:grid; gap:.35rem; } .menu-actions > button,.garden-action-menu form > button { display:flex; justify-content:space-between; width:100%; min-height:38px; padding:.45rem .55rem; border:1px solid #765324; color:#ead39b; background:#201407; font:inherit; font-size:.72rem; cursor:pointer; text-align:left; } .menu-actions button:hover,.menu-actions button:focus-visible,.garden-action-menu form > button:hover,.garden-action-menu form > button:focus-visible { background:#5b3f16; outline:1px solid #ffe9a8; outline-offset:1px; } .harvest-action :global(button) { width:100%; } form,label { display:grid; gap:.45rem; } label { color:#c9ad70; font-size:.7rem; } .check { display:flex; align-items:center; } select,input { min-height:34px; border:1px solid #765324; color:#f0dca8; background:#100a05; } output { float:right; color:#f4dc96; } input[type='range'] { width:100%; accent-color:#c6963d; } .help { margin:.35rem 0 .6rem; color:#b29c72; font-family:Georgia,serif; font-size:.76rem; line-height:1.35; } .batch-row { display:flex; align-items:center; justify-content:space-between; gap:.4rem; margin-top:.55rem; } .batch-row form { flex:1; } .batch-row .plain { padding:.4rem; font-family:inherit; font-size:.67rem; text-decoration:underline; } dl { display:grid; gap:.3rem; margin:.45rem 0 .7rem; } dl div { display:flex; justify-content:space-between; gap:.5rem; font-size:.65rem; } dt { color:#a89161; } dd { max-width:58%; margin:0; overflow-wrap:anywhere; text-align:right; } .feedback,.error { margin:.55rem 0 0; padding:.4rem; border:1px solid #5d6939; color:#d4e0ad; font-family:Georgia,serif; font-size:.72rem; } .error { border-color:#9d4d3b; color:#ffd0ba; } .mobile { width:min(19rem, calc(100vw - 1rem)); } .mobile .parent-pane { display:none; }
+  h2 { margin:.55rem 0; color:#f3d991; font-size:.92rem; } .menu-actions { display:grid; gap:.35rem; } .menu-actions > button,.garden-action-menu form > button { display:flex; justify-content:space-between; width:100%; min-height:38px; padding:.45rem .55rem; border:1px solid #765324; color:#ead39b; background:#201407; font:inherit; font-size:.72rem; cursor:pointer; text-align:left; } .menu-actions button:hover,.menu-actions button:focus-visible,.garden-action-menu form > button:hover,.garden-action-menu form > button:focus-visible { background:#5b3f16; outline:1px solid #ffe9a8; outline-offset:1px; } .harvest-action :global(button) { width:100%; } form,label { display:grid; gap:.45rem; } label { color:#c9ad70; font-size:.7rem; } .check { display:flex; align-items:center; } select,input { min-height:34px; border:1px solid #765324; color:#f0dca8; background:#100a05; } output { float:right; color:#f4dc96; } input[type='range'] { width:100%; accent-color:#c6963d; } .help { margin:.35rem 0 .6rem; color:#b29c72; font-family:Georgia,serif; font-size:.76rem; line-height:1.35; } .preview-detail,.preview-warning { margin:.25rem 0; padding:.35rem .45rem; border-left:2px solid #7f642e; color:#d6c493; font-family:Georgia,serif; font-size:.7rem; line-height:1.35; } .preview-warning { border-color:#b17832; color:#f0cb84; } .seed-guidance { display:grid; gap:.3rem; margin-top:.65rem; padding-top:.55rem; border-top:1px solid #4f3a1c; } .seed-guidance .eyebrow { margin:0; } .seed-guidance ul { display:grid; gap:.25rem; margin:0; padding-left:1rem; color:#c4b084; font-family:Georgia,serif; font-size:.7rem; line-height:1.35; } .batch-row { display:flex; align-items:center; justify-content:space-between; gap:.4rem; margin-top:.55rem; } .batch-row form { flex:1; } .batch-row .plain { padding:.4rem; font-family:inherit; font-size:.67rem; text-decoration:underline; } dl { display:grid; gap:.3rem; margin:.45rem 0 .7rem; } dl div { display:flex; justify-content:space-between; gap:.5rem; font-size:.65rem; } dt { color:#a89161; } dd { max-width:58%; margin:0; overflow-wrap:anywhere; text-align:right; } .feedback,.error { margin:.55rem 0 0; padding:.4rem; border:1px solid #5d6939; color:#d4e0ad; font-family:Georgia,serif; font-size:.72rem; } .error { border-color:#9d4d3b; color:#ffd0ba; } .mobile { width:min(19rem, calc(100vw - 1rem)); } .mobile .parent-pane { display:none; }
 </style>

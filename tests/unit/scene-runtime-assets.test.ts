@@ -24,6 +24,14 @@ describe('local layered-scene asset contract', () => {
     expect(sceneRuntimeAssetPublicUrl('bar-lira', 'http://127.0.0.1:57321')).toBe(
       'http://127.0.0.1:57321/storage/v1/object/public/prototype-runtime-media/scenes/bar/v1/bar-lira.webp'
     );
+    expect(sceneRuntimeAssetPublicUrl('bar-lira', 'http://127.0.0.1:58321')).toBe(
+      'http://127.0.0.1:58321/storage/v1/object/public/prototype-runtime-media/scenes/bar/v1/bar-lira.webp'
+    );
+    expect(sceneRuntimeAssetPublicUrl('bar-lira', 'https://localhost:8443')).toBe(
+      'https://localhost:8443/storage/v1/object/public/prototype-runtime-media/scenes/bar/v1/bar-lira.webp'
+    );
+    expect(sceneRuntimeAssetPublicUrl('bar-lira', 'http://example.com:58321')).toBeNull();
+    expect(sceneRuntimeAssetPublicUrl('bar-lira', 'ftp://127.0.0.1:58321')).toBeNull();
   });
 
   it('declares exact design-plane derivatives with real-alpha foreground and sprites', () => {

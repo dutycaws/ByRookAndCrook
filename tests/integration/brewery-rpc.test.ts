@@ -118,7 +118,7 @@ describe('brewery RPC', () => {
     ]);
     expect(finished.brewery.socialCards).toEqual([]);
     expect(finished.brewery.intentCards).toContainEqual(
-      expect.objectContaining({ cardKey: 'resolve', tier: 'exceptional', sourceBeverageId: finished.brewery.beverages[0].id })
+      expect.objectContaining({ cardKey: 'flirt', tier: 'exceptional', sourceBeverageId: finished.brewery.beverages[0].id })
     );
 
     const advanceInput = {

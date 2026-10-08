@@ -3,6 +3,7 @@ import { parseFrozenSocialEncounterContext, parseSocialEncounterProposal } from 
 import { SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION, createSettlementProvider as createSettlementProviderBase } from '../../src/lib/server/evolving-world';
 import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
 import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+import { captureMockedNpcProviderRequests } from '../helpers/capture-npc-provider-payloads';
 
 const promptRelease=fixturePromptRelease;
 function createSettlementProvider(config: Record<string,string|undefined>) {
@@ -28,14 +29,14 @@ function contextRaw(liraCapabilities=['deceive','share_gossip']) {
 function proposal(mode:'honest'|'fabricate'='honest', informational=false) { return {version:'social-encounter-v1',templateKey:'road-rumor',participantResidentIds:[lira,torvin],privateCommunicativeIntents:informational ? [] : [{speakerResidentId:lira,recipientResidentId:torvin,mode,message:mode==='fabricate' ? 'Lira privately floats a misleading trail rumor.' : 'Lira privately shares the smoke report.'}],privateExchangeSummary:informational ? 'They exchange a quiet greeting and leave matters unchanged.' : 'Lira privately summarizes the smoke report for Torvin.',evidenceIds:['evidence-smoke'],causalExplanation:'The encounter relies only on the frozen smoke report.',relationshipEffects:informational ? [] : [{recipientResidentId:torvin,sourceResidentId:lira,axis:'trust',delta:1}],gossipBeliefAdditions:informational ? [] : [{recipientResidentId:torvin,sourceResidentId:lira,sourceBeliefId:beliefId,sourceEvidenceId:'evidence-smoke',originalClaimFingerprint:fingerprint,content:'Smoke rose by the northern pass.',confidence:56,provenance:[{sourceKind:'direct_evidence',sourceId:'evidence-smoke'},{sourceKind:'gossip',sourceId:beliefId,speakerNpcId:liraNpc}]}],publicSummary:informational ? null : 'Lira and Torvin compared reports by the northern road.'}; }
 function completed(value:unknown) { return new Response(JSON.stringify({status:'completed',input_tokens:13,usage:{input_tokens:13,output_tokens:5},output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]}),{status:200,headers:{'content-type':'application/json'}}); }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { captureMockedNpcProviderRequests('world-social-encounter-provider.test.ts'); vi.unstubAllGlobals(); });
 
 describe('social encounter provider stages', () => {
   it('validates honest and attributed gossip proposals against the direct frozen context', async () => {
     const requests:any[]=[];
     vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => { requests.push(JSON.parse(String(init.body))); return completed({proposalJson:JSON.stringify(proposal())}); }));
     const result=await createSettlementProvider({OPENAI_API_KEY:'test-key'}).generate('social_encounter_proposer',contextRaw(),new AbortController().signal);
-    expect(result).toMatchObject({value:proposal(),model:'gpt-5.6-terra',promptVersion:SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION,usage:{input:13,output:5}});
+    expect(result).toMatchObject({value:proposal(),model:'gpt-6-luna',promptVersion:SOCIAL_ENCOUNTER_SETTLEMENT_PROMPT_VERSION,usage:{input:13,output:5}});
     expect(result.value).toMatchObject({gossipBeliefAdditions:[{sourceBeliefId:beliefId,sourceEvidenceId:'evidence-smoke',originalClaimFingerprint:fingerprint}]});
     expect(requests[0].text.format).toMatchObject({name:'world_social_encounter_proposer',strict:true,schema:{additionalProperties:false,required:['proposalJson'],properties:{proposalJson:{maxLength:12000}}}});
   });
@@ -55,7 +56,7 @@ describe('social encounter provider stages', () => {
     const requests:any[]=[]; let call=0;
     vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => { if(String(_url).endsWith('/input_tokens')) return new Response(JSON.stringify({input_tokens:13}),{status:200}); requests.push(JSON.parse(String(init.body))); return completed(call++ === 0 ? {decision:'repair',instructions:[{code:'gossip_attribution',path:'gossipBeliefAdditions'}]} : {decision:'repair',instructions:[{code:'private_summary',path:'privateExchangeSummary'}]}); }));
     const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'}); const payload={context:contextRaw(),proposal:proposal()};
-    await expect(provider.generate('social_encounter_critic',payload,new AbortController().signal)).resolves.toMatchObject({value:{decision:'repair',instructions:[{code:'gossip_attribution',path:'gossipBeliefAdditions'}]},model:'gpt-5.6-luna'});
+    await expect(provider.generate('social_encounter_critic',payload,new AbortController().signal)).resolves.toMatchObject({value:{decision:'repair',instructions:[{code:'gossip_attribution',path:'gossipBeliefAdditions'}]},model:'gpt-6-luna'});
     await expect(provider.generate('social_encounter_final_critic',payload,new AbortController().signal)).rejects.toMatchObject({code:'provider_malformed'});
     expect(requests[0].text.format.schema).toMatchObject({additionalProperties:false,required:['decision','instructions'],properties:{decision:{enum:['accept','reject','repair']},instructions:{minItems:0,maxItems:4,items:{additionalProperties:false,required:['code','path'],properties:{code:{enum:expect.arrayContaining(['gossip_attribution'])},path:{enum:expect.arrayContaining(['gossipBeliefAdditions'])}}}}}});
     expect(requests[0].text.format.schema).not.toHaveProperty('allOf');
@@ -70,7 +71,7 @@ describe('social encounter provider stages', () => {
     vi.stubGlobal('fetch',vi.fn(async (_url, init:RequestInit) => { requests.push(JSON.parse(String(init.body))); return completed({proposalJson:JSON.stringify(proposal('honest',true))}); }));
     const context=contextRaw(); const result=await createSettlementProvider({OPENAI_API_KEY:'test-key'}).generate('social_encounter_repair',{context,proposal:proposal(),instructions:[{code:'public_projection',path:'publicSummary'}]},new AbortController().signal);
     expect(result.value).toMatchObject({privateCommunicativeIntents:[],relationshipEffects:[],gossipBeliefAdditions:[],publicSummary:null});
-    expect(requests[0].model).toBe('gpt-5.6-terra');
+    expect(requests[0].model).toBe('gpt-6-luna');
     expect(requests[0].input[0].content).toContain('may not introduce participants');
   });
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { GameSnapshot } from '$lib/game/contracts';
+  import type { GameSnapshot, GardenState } from '$lib/game/contracts';
 
   let { snapshot }: { snapshot: GameSnapshot } = $props();
 
@@ -24,6 +24,13 @@
         : []);
   }
 
+  function forecastClues(day: GardenState['forecast'][number]): string[] {
+    const rain = day.rainfall >= 18 ? 'Steady rain' : day.rainfall >= 7 ? 'Passing showers' : day.rainfall > 0 ? 'A little rain' : 'Dry skies';
+    const drying = day.drying >= 10 ? 'Soil may dry quickly' : day.drying <= 4 ? 'Soil may hold moisture' : 'Gentle drying';
+    const light = day.lightDelta >= 5 ? 'Brighter light' : day.lightDelta <= -10 ? 'Less light' : 'Changing light';
+    return [rain, drying, light];
+  }
+
   let unlocked = $derived(snapshot.cells.filter((cell) => cell.unlocked !== false));
   let latestEvents = $derived(reportEvents(snapshot.garden?.latestReport));
 </script>
@@ -44,7 +51,7 @@
           <div>
             <strong>Day {day.dayNumber}</strong>
             <span>{day.name}</span>
-            <small>Rain {day.rainfall} · Drying {day.drying >= 0 ? '+' : ''}{day.drying} · Light {day.lightDelta >= 0 ? '+' : ''}{day.lightDelta}</small>
+            <small>{forecastClues(day).join(' · ')}</small>
           </div>
         {/each}
       </div>

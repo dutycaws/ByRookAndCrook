@@ -1,11 +1,31 @@
 <script lang="ts">
+  import { BURN_TREATMENTS } from '$lib/card-effects';
   import type { PageProps } from './$types';
   let { data, form }: PageProps = $props();
   let profile: any = $derived(data.community.profile as any);
 </script>
 
+<svelte:head>
+  <title>Profile settings · By Rook and Crook</title>
+</svelte:head>
+
 <main class="page-shell community-page">
-  <header><p class="eyebrow">Keeper account</p><h1>Community profile</h1><p>Your public author details and audience preference.</p></header>
+  <header><p class="eyebrow">Keeper account</p><h1>Profile</h1><p>Manage your gameplay preferences and community profile.</p></header>
+  <form method="POST" action="?/saveCardEffects" class="community-card form-stack">
+    <h2 id="gameplay-preferences-title">Gameplay preferences</h2>
+    <p>Choose a card burn effect. Random picks one effect per burn action and keeps it consistent across that action.</p>
+    <label for="card-burn-style">Card burn effect</label>
+    <select id="card-burn-style" name="cardBurnStyle" value={form?.cardBurnStyle ?? data.cardBurnStyle} aria-describedby="card-burn-style-help">
+      {#each BURN_TREATMENTS as treatment}
+        <option value={treatment.value}>{treatment.name} · {treatment.preview}</option>
+      {/each}
+      <option value="random">Random · each burn action</option>
+    </select>
+    <small id="card-burn-style-help">Saved to your account. Used whenever cards burn away.</small>
+    {#if form?.cardEffectsError}<p class="community-notice" role="alert">{form.cardEffectsError}</p>{/if}
+    {#if form?.cardEffectsMessage}<p class="community-notice" role="status">{form.cardEffectsMessage}</p>{/if}
+    <button class="primary-action">Save gameplay preferences</button>
+  </form>
   {#if form?.message}<p class="community-notice">{form.message}</p>{/if}
   <form method="POST" action="?/save" class="community-card form-stack">
     <label>Display name <input name="displayName" value={profile.displayName} minlength="2" maxlength="40" required /></label>

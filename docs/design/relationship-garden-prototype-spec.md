@@ -82,15 +82,17 @@ Provide a short automatic care history for each plot: planting, care actions suc
 
 The history retention length, specific clue vocabulary, and severity thresholds are proposed tuning details rather than settled player-facing requirements.
 
-## Model efficiency and evaluation
+## Model efficiency and spend tracking
 
-This is a separate requested engineering validation workstream, not an additional player-facing gameplay pillar.
+Updated user decision, October 4, 2026: try GPT-6 Luna only for all text-model calls first. Do not run a Sol comparison or add an automatic Sol fallback. Image and embedding models are outside this text-model change.
 
-Prompt deduplication is a separate implementation effort already reported complete locally. Its reported reduction is approximately twenty-four percent of assembled prompt text bytes, not measured token or billing savings. Adoption of the prepared prompt release and live evaluation remain separate tasks.
+Keep the current prompts, context limits, processing stages, and game-rule validation for this trial. Do not combine this routing change with prompt-release adoption, context redesign, call consolidation, or stage removal. Previously completed prompt deduplication remains separate; its text-byte reduction is not measured token savings.
 
-Compare GPT-6 Luna for text stages with GPT-6 Sol for character and creative stages plus GPT-6 Luna for supporting stages. Keep validation stages initially. Evaluate cost per successful interaction, latency, retries, refusals, accepted plan changes, promise attribution, hidden-motive handling, and quest continuity. Do not infer model quality solely from per-token price.
+Use ordinary gameplay and existing test paths for the initial trial. Do not build a new fixture suite or synthetic benchmark program for token efficiency. Record the model actually used, token usage (including cached tokens where available), cumulative spend, errors/retries, and noticeable NPC behavior issues. Use existing telemetry where possible and keep any additional recording lightweight. Label estimated costs honestly when provider billing is unavailable.
 
-Use deterministic or mocked coverage for most regression cases, with a small bounded live suite and a Lira quest-flow evaluation. The previously reported roughly five dollars covered several attempts, not one complete playthrough. No live-call budget was set by the user. Any outstanding approval restriction on transmitting evaluation payloads must be resolved before live calls.
+There is no user-imposed spending cap or automatic spend cutoff: the user explicitly removed the earlier one-dollar cap and requested spend tracking instead. This authorizes the scoped Luna trial, not unrelated or indefinite API workload. Simpler phrasing is acceptable; preserve personality, memory accuracy, hidden motives, promise ownership, and quest behavior. If important behavior fails, record the evidence and review the next change rather than silently switching models.
+
+Any applicable unresolved payload-export approval restriction still applies; report it if it prevents a live run. The scoped plan requires no additional model bake-off, new fixture suite, or cost-optimization redesign before trying Luna and recording results.
 
 ## Acceptance scenarios
 
@@ -107,6 +109,6 @@ Use deterministic or mocked coverage for most regression cases, with a small bou
 
 Deferred: free furnishing placement, construction projects for quest rewards, unique author-programmed effects, new condition-specific plant art, diagnostic tool progression, dedicated friendship scenes, additional relationship quests, and departed NPC returns.
 
-The delivery plan must propose numerical stage thresholds, per-interaction relationship change limits, multi-day repair accounting, supported failure conditions, setback count and warning rules, trinket strengths and effect timing, arrival selection, and care-history retention. These are proposed implementation defaults until reviewed; this document does not silently treat them as approved values.
+The implementing agent may choose and document reversible numerical stage thresholds, per-interaction relationship limits, multi-day repair accounting, supported failure-condition parameters, setback counts and warning rules, trinket strengths and effect timing, arrival selection details, and care-history retention without waiting for further approval. Preserve the approved product behavior; material changes to that behavior require clarification.
 
 This specification is ready for an implementation gap review. Completion means demonstrating the acceptance scenarios as one coherent prototype, not merely adding isolated fields or prompts.

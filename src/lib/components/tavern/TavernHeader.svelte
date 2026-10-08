@@ -2,7 +2,12 @@
   import { page } from '$app/state';
   import CapabilityMenu from '$lib/components/community/CapabilityMenu.svelte';
 
-  let { userEmail, capabilities = [] }: { userEmail: string; capabilities?: string[] } = $props();
+  let {
+    userEmail,
+    capabilities = [],
+    codexUnreadCount = 0
+  }: { userEmail: string; capabilities?: string[]; codexUnreadCount?: number } = $props();
+
   const primary = [
     { href: '/garden', label: 'Garden', icon: 'leaf' },
     { href: '/bar', label: 'Bar', icon: 'mug' },
@@ -11,6 +16,10 @@
     { href: '/shop', label: 'Shop', icon: 'satchel' },
     { href: '/codex', label: 'Codex', icon: 'codex' }
   ] as const;
+
+  function hrefFor(item: typeof primary[number]): string {
+    return item.icon === 'codex' && codexUnreadCount > 0 ? '/codex?section=chronicle' : item.href;
+  }
 </script>
 
 <header class="game-header">
@@ -22,8 +31,14 @@
   </a>
 
   <nav aria-label="Tavern areas">
-    {#each primary as item}
-      <a href={item.href} class:active={page.url.pathname === item.href} aria-current={page.url.pathname === item.href ? 'page' : undefined}>
+    {#each primary as item (item.href)}
+      <a
+        href={hrefFor(item)}
+        class:active={page.url.pathname === item.href}
+        aria-current={page.url.pathname === item.href ? 'page' : undefined}
+        aria-label={item.icon === 'codex' && codexUnreadCount > 0 ? `Codex, ${codexUnreadCount} unread tavern updates` : undefined}
+        data-codex-nav={item.icon === 'codex' ? '' : undefined}
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           {#if item.icon === 'leaf'}
             <path d="M19.5 3.5C12 4 7.5 7.5 6.5 14.5M5 21c1-6.5 5.5-11 12-13M7 15c-2.5 0-4.5-1.2-5-3.5 3.5-.7 6 .2 7.5 2.5M12 10c-.3-3.4 1.1-6 4-7.5 1.4 3.3.7 6.1-2 8.5" />
@@ -39,7 +54,12 @@
             <path d="M4 13c0-3 2.2-5 5-5 .8-3 5.7-3.2 7 0 2.3.3 4 2.2 4 4.5V19H4zM8 12v4M12 10v6M16 12v4" />
           {/if}
         </svg>
-        <span>{item.label}</span>
+        <span class="nav-label-group">
+          <span>{item.label}</span>
+          {#if item.icon === 'codex' && codexUnreadCount > 0}
+            <span class="codex-unread" aria-hidden="true">{codexUnreadCount > 99 ? '99+' : codexUnreadCount}</span>
+          {/if}
+        </span>
       </a>
     {/each}
   </nav>
@@ -55,3 +75,9 @@
     </details>
   </div>
 </header>
+
+<style>
+  .nav-label-group { display: inline-flex; align-items: center; gap: .42rem; }
+  .codex-unread { display: inline-grid; min-width: 1.2rem; height: 1.2rem; place-items: center; border: 1px solid #d5aa54; border-radius: 999px; padding: 0 .25rem; color: #25190a; background: #e1bd68; font: 700 .68rem/1 'Cinzel', Georgia, serif; letter-spacing: 0; }
+  @media (prefers-reduced-motion: reduce) { :global(.game-header nav a) { transition: none; } }
+</style>

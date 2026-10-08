@@ -11,6 +11,7 @@ import { DIALOGUE_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-regis
 import type { PromptRegistryService } from '$lib/server/prompt-registry/service';
 import { retrieveNpcMemoryEvidence, type NpcMemoryEvidenceClient } from '$lib/server/npc-memory/retrieval';
 import type { NpcMemoryEmbeddingProvider } from '$lib/server/npc-memory/contracts';
+import { isEmptySocialTurn } from '$lib/game/relationships';
 
 export class DialogueError extends Error { constructor(message:string,public status=500,public code='DIALOGUE_FAILED'){super(message);} }
 export type DialogueRuntimeOptions = { maxCalls?:number; rounds?:number; deadlineMs?:number; observability?: AiObservabilitySink; promptRegistry?: PromptRegistryService; embeddingProvider?: NpcMemoryEmbeddingProvider };
@@ -167,6 +168,7 @@ export function parseInput(value:unknown): DialogueInput {
   if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !uuid.test(v.npcId??'') || typeof v.message!=='string'
     || !v.message.trim() || v.message.length>2000 || !Number.isSafeInteger(v.expectedConversationSequence) || v.expectedConversationSequence<0
     || v.interactionVersion!=='dialogue-v2' || v.intentCardId!=null&&!uuid.test(v.intentCardId)
+    || v.intentCardId!=null&&v.offering!=null
     || v.offering!=null&&(!['food','beverage'].includes(v.offering.kind)||!uuid.test(v.offering.itemId)))
     throw new DialogueError('Enter a message and choose an available intent card or offering.',400,'INVALID_INPUT');
   return {turnId:v.turnId,npcId:v.npcId,message:v.message,expectedConversationSequence:v.expectedConversationSequence,
@@ -180,6 +182,7 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
   const fallback:Decision={stance:'clarify',reaction:0,subject:'quest',evidence:'',intention:null};
   if(!matchesSchema(raw,schemas.deliberate)) return fallback;
   const d=structuredClone(raw) as Decision;
+  if(d.reaction>0&&isEmptySocialTurn(message)) d.reaction=0;
   if(d.reaction && (d.evidence.length<3||!message.includes(d.evidence))) d.reaction=0;
   const p=d.intention;
   const activeIntention=base.intention;

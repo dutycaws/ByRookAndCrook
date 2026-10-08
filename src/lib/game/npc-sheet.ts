@@ -1,4 +1,5 @@
 import type { ActionKind, Approach, Intention } from './dialogue';
+import { TRINKET_ARTWORK, TRINKET_EFFECT_CATALOG, type NpcInitialQuestTrinket, type TrinketCatalogId, type SupportedTrinketArtworkId } from './trinkets';
 
 export type NpcId = string;
 export type NpcVersionId = string;
@@ -15,7 +16,9 @@ export interface NpcSupportingEntity { id: string; namespace: string; name: stri
 export interface NpcRelationship { subject: { kind: 'entity'; entityId: string } | { kind: 'npc'; npcId: NpcId }; description: string; trustThreshold: number; }
 export interface NpcFact { id: string; category: 'history' | 'relationship' | 'goal' | 'secret'; text: string; trustThreshold: number; entityRefs: string[]; npcRefs: NpcId[]; }
 export interface NpcPlanStep { action: ActionKind; approach: Approach; }
-export interface NpcMilestone { id: string; title: string; outcome: string; motivation: string; constraints: string[]; allowedTargets: string[]; difficulty: number; successNews: string; nonSuccessNews: string; retiredTargets: string[]; permanentLoss: null | { kind: 'dead' | 'departed'; warning: string; outcome: string; }; startingPlan: NpcPlanStep[] | null; }
+export interface NpcQuestFailureCondition { type: 'attempt_allowance_exhausted'; maxAttempts: number; }
+export interface NpcSetbackWarning { afterSetbacks: number; text: string; }
+export interface NpcMilestone { id: string; title: string; outcome: string; motivation: string; constraints: string[]; allowedTargets: string[]; difficulty: number; successNews: string; nonSuccessNews: string; retiredTargets: string[]; permanentLoss: null | { kind: 'dead' | 'departed'; warning: string; outcome: string; }; failureCondition?: NpcQuestFailureCondition | null; warnings?: NpcSetbackWarning[] | null; startingPlan: NpcPlanStep[] | null; }
 export interface NpcPersonalityDimension { key: string; label: string; negativeAnchor: string; positiveAnchor: string; initialValue: number; volatility: number; ordinaryChangeThreshold: number; definingRuptureThreshold: number; }
 export interface NpcPersonalityCollection { kind: NpcProfileEntryKind; maximumEntries: number; }
 export interface NpcInitialPersonalityEntry { id: string; kind: NpcProfileEntryKind; text: string; core: boolean; active: true; }
@@ -25,7 +28,7 @@ export interface NpcSheet {
   appearance: { physicalAppearance: string; silhouette: string; palette: string[]; attire: string; notableFeatures: string; mood: string; };
   personality: { dimensions: NpcPersonalityDimension[]; collections: NpcPersonalityCollection[]; initialEntries: NpcInitialPersonalityEntry[]; };
   lore: { entities: NpcSupportingEntity[]; npcReferences: NpcId[]; relationships: NpcRelationship[]; facts: NpcFact[]; };
-  skills: Record<(typeof NPC_SKILLS)[number], number>; campaign: { durableGoal: string; milestones: NpcMilestone[]; };
+  skills: Record<(typeof NPC_SKILLS)[number], number>; campaign: { durableGoal: string; initialQuestTrinket?: NpcInitialQuestTrinket | null; milestones: NpcMilestone[]; };
 }
 export interface NpcSheetIssue { path: string; code: string; message: string; }
 
@@ -38,6 +41,37 @@ const profileKinds = new Set<string>(NPC_PROFILE_ENTRY_KINDS);
 const issue = (issues: NpcSheetIssue[], path: string, code: string, message: string) => issues.push({ path, code, message });
 const text = (value: unknown, min: number, max: number): value is string => typeof value === 'string' && value.trim().length >= min && value.trim().length <= max;
 const textList = (value: unknown, min = 1, max = 10): value is string[] => Array.isArray(value) && value.length >= min && value.length <= max && value.every((entry) => text(entry, 1, 200));
+const trinketCatalogIds = new Set(Object.keys(TRINKET_EFFECT_CATALOG));
+const trinketArtworkIds = new Set(Object.keys(TRINKET_ARTWORK));
+
+function validateInitialQuestTrinket(value: unknown, issues: NpcSheetIssue[]): void {
+  if (value === undefined || value === null) return;
+  const reward = value as Partial<NpcInitialQuestTrinket> & Record<string, unknown>;
+  const path = 'campaign.initialQuestTrinket';
+  if (!value || typeof value !== 'object' || Array.isArray(value)) { issue(issues, path, 'trinket_reward', 'The initial quest reward must select a supported trinket.'); return; }
+  if (Object.keys(reward).some((key) => !['catalogId', 'artworkId', 'name', 'dedication'].includes(key))) issue(issues, path, 'trinket_reward_authority', 'Trinket authors may choose only a catalog effect, supported artwork, name, and personal dedication.');
+  if (!trinketCatalogIds.has(String(reward.catalogId)) || !trinketArtworkIds.has(String(reward.artworkId)) || !text(reward.name, 1, 80) || !text(reward.dedication, 20, 500)) {
+    issue(issues, path, 'trinket_reward', 'A trinket needs a supported catalog effect and artwork, a 1–80 character name, and a 20–500 character dedication.');
+  }
+}
+
+function validateFailureGate(milestone: Partial<NpcMilestone>, path: string, issues: NpcSheetIssue[]): void {
+  const condition = milestone.failureCondition;
+  if (condition === undefined || condition === null) {
+    if (milestone.warnings != null && (!Array.isArray(milestone.warnings) || milestone.warnings.length > 0)) issue(issues, `${path}.warnings`, 'failure_gate', 'Setback warnings require a supported authored failure condition.');
+    return;
+  }
+  if (condition.type !== 'attempt_allowance_exhausted' || !Number.isInteger(condition.maxAttempts) || condition.maxAttempts < 3 || condition.maxAttempts > 10) {
+    issue(issues, `${path}.failureCondition`, 'failure_condition', 'Choose attempt_allowance_exhausted with an attempt allowance from 3–10.');
+    return;
+  }
+  if (milestone.permanentLoss === null) issue(issues, `${path}.failureCondition`, 'failure_outcome', 'A permanent failure condition requires an authored permanent-loss outcome.');
+  const warnings = milestone.warnings;
+  if (!Array.isArray(warnings) || warnings.length !== condition.maxAttempts - 1 || warnings.some((warning, index) =>
+    !Number.isInteger(warning?.afterSetbacks) || warning.afterSetbacks !== index + 1 || warning.afterSetbacks >= condition.maxAttempts || !text(warning.text, 20, 500))) {
+    issue(issues, `${path}.warnings`, 'failure_warnings', `Provide one distinct, 20–500 character warning after each of the first ${condition.maxAttempts - 1} setbacks.`);
+  }
+}
 
 /** Normalized values are only used for collision detection; persisted keys stay strict ASCII. */
 export function normalizeNpcProfileKey(value: string): string { return value.trim().toLocaleLowerCase('en-US').replace(/-/g, '_'); }
@@ -101,7 +135,9 @@ export function validateNpcSheet(value: unknown): NpcSheetIssue[] {
   if (!Array.isArray(lore?.relationships) || lore.relationships.length > 20) issue(issues, 'lore.relationships', 'relationship_count', 'Use at most 20 relationships.'); else lore.relationships.forEach((entry, index) => { const entityId = entry?.subject?.kind === 'entity' ? entry.subject.entityId : null; const validSubject = entityId !== null ? slug.test(entityId) && !!lore?.entities?.some((entity) => entity.id === entityId) : entry?.subject?.kind === 'npc' && uuid.test(entry.subject.npcId); if (!validSubject || !text(entry.description, 1, 200) || !Number.isInteger(entry.trustThreshold) || entry.trustThreshold < 0 || entry.trustThreshold > 100) issue(issues, `lore.relationships.${index}`, 'relationship', 'Relationships require a valid subject, description, and trust threshold from 0–100.'); });
   if (!Array.isArray(lore?.facts) || lore.facts.length > 20) issue(issues, 'lore.facts', 'fact_count', 'Use at most 20 facts.'); else { const factIds = new Set<string>(); lore.facts.forEach((entry, index) => { if (!slug.test(entry.id) || factIds.has(entry.id) || !['history', 'relationship', 'goal', 'secret'].includes(entry.category) || !text(entry.text, 1, 1000) || !Number.isInteger(entry.trustThreshold) || entry.trustThreshold < 0 || entry.trustThreshold > 100 || !Array.isArray(entry.entityRefs) || entry.entityRefs.length > 20 || entry.entityRefs.some((id) => !lore?.entities?.some((entity) => entity.id === id)) || !Array.isArray(entry.npcRefs) || entry.npcRefs.length > 20 || entry.npcRefs.some((id) => !uuid.test(id))) issue(issues, `lore.facts.${index}`, 'fact', 'Facts require a unique slug, supported category, bounded references, text, and trust threshold from 0–100.'); factIds.add(entry.id); }); }
   const skills = sheet.skills as NpcSheet['skills'] | undefined; const values = NPC_SKILLS.map((key) => skills?.[key]); if (values.some((score) => !Number.isInteger(score) || Number(score) < 0 || Number(score) > 4)) issue(issues, 'skills', 'skill_range', 'Every skill must be an integer from 0–4.'); else if (values.reduce<number>((sum, score) => sum + Number(score), 0) !== 10 || !values.includes(4) || !values.some((score) => Number(score) <= 1)) issue(issues, 'skills', 'skill_budget', 'Skills must total 10, include one 4, and include one score of 1 or below.');
-  const campaign = sheet.campaign as Partial<NpcSheet['campaign']> | undefined; if (!text(campaign?.durableGoal, 20, 300)) issue(issues, 'campaign.durableGoal', 'text_length', 'The durable goal must be 20–300 characters.'); if (!Array.isArray(campaign?.milestones) || campaign.milestones.length < 2 || campaign.milestones.length > 10) issue(issues, 'campaign.milestones', 'milestone_count', 'Campaigns require 2–10 ordered milestones.'); else campaign.milestones.forEach((milestone, index) => { const path = `campaign.milestones.${index}`; if (!slug.test(milestone.id) || !text(milestone.title, 1, 80) || !text(milestone.outcome, 20, 500) || !text(milestone.motivation, 20, 500) || !textList(milestone.constraints, 1, 10) || !textList(milestone.allowedTargets, 1, 20) || !Number.isInteger(milestone.difficulty) || milestone.difficulty < 0 || milestone.difficulty > 4 || !text(milestone.successNews, 20, 500) || !text(milestone.nonSuccessNews, 20, 500) || !Array.isArray(milestone.retiredTargets) || milestone.retiredTargets.length > 20 || milestone.retiredTargets.some((target) => !milestone.allowedTargets.includes(target))) issue(issues, path, 'milestone', 'Milestone content, targets, difficulty, news, and retired targets must satisfy the campaign contract.'); if (milestone.permanentLoss !== null && (!['dead', 'departed'].includes(milestone.permanentLoss?.kind) || !text(milestone.permanentLoss?.warning, 20, 500) || !text(milestone.permanentLoss?.outcome, 20, 500))) issue(issues, `${path}.permanentLoss`, 'permanent_loss', 'Permanent loss requires a type, visible warning, and reviewed outcome.'); validatePlan(milestone.startingPlan, `${path}.startingPlan`, index === 0, issues); });
+  const campaign = sheet.campaign as Partial<NpcSheet['campaign']> | undefined;
+  validateInitialQuestTrinket(campaign?.initialQuestTrinket, issues);
+  if (!text(campaign?.durableGoal, 20, 300)) issue(issues, 'campaign.durableGoal', 'text_length', 'The durable goal must be 20–300 characters.'); if (!Array.isArray(campaign?.milestones) || campaign.milestones.length < 2 || campaign.milestones.length > 10) issue(issues, 'campaign.milestones', 'milestone_count', 'Campaigns require 2–10 ordered milestones.'); else campaign.milestones.forEach((milestone, index) => { const path = `campaign.milestones.${index}`; if (!slug.test(milestone.id) || !text(milestone.title, 1, 80) || !text(milestone.outcome, 20, 500) || !text(milestone.motivation, 20, 500) || !textList(milestone.constraints, 1, 10) || !textList(milestone.allowedTargets, 1, 20) || !Number.isInteger(milestone.difficulty) || milestone.difficulty < 0 || milestone.difficulty > 4 || !text(milestone.successNews, 20, 500) || !text(milestone.nonSuccessNews, 20, 500) || !Array.isArray(milestone.retiredTargets) || milestone.retiredTargets.length > 20 || milestone.retiredTargets.some((target) => !milestone.allowedTargets.includes(target))) issue(issues, path, 'milestone', 'Milestone content, targets, difficulty, news, and retired targets must satisfy the campaign contract.'); if (milestone.permanentLoss !== null && (!['dead', 'departed'].includes(milestone.permanentLoss?.kind) || !text(milestone.permanentLoss?.warning, 20, 500) || !text(milestone.permanentLoss?.outcome, 20, 500))) issue(issues, `${path}.permanentLoss`, 'permanent_loss', 'Permanent loss requires a type, visible warning, and reviewed outcome.'); validateFailureGate(milestone, path, issues); validatePlan(milestone.startingPlan, `${path}.startingPlan`, index === 0, issues); });
   return issues;
 }
 

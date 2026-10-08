@@ -24,6 +24,28 @@ export interface BarScenePatronPlacement {
   hitBounds: { x: number; y: number; width: number; height: number };
 }
 
+export interface BarSceneCameraTarget {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BarSceneCameraTransform {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+export interface BarSceneCameraInput {
+  viewportWidth: number;
+  viewportHeight: number;
+  designWidth: number;
+  designHeight: number;
+  mobile: boolean;
+  target: BarSceneCameraTarget | null;
+}
+
 function stablePatronIds(instanceIds: readonly string[]): string[] {
   return [...new Set(instanceIds)].sort((left, right) => left.localeCompare(right));
 }
@@ -69,10 +91,53 @@ export function reconcileBarSceneSelection(
   return {
     selectedKey: previous.selectedKey && keys.includes(previous.selectedKey)
       ? previous.selectedKey
-      : keys[0],
+      : null,
     focusedKey: previous.focusedKey && keys.includes(previous.focusedKey)
       ? previous.focusedKey
       : keys[0]
+  };
+}
+
+/**
+ * Focuses a resident without exposing empty space beyond the scene plane.
+ * Translation stays in design-plane coordinates, then composes with the
+ * responsive AreaScene crop and shared parallax transform.
+ */
+export function barSceneCameraForFocus(input: BarSceneCameraInput): BarSceneCameraTransform {
+  const { viewportWidth, viewportHeight, designWidth, designHeight, mobile, target } = input;
+  if (!target || viewportWidth <= 0 || viewportHeight <= 0 || designWidth <= 0 || designHeight <= 0) {
+    return { scale: 1, x: 0, y: 0 };
+  }
+
+  const fitScale = mobile ? viewportHeight / designHeight : viewportWidth / designWidth;
+  if (!Number.isFinite(fitScale) || fitScale <= 0) return { scale: 1, x: 0, y: 0 };
+
+  const zoom = mobile ? 1.42 : 1.3;
+  const areaOffsetX = mobile ? (viewportWidth - designWidth * fitScale) / 2 : 0;
+  const visibleLeft = Math.max(0, -areaOffsetX / fitScale);
+  const visibleTop = 0;
+  const visibleWidth = viewportWidth / fitScale;
+  const visibleHeight = viewportHeight / fitScale;
+  const focusX = target.x + target.width / 2;
+  const focusY = target.y + target.height * 0.32;
+  const destinationX = visibleLeft + visibleWidth * 0.46;
+  const destinationY = visibleTop + visibleHeight * (mobile ? 0.3 : 0.32);
+  const desiredX = destinationX - focusX * zoom;
+  const desiredY = destinationY - focusY * zoom;
+  // Keep the whole scene plane over the frame so camera motion never reveals
+  // the black stage around it, including when the target is near an edge.
+  const minX = visibleLeft + visibleWidth - designWidth * zoom;
+  const maxX = visibleLeft;
+  const minY = visibleTop + visibleHeight - designHeight * zoom;
+  const maxY = visibleTop;
+  const clamp = (value: number, min: number, max: number) => min <= max
+    ? Math.max(min, Math.min(max, value))
+    : (min + max) / 2;
+
+  return {
+    scale: zoom,
+    x: clamp(desiredX, minX, maxX),
+    y: clamp(desiredY, minY, maxY)
   };
 }
 

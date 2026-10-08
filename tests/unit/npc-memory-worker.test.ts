@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assembleNpcMemoryContext, canonicalJson, sha256Hex, utf8Bytes } from '$lib/server/npc-memory/context';
-import { drainNpcMemoryQueue, runNpcMemoryClaim } from '$lib/server/npc-memory/worker';
+import { drainNpcMemoryQueue, runNpcMemoryClaim, runNpcMemorySummaryJobById } from '$lib/server/npc-memory/worker';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const fence = '22222222-2222-4222-8222-222222222222';
@@ -34,7 +34,7 @@ describe('npc memory worker', () => {
   const v2Refs = () => v2Load().leaves.map(({ ordinal, sourceKind, sourceId, sourceVersion, sourceHash, ledgerSequence }) => ({ ordinal, sourceKind, sourceId, sourceVersion, sourceHash, ledgerSequence }));
   const finalized = (fallback: boolean) => ({ status: 'completed', fallback, contentHash: 'd'.repeat(64) });
   const prepared = () => { const body: any = { model: 'fixture', store: false, max_output_tokens: 4096, text: { format: { schema: { properties: { summary: { maxLength: 12000 }, citations: { maxItems: 16 } } } } } }; Object.freeze(body); return Object.freeze({ body, model: 'fixture', inputTokens: 1, maxSummaryChars: 12000, maxCitations: 16 }); };
-  const v2Runtime = (provider = { preflight: vi.fn(async () => ({ prepared: prepared(), inputTokens: 1, durationMs: 1 })), generate: vi.fn(async () => ({ result: { version: 'npc-memory-summary-v2', mode: 'model', summary: 'safe', citations: [], protectedRefs: v2Refs(), leaves: v2Refs() }, model: 'fixture', inputTokens: 1, outputTokens: 1, durationMs: 1 })) }) => ({ processorKind: 'summary' as const, processorVersion: 'npc-memory-summary-v2', loadSource: async () => ({ records: [] }), summaryV2: provider, summaryV2Model: 'fixture', summaryV2Signal: signal, resolvePinnedPrompt: async (releaseId: string) => ({ releaseId, revisionId: v2Plan().prompt.revisionId, key: 'npc_memory.summary.v2', contractId: 'npc-memory-summary-v2', contractHash: 'f279a108f11e212c77e4876521e9ee47092171b6d2a820d83a245d57a3c64e03', body: 'Pinned prompt' }) });
+  const v2Runtime = (provider: any = { preflight: vi.fn(async () => ({ prepared: prepared(), inputTokens: 1, durationMs: 1 })), generate: vi.fn(async () => ({ result: { version: 'npc-memory-summary-v2', mode: 'model', summary: 'safe', citations: [], protectedRefs: v2Refs(), leaves: v2Refs() }, model: 'fixture', inputTokens: 1, outputTokens: 1, cachedInputTokens: 0, cacheWriteInputTokens: 1, durationMs: 1 })) }) => ({ processorKind: 'summary' as const, processorVersion: 'npc-memory-summary-v2', loadSource: async () => ({ records: [] }), summaryV2: provider, summaryV2Model: 'fixture', summaryV2Signal: signal, resolvePinnedPrompt: async (releaseId: string) => ({ releaseId, revisionId: v2Plan().prompt.revisionId, key: 'npc_memory.summary.v2', contractId: 'npc-memory-summary-v2', contractHash: 'f279a108f11e212c77e4876521e9ee47092171b6d2a820d83a245d57a3c64e03', body: 'Pinned prompt' }) });
 
   it('prepares before remote token preflight, then dispatches immediately before its one generation', async () => {
     const calls: string[] = [];
@@ -43,6 +43,28 @@ describe('npc memory worker', () => {
     await expect(runNpcMemoryClaim(api, v2Claim(), v2Runtime(provider))).resolves.toEqual({ status: 'completed', artifacts: 1, fallback: false });
     expect(calls).toEqual(['world_npc_memory_summary_plan_v2','world_npc_memory_summary_recover_dispatch','world_npc_memory_summary_load','world_npc_memory_summary_prepare_dispatch','world_npc_memory_summary_mark_dispatched','world_npc_memory_summary_record_dispatch_result','world_npc_memory_summary_finalize_v2']);
     expect(provider.preflight).toHaveBeenCalledTimes(1); expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims exactly one selected summary-v2 job and passes its fenced claim to the existing worker', async () => {
+    const api = { rpc: vi.fn(async (name: string) => {
+      const data: any = name === 'world_npc_memory_claim_selected' ? v2Claim()
+        : name === 'world_npc_memory_summary_plan_v2' ? v2Plan()
+          : name === 'world_npc_memory_summary_recover_dispatch' ? { directive: 'fallback_only', reason: 'no_prior_receipt' }
+            : name === 'world_npc_memory_summary_load' ? v2Load()
+              : name === 'world_npc_memory_summary_prepare_dispatch' ? { state: 'prepared', idempotencyKey: 'key', identityHash: 'b'.repeat(64), requestHash: 'c'.repeat(64) }
+                : name === 'world_npc_memory_summary_finalize_v2' ? finalized(false) : {};
+      return { data, error: null };
+    }) };
+    await expect(runNpcMemorySummaryJobById(api, id, v2Runtime())).resolves.toEqual({ status: 'completed', artifacts: 1, fallback: false });
+    expect(api.rpc).toHaveBeenNthCalledWith(1, 'world_npc_memory_claim_selected', { p_job_id: id });
+    expect(api.rpc).not.toHaveBeenCalledWith('world_npc_memory_claim', expect.anything());
+  });
+
+  it('rejects malformed selected IDs or incompatible worker profiles before any claim RPC', async () => {
+    const api = client();
+    await expect(runNpcMemorySummaryJobById(api, 'not-a-uuid', v2Runtime())).resolves.toEqual({ status: 'failed', errorCode: 'claim_malformed' });
+    await expect(runNpcMemorySummaryJobById(api, id, runtime())).resolves.toEqual({ status: 'failed', errorCode: 'worker_misconfigured' });
+    expect(api.rpc).not.toHaveBeenCalled();
   });
 
   it('never resends prepared or dispatched recovery states and finalizes extractively', async () => {
@@ -93,9 +115,10 @@ describe('npc memory worker', () => {
     const api = { rpc: vi.fn(async (name: string) => ({ data: name === 'world_npc_memory_summary_plan_v2' ? v2Plan() : name === 'world_npc_memory_summary_recover_dispatch' ? { directive: 'fallback_only', reason: 'no_prior_receipt' } : name === 'world_npc_memory_summary_load' ? v2Load() : name === 'world_npc_memory_summary_prepare_dispatch' ? { state: 'prepared', idempotencyKey: 'key', identityHash: 'b'.repeat(64), requestHash: 'c'.repeat(64) } : name === 'world_npc_memory_summary_finalize_v2' ? finalized(false) : {}, error: null })) };
     const rt = { ...v2Runtime(), recordTelemetry: (event: Record<string, unknown>) => { events.push(event); } };
     await expect(runNpcMemoryClaim(api, v2Claim(), rt)).resolves.toMatchObject({ status: 'completed' });
-    const allowed = ['batchOrdinal', 'durationMs', 'errorCode', 'inputTokens', 'jobId', 'model', 'outputTokens', 'planHash', 'promptKey', 'promptReleaseId', 'promptRevisionId', 'status'];
+    const allowed = ['batchOrdinal', 'cacheWriteInputTokens', 'cachedInputTokens', 'durationMs', 'errorCode', 'inputTokens', 'jobId', 'model', 'outputTokens', 'planHash', 'promptKey', 'promptReleaseId', 'promptRevisionId', 'status'];
     expect(events).toHaveLength(2);
     for (const event of events) expect(Object.keys(event).sort()).toEqual(expect.arrayContaining(['jobId', 'planHash', 'promptKey', 'promptReleaseId', 'promptRevisionId', 'status']));
+    expect(events[0]).toMatchObject({ inputTokens: 1, cachedInputTokens: 0, cacheWriteInputTokens: 1 });
     for (const event of events) expect(Object.keys(event).every((key) => allowed.includes(key))).toBe(true);
     const serialized = JSON.stringify(events);
     expect(serialized).not.toContain('Pinned prompt');

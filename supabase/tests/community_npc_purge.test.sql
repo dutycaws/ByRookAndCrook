@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(31);
+select plan(38);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000061','purge-player@example.test','authenticated','authenticated'),
@@ -108,6 +108,12 @@ create temporary table pg_temp.mature_prepared as
 create temporary table pg_temp.mature_terminal as
   select * from private.world_resolve_quest_step((select quest_id from pg_temp.mature_prepared),5,0);
 grant select on pg_temp.mature_terminal to service_role;
+create temporary table pg_temp.mature_keepsake as
+  select id,active_slot from private.world_owned_trinkets
+  where source_instance_id=(select instance_id from pg_temp.mature_world);
+grant select on pg_temp.mature_keepsake to authenticated;
+select is((select count(*) from pg_temp.mature_keepsake),1::bigint,
+  'the mature resident earns the first authored-quest keepsake before purge');
 update public.tavern_saves set current_day=6,world_phase='settling'
   where id=(select save_id from pg_temp.mature_world);
 set local role service_role;
@@ -126,6 +132,30 @@ grant select on pg_temp.mature_transition_claim to service_role;
 update public.tavern_saves set world_phase='open'
   where id=(select save_id from pg_temp.mature_world);
 
+create temporary table pg_temp.mature_swap_result(result jsonb);
+grant insert,select on pg_temp.mature_swap_result to authenticated;
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000061';
+insert into pg_temp.mature_swap_result(result)
+select public.npc_swap_trinket(
+  (select save_id from pg_temp.mature_world),
+  (select id from pg_temp.mature_keepsake),
+  (select active_slot from pg_temp.mature_keepsake),
+  '18100000-0000-4000-8000-000000000064',
+  (select revision from public.tavern_saves where id=(select save_id from pg_temp.mature_world))
+);
+select is((select result->>'status' from pg_temp.mature_swap_result),'unchanged',
+  'the earned keepsake can receive a normal swap receipt before purge');
+reset role;
+select throws_ok(format(
+  'delete from private.world_quest_trinket_grant_receipts where source_instance_id=%L',
+  (select instance_id from pg_temp.mature_world)
+),'55000',null,'quest keepsake grant receipts reject ordinary deletion');
+select throws_ok(format(
+  'delete from private.world_trinket_swap_receipts where trinket_id=%L',
+  (select id from pg_temp.mature_keepsake)
+),'55000',null,'keepsake swap receipts reject ordinary deletion');
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000061';
@@ -136,6 +166,9 @@ select is(public.npc_share_view((select share_token from pg_temp.mature_share)):
 select lives_ok($$select public.npc_set_mature_preference(false,false)$$,'mature opt-out can be repeated safely');
 reset role;
 select is((select count(*) from private.world_npc_instances where id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal deletes the world resident');
+select is((select count(*) from private.world_owned_trinkets where source_instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal deletes the authored keepsake copy');
+select is((select count(*) from private.world_quest_trinket_grant_receipts where source_instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal deletes grant receipts that copied the authored keepsake text');
+select is((select count(*) from private.world_trinket_swap_receipts where trinket_id=(select id from pg_temp.mature_keepsake)),0::bigint,'mature removal deletes swap receipts tied to the purged keepsake');
 select is((select count(*) from private.world_resident_package_pins where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'mature removal cascades the resident package pin with its resident');
 select is((select count(*) from private.world_npc_dialogue_turns where id='18100000-3000-4000-8000-000000000001'),0::bigint,'dialogue and its frozen checkpoint cascade away with the removed resident');
 select is((select count(*) from private.world_npc_memories where instance_id=(select instance_id from pg_temp.mature_world)),0::bigint,'significant dialogue memories are removed with their source exchange');

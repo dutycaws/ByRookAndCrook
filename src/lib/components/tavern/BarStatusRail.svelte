@@ -1,20 +1,38 @@
 <script lang="ts">
-  let { day, gold, drinks, foods, recent }: { day: number; gold: number; drinks: number; foods: number; recent: number } = $props();
+  let {
+    day,
+    gold,
+    disabled = false,
+    presentation = 'default',
+    onclose
+  }: {
+    day: number;
+    gold: number;
+    disabled?: boolean;
+    presentation?: 'default' | 'player-hand';
+    onclose: () => void;
+  } = $props();
 </script>
 
-<aside class="tavern-rail tavern-status-rail" aria-labelledby="tavern-status-title">
-  <div class="rail-title"><p class="eyebrow">Tavern status</p><h2 id="tavern-status-title">Tonight at the Rook</h2></div>
-  <dl class="status-list">
-    <div><dt>Tavern day</dt><dd>{day}</dd></div>
-    <div aria-label="Tavern gold"><dt>Gold</dt><dd>{gold} gold</dd></div>
-    <div><dt>Drinks ready</dt><dd>{drinks}</dd></div>
-    <div><dt>Food ready</dt><dd>{foods}</dd></div>
-    <div><dt>Recent servings</dt><dd>{recent}</dd></div>
-  </dl>
-  <div class="rail-routes" aria-label="Restock the tavern">
-    <p class="eyebrow">Prepare for service</p>
-    <a href="/garden">Tend the garden <span aria-hidden="true">→</span></a>
-    <a href="/brewery">Brew a drink <span aria-hidden="true">→</span></a>
-    <a href="/bakery">Bake some food <span aria-hidden="true">→</span></a>
-  </div>
-</aside>
+<div class="bar-status" class:status-only={presentation === 'player-hand'} aria-label="Tavern status">
+  <p class="status-line"><span>Day {day}</span><span aria-hidden="true">·</span><span>{gold} gold</span></p>
+  {#if presentation === 'default'}
+    <button class="end-evening" type="button" {disabled} onclick={onclose}>
+      <span aria-hidden="true">☾</span><span>End evening</span>
+    </button>
+  {/if}
+</div>
+
+<style>
+  .bar-status { position: absolute; z-index: 13; top: .7rem; right: .75rem; left: .75rem; display: flex; align-items: start; justify-content: space-between; gap: .75rem; pointer-events: none; }
+  .bar-status.status-only { justify-content: flex-start; right: auto; }
+  .status-line { display: inline-flex; align-items: center; gap: .5rem; margin: 0; padding: .45rem .65rem; border: 1px solid rgb(193 159 94 / .28); color: #e7d7af; background: rgb(14 10 6 / .78); font-size: .82rem; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #000; }
+  .status-only .status-line { gap: .4rem; padding: .38rem .55rem; font-size: .78rem; }
+  .status-line span[aria-hidden='true'] { color: #a89468; }
+  .end-evening { display: inline-flex; min-height: 2.75rem; align-items: center; justify-content: center; gap: .45rem; padding: .4rem .65rem; border: 1px solid #806631; color: #ebd9ad; background: rgb(17 12 6 / .92); font: inherit; font-size: .84rem; font-weight: 650; white-space: nowrap; cursor: pointer; pointer-events: auto; transition: background-color 150ms ease, border-color 150ms ease; }
+  .end-evening span:first-child { color: #e4c36b; }
+  .end-evening:hover { border-color: #c49b4e; background: #392910; }
+  .end-evening:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
+  .end-evening:disabled { opacity: .62; cursor: wait; }
+  @media (max-width: 520px) { .bar-status { top: .45rem; right: .45rem; left: .45rem; } .status-line { gap: .35rem; padding: .35rem .5rem; font-size: .75rem; } .end-evening { min-height: 2rem; padding: .3rem .45rem; font-size: .76rem; } }
+</style>

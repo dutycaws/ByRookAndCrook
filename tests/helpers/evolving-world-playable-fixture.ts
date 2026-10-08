@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { execFileSync } from 'node:child_process';
 import type { Database } from '../../src/lib/database.types';
 import { parseSnapshot } from '../../src/lib/game/contracts';
-import { createTestPlayer } from './local-supabase';
+import { createTestPlayer, getLocalTestDatabaseContainer } from './local-supabase';
 import { createBrewedTavern } from './brewed-tavern';
 
 type ProceduralContext = {
@@ -69,7 +69,11 @@ type QuestTransitionContext = {
   frozenTargetRefs?: string[];
 };
 
-export type QuestLifecycleFixture = Awaited<ReturnType<typeof createBrewedQuestLifecycleFixture>>;
+type TestPlayer = Awaited<ReturnType<typeof createTestPlayer>>;
+export type QuestLifecycleFixture = Pick<TestPlayer, 'admin' | 'client' | 'userId' | 'email' | 'password'> & {
+  saveId: string;
+  liraInstanceId: string;
+};
 
 function assertRpc(result: { error: Error | null }, message: string): void {
   if (result.error) throw new Error(`${message}: ${result.error.message}`);
@@ -77,7 +81,7 @@ function assertRpc(result: { error: Error | null }, message: string): void {
 
 function queryLocalPostgres(sql: string): string {
   const output = execFileSync('docker', [
-    'exec', 'supabase_db_by-rook-and-crook', 'psql', '-qAt', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', sql
+    'exec', getLocalTestDatabaseContainer(), 'psql', '-qAt', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', sql
   ], { encoding: 'utf8' }).trim();
   const line = output.split('\n').at(-1)?.trim();
   if (!line) throw new Error('Local lifecycle fixture query returned no value.');
@@ -221,7 +225,7 @@ async function snapshot(client: SupabaseClient<Database>) {
 
 function fundFixtureSave(saveId: string) {
   execFileSync('docker', [
-    'exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
+    'exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
     '-c', `update public.tavern_saves set gold=20 where id='${saveId}'::uuid`
   ]);
 }
@@ -302,21 +306,107 @@ export async function createBrewedQuestLifecycleFixture() {
   return { ...player, liraInstanceId: uuid(lira.instanceId, 'Lira instance ID') };
 }
 
-/** Close a playable day and drain background work, leaving Lira's transition for the journey. */
-export async function closeQuestLifecycleDay(fixture: QuestLifecycleFixture) {
+/**
+ * A browser lifecycle fixture with only Lira instantiated and Torvin available
+ * as the later-day authored arrival. Its warned loss quest is built from
+ * Lira's currently published package so the UI exercises real authored text.
+ */
+export async function createLiraDepartureArrivalFixture(): Promise<QuestLifecycleFixture> {
+  const player = await createTestPlayer('issue-35-departure-arrival-ui');
+  const saveId = crypto.randomUUID();
+  try {
+    const sql = `
+insert into public.tavern_saves(id,user_id,current_day,revision,world_phase,community_npc_level)
+values('${saveId}'::uuid,'${player.userId}'::uuid,1,0,'open',20);
+select private.ensure_garden_ecosystem('${saveId}'::uuid);
+do $fixture$
+declare
+  lira private.npc_first_party_catalog_identities;
+  candidate private.npc_first_party_catalog_identities;
+  resident record;
+  initial_quest private.world_quests;
+  milestone jsonb;
+begin
+  select * into lira from private.npc_first_party_catalog_identities where identity_key='lira';
+  if lira.npc_id is null then raise exception 'Published Lira package is unavailable'; end if;
+  select * into resident from private.world_materialize_resident_from_version(
+    '${saveId}'::uuid,lira.npc_id,lira.active_version_id,1
+  );
+  for candidate in
+    select * from private.npc_first_party_catalog_identities
+    where identity_key not in ('lira','torvin') and active_version_id is not null
+  loop
+    perform private.world_materialize_resident_from_version(
+      '${saveId}'::uuid,candidate.npc_id,candidate.active_version_id,1
+    );
+  end loop;
+
+  select * into initial_quest from private.world_quests
+  where save_id='${saveId}'::uuid and instance_id=resident.instance_id
+    and origin='authored_milestone' and authored_milestone_index=0;
+  milestone := (select version.sheet#>array['campaign','milestones','1']
+    from private.npc_versions version where version.id=initial_quest.version_id);
+  delete from private.world_quests where id=initial_quest.id;
+  insert into private.world_quests(
+    save_id,instance_id,package_id,package_hash,version_id,origin,authored_milestone_index,authored_milestone_key,
+    title,objective,motivation,constraints,target_refs,difficulty,definition_plan,current_plan,plan_revision,
+    state,current_step,preparation,scheduled_for_day,activated_day
+  ) values (
+    initial_quest.save_id,initial_quest.instance_id,initial_quest.package_id,initial_quest.package_hash,
+    initial_quest.version_id,'authored_milestone',1,milestone->>'id',
+    coalesce(milestone->>'title','Authored loss milestone'),
+    coalesce(milestone->>'outcome','Complete the authored milestone.'),
+    coalesce(milestone->>'motivation','Pursue the authored milestone.'),
+    coalesce(array(select value from jsonb_array_elements_text(milestone->'constraints') value),'{}'::text[]),
+    coalesce(array(select value from jsonb_array_elements_text(milestone->'allowedTargets') value),'{}'::text[]),
+    coalesce((milestone->>'difficulty')::integer,0),
+    '[{"action":"attempt","approach":"scouting"}]'::jsonb,
+    '[{"action":"attempt","approach":"scouting"}]'::jsonb,
+    1,'active',0,0,1,1
+  );
+  delete from private.world_quests where id=initial_quest.id;
+end
+$fixture$;
+`;
+    execFileSync('docker', [
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-qAt', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', sql
+    ], { encoding: 'utf8' });
+
+    const bar = await player.client.rpc('npc_bar_snapshot');
+    assertRpc(bar, 'Could not load the single-resident arrival fixture');
+    const lira = (bar.data as { roster?: Array<{ instanceId?: string; name?: string }> }).roster
+      ?.find((resident) => resident.name === 'Lira Nightwind');
+    if (!lira?.instanceId) throw new Error('Lira was not materialized in the arrival fixture.');
+    const fixture: QuestLifecycleFixture = { ...player, saveId, liraInstanceId: uuid(lira.instanceId, 'Lira instance ID') };
+
+    resolveActiveQuestForLifecycle(fixture, 1, 99);
+    resolveActiveQuestForLifecycle(fixture, 2, 99);
+    execFileSync('docker', [
+      'exec', getLocalTestDatabaseContainer(), 'psql', '-qAt', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c',
+      `update public.tavern_saves set current_day=2 where id='${saveId}'::uuid;
+       insert into public.garden_weather(save_id,day_number,rules_version,weather_key)
+       values('${saveId}'::uuid,4,'garden-apiary-v1',private.garden_weather_key(4)) on conflict do nothing;`
+    ], { encoding: 'utf8' });
+    return fixture;
+  } catch (cause) {
+    const deleted = await player.admin.auth.admin.deleteUser(player.userId);
+    if (deleted.error && !/database error deleting user/i.test(deleted.error.message)) throw deleted.error;
+    throw cause;
+  }
+}
+
+/** Drain the background work after an end-day action has already been submitted by the UI. */
+export async function settleQuestLifecycleDay(fixture: QuestLifecycleFixture) {
   const current = await snapshot(fixture.client);
   const supplies = await fixture.client.rpc('world_generated_shop_projection', { p_save_id: fixture.saveId });
-  assertRpc(supplies, 'Could not load generated supplies before closing the lifecycle day');
+  assertRpc(supplies, 'Could not load generated supplies before settling the lifecycle day');
   const provisionExists = (supplies.data as { catalog?: Array<{ itemKey?: string }> })?.catalog
     ?.some((item) => item.itemKey === provisionKey) ?? false;
-  const closed = await fixture.client.rpc('advance_tavern_day', {
-    p_save_id: fixture.saveId, p_action_id: actionId(current.save.currentDay, 9), p_expected_revision: current.save.revision
-  });
-  assertRpc(closed, 'Could not close the public tavern day');
-  const settlementId = (closed.data as { worldSettlement?: { settlementId?: string } })?.worldSettlement?.settlementId;
-  if (!settlementId) throw new Error('Day close did not return an ordinary settlement.');
+  const status = await fixture.client.rpc('world_settlement_status', { p_save_id: fixture.saveId });
+  assertRpc(status, 'Could not read the active lifecycle settlement');
+  const settlementId = (status.data as { id?: string } | null)?.id;
+  if (!settlementId) throw new Error('The UI day close did not leave an ordinary settlement to drain.');
   for (let pass = 0; pass < 3; pass += 1) {
-    // Supply unlocks require a new canonical item; later days reuse the provision.
     if (await drainFixtureClaims(fixture.admin as unknown as RpcClient, settlementId, !provisionExists) === 0) break;
   }
   const backgroundTransitions = JSON.parse(queryLocalPostgres(
@@ -328,6 +418,19 @@ export async function closeQuestLifecycleDay(fixture: QuestLifecycleFixture) {
     await runQuestLifecycleTransition(fixture, transition.terminalEventId,
       transition.nextAuthoredMilestone ? 'next_authored_milestone' : 'departure');
   }
+  return { day: current.save.currentDay, settlementId };
+}
+
+/** Close a playable day and drain background work, leaving Lira's transition for the journey. */
+export async function closeQuestLifecycleDay(fixture: QuestLifecycleFixture) {
+  const current = await snapshot(fixture.client);
+  const closed = await fixture.client.rpc('advance_tavern_day', {
+    p_save_id: fixture.saveId, p_action_id: actionId(current.save.currentDay, 9), p_expected_revision: current.save.revision
+  });
+  assertRpc(closed, 'Could not close the public tavern day');
+  const settlementId = (closed.data as { worldSettlement?: { settlementId?: string } })?.worldSettlement?.settlementId;
+  if (!settlementId) throw new Error('Day close did not return an ordinary settlement.');
+  await settleQuestLifecycleDay(fixture);
   return { closingDay: current.save.currentDay, settlementId };
 }
 

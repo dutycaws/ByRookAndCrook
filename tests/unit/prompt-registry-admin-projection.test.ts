@@ -15,16 +15,25 @@ describe('prompt registry admin projection', () => {
   it('projects execution ledger records through an allow-list only', () => {
     const runs = safePromptExecutionRuns([{
       executionId: 'turn:123', attempt: 2, workflow: 'dialogue', node: 'dialogue.speak', promptKey: 'dialogue.speak', releaseId: 'release-12', revisionId: 'revision-7',
-      status: 'completed', model: 'fixture', durationMs: 88, inputTokens: 10, outputTokens: 20, errorCode: null, occurredAt: '2026-09-16T00:00:00.000Z',
+      status: 'completed', model: 'fixture', durationMs: 88, inputTokens: 10, outputTokens: 20, cachedInputTokens: 0, cacheWriteInputTokens: 4, errorCode: null, occurredAt: '2026-09-16T00:00:00.000Z',
       renderedPrompt: 'must never reach the browser', privateNpcContext: { name: 'secret' }, providerError: 'sensitive provider detail', storageKey: 'private/key'
     }]);
-    expect(runs).toEqual([expect.objectContaining({ executionId: 'turn:123', promptKey: 'dialogue.speak', durationMs: 88 })]);
-    expect(Object.keys(runs[0]!).sort()).toEqual(['attempt', 'durationMs', 'errorCode', 'executionId', 'inputTokens', 'model', 'node', 'occurredAt', 'outputTokens', 'promptKey', 'releaseId', 'revisionId', 'status', 'workflow']);
+    expect(runs).toEqual([expect.objectContaining({ executionId: 'turn:123', promptKey: 'dialogue.speak', durationMs: 88, cachedInputTokens: 0, cacheWriteInputTokens: 4 })]);
+    expect(Object.keys(runs[0]!).sort()).toEqual(['attempt', 'cacheWriteInputTokens', 'cachedInputTokens', 'durationMs', 'errorCode', 'executionId', 'inputTokens', 'model', 'node', 'occurredAt', 'outputTokens', 'promptKey', 'releaseId', 'revisionId', 'status', 'workflow']);
     expect(JSON.stringify(runs)).not.toContain('privateNpcContext');
     expect(JSON.stringify(runs)).not.toContain('renderedPrompt');
   });
 
   it('rejects malformed ledger records rather than guessing a safe shape', () => {
     expect(safePromptExecutionRuns([{ executionId: 'missing-fields' }, 'not-a-record'])).toEqual([]);
+  });
+
+  it('keeps missing cache usage unknown and preserves a reported zero', () => {
+    const runs = safePromptExecutionRuns([
+      { executionId: 'turn:unknown', attempt: 0, workflow: 'dialogue', node: 'dialogue.speak', promptKey: 'dialogue.speak', releaseId: 'release', revisionId: 'revision', status: 'completed', occurredAt: '2026-09-16T00:00:00.000Z', inputTokens: 10, outputTokens: 2 },
+      { executionId: 'turn:zero', attempt: 0, workflow: 'dialogue', node: 'dialogue.speak', promptKey: 'dialogue.speak', releaseId: 'release', revisionId: 'revision', status: 'completed', occurredAt: '2026-09-16T00:00:00.000Z', inputTokens: 10, outputTokens: 2, cachedInputTokens: 0, cacheWriteInputTokens: 4 }
+    ]);
+    expect(runs[0]).toMatchObject({ cachedInputTokens: null, cacheWriteInputTokens: null });
+    expect(runs[1]).toMatchObject({ cachedInputTokens: 0, cacheWriteInputTokens: 4 });
   });
 });

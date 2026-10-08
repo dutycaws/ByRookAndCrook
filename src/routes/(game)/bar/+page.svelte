@@ -1,117 +1,261 @@
 <script lang="ts">
+  import { onMount, tick } from 'svelte';
   import { enhance } from '$app/forms';
-  import { invalidateAll } from '$app/navigation';
-  import { qualityLabel } from '$lib/game/contracts';
-  import { reconcileBarSceneSelection, selectedBarPatron } from '$lib/game/bar-scene';
+  import { invalidateAll, replaceState } from '$app/navigation';
+  import { page } from '$app/state';
   import { isActiveSettlement } from '$lib/game/evolving-world';
-  import type { ServeCommand } from '$lib/game/serving';
+  import type { TrinketSlot } from '$lib/game/trinkets';
   import NpcDialogue from '$lib/components/NpcDialogue.svelte';
-  import BarStatusRail from '$lib/components/tavern/BarStatusRail.svelte';
-  import GuestInspector from '$lib/components/tavern/GuestInspector.svelte';
-  import TavernScene from '$lib/components/tavern/TavernScene.svelte';
+  import Dialog from '$lib/components/ui/Dialog.svelte';
+  import FloatingSurface from '$lib/components/ui/FloatingSurface.svelte';
+  import ResidentInspector from '$lib/components/tavern/ResidentInspector.svelte';
   import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
+  import TavernScene from '$lib/components/tavern/TavernScene.svelte';
+  import TrinketCollection from '$lib/components/tavern/TrinketCollection.svelte';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
-  function initialSelection() {
-    const patrons = data.archived ? data.snapshot?.roster ?? [] : data.snapshot?.patrons ?? [];
-    return data.selectedNpcInstanceId
-      && patrons.some((entry) => entry.instanceId === data.selectedNpcInstanceId)
-        ? data.selectedNpcInstanceId
-        : patrons[0]?.instanceId ?? null;
+
+  function validInitialSelection() {
+    const requested = data.selectedNpcInstanceId;
+    return requested && data.snapshot?.patrons.some((patron) => patron.instanceId === requested)
+      ? requested
+      : null;
   }
-  const initialSelectedInstanceId = initialSelection();
-  // Seed selection during SSR so hydration does not insert the conversation
-  // composer after first paint and shift the whole mobile Bar layout.
-  let selectedInstanceId = $state<string | null>(initialSelectedInstanceId);
-  let focusedInstanceId = $state<string | null>(initialSelectedInstanceId);
-  let itemSelection = $state('');
-  let pending = $state(false);
-  let unresolved = $state<ServeCommand | null>(null);
-  let localError = $state<string | null>(null);
+
+  let selectedInstanceId = $state<string | null>(validInitialSelection());
+  let focusedInstanceId = $state<string | null>(validInitialSelection());
+  let journalOpen = $state(false);
+  let talkOpen = $state(false);
+  let deckOpen = $state(Boolean(validInitialSelection()));
+  let cardSelected = $state(false);
+  let dialogueBusy = $state(false);
   let hydrated = $state(false);
-  let closeCommand: {actionId:string;saveId:string;revision:number}|null=$state(null);
-  let displayedPatrons = $derived(data.archived ? data.snapshot?.roster ?? [] : data.snapshot?.patrons ?? []);
-  const enhanceClose:SubmitFunction=({formData,cancel})=>{
-    if(!data.snapshot||pending){cancel();return;}
-    closeCommand??={actionId:crypto.randomUUID(),saveId:data.snapshot.save.id,revision:data.snapshot.save.revision};
-    for(const [key,value] of Object.entries(closeCommand))formData.set(key,String(value));
-    pending=true;
-    return async({result,update})=>{
-      if(result.type==='error'||result.type==='failure'&&result.status>=500){localError='Closing could not be confirmed. Retry closing to recover the result.';pending=false;return;}
-      closeCommand=null;
-      localError=null;
-      try{await update({reset:false});if(result.type==='failure')await invalidateAll();}
-      catch{localError='The journal could not be refreshed. Refresh the bar to see the current day.';}finally{pending=false;}
-    };
-  };
-  $effect(() => { hydrated = true; });
-  let patron = $derived(selectedBarPatron(displayedPatrons, selectedInstanceId));
-  let selectedKind = $derived(itemSelection.startsWith('food:') ? 'food' as const : 'beverage' as const);
-  let selectedId = $derived(itemSelection.split(':', 2)[1] ?? '');
-  let item = $derived(selectedKind === 'food'
-    ? data.snapshot?.foods.find((food) => food.id === selectedId)
-    : data.snapshot?.beverages.find((drink) => drink.id === selectedId));
+  let pending = $state(false);
+  let closeDialogOpen = $state(false);
+  let closeError = $state<string | null>(null);
+  let closeCommand: { actionId: string; saveId: string; revision: number } | null = $state(null);
+  let keepsakeDialogOpen = $state(false);
+  let keepsakeBusy = $state(false);
+  let selectedTrinketSlot = $state<TrinketSlot | null>(null);
+  let selectedTrinketId = $state('');
+
+  const patrons = $derived(data.snapshot?.patrons ?? []);
+  const collection = $derived(data.snapshot?.trinkets?.collection ?? []);
+  const patron = $derived(patrons.find((resident) => resident.instanceId === selectedInstanceId) ?? null);
+  const journal = $derived(patron ? data.journals[patron.instanceId] ?? null : null);
+  const interactionBlocked = $derived(!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand);
+  const codexHref = $derived(patron
+    ? `/codex?section=residents&resident=${encodeURIComponent(patron.instanceId)}`
+    : '/codex?section=residents');
+  const codexCursorHref = $derived(patron && journal?.questArchive.nextCursor
+    ? `/codex?section=residents&resident=${encodeURIComponent(patron.instanceId)}&questCursor=${encodeURIComponent(journal.questArchive.nextCursor)}`
+    : codexHref);
 
   $effect(() => {
-    if (unresolved) return;
-    const patrons = displayedPatrons;
-    const reconciled = reconcileBarSceneSelection(patrons, { selectedKey: selectedInstanceId, focusedKey: focusedInstanceId });
-    selectedInstanceId = reconciled.selectedKey;
-    focusedInstanceId = reconciled.focusedKey;
-    const choices = [
-      ...(data.snapshot?.beverages.map((drink) => `beverage:${drink.id}`) ?? []),
-      ...(data.snapshot?.foods.map((food) => `food:${food.id}`) ?? [])
-    ];
-    if (!choices.includes(itemSelection)) itemSelection = choices[0] ?? '';
+    if (selectedInstanceId && !patrons.some((resident) => resident.instanceId === selectedInstanceId)) {
+      selectedInstanceId = null;
+      journalOpen = false;
+      talkOpen = false;
+      deckOpen = false;
+      cardSelected = false;
+    }
+    if (focusedInstanceId && !patrons.some((resident) => resident.instanceId === focusedInstanceId)) {
+      focusedInstanceId = selectedInstanceId ?? patrons[0]?.instanceId ?? null;
+    }
+    if (!focusedInstanceId && patrons.length) focusedInstanceId = patrons[0].instanceId;
   });
 
-  const enhanceServe: SubmitFunction = ({ formData, cancel }) => {
-    if (!data.snapshot || pending || (!unresolved && !item)) { cancel(); return; }
-    unresolved ??= {
-      saveId: data.snapshot.save.id, instanceId: patron?.instanceId ?? '', itemKind: selectedKind, itemId: selectedId,
-      actionId: crypto.randomUUID(), expectedRevision: data.snapshot.save.revision
+  onMount(() => {
+    hydrated = true;
+    const syncBrowserSelection = () => {
+      const requested = new URL(window.location.href).searchParams.get('npc');
+      const nextSelection = requested && patrons.some((resident) => resident.instanceId === requested)
+        ? requested
+        : null;
+      selectedInstanceId = nextSelection;
+      if (nextSelection) focusedInstanceId = nextSelection;
+      talkOpen = false;
+      deckOpen = Boolean(nextSelection);
+      cardSelected = false;
+      journalOpen = false;
     };
-    const command = unresolved;
-    for (const [key, value] of Object.entries(command)) formData.set(key, String(value ?? ''));
+    window.addEventListener('popstate', syncBrowserSelection);
+    return () => window.removeEventListener('popstate', syncBrowserSelection);
+  });
+
+  function clearPatronUrl() {
+    if (!page.url.searchParams.has('npc')) return;
+    const params = new URLSearchParams(page.url.searchParams);
+    params.delete('npc');
+    const query = params.toString();
+    replaceState(`/bar${query ? `?${query}` : ''}`, page.state);
+  }
+
+  async function selectPatron(instanceId: string) {
+    if (interactionBlocked || !patrons.some((resident) => resident.instanceId === instanceId)) return;
+    selectedInstanceId = instanceId;
+    focusedInstanceId = instanceId;
+    keepsakeDialogOpen = false;
+    selectedTrinketSlot = null;
+    journalOpen = false;
+    talkOpen = false;
+    deckOpen = true;
+    cardSelected = false;
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-card-index="0"]')?.focus({ preventScroll: true });
+  }
+
+  async function returnToBar() {
+    if (interactionBlocked) return;
+    const returningInstanceId = selectedInstanceId;
+    selectedInstanceId = null;
+    journalOpen = false;
+    talkOpen = false;
+    deckOpen = false;
+    cardSelected = false;
+    clearPatronUrl();
+    await tick();
+    if (!returningInstanceId) return;
+    const actorKey = `patron:${returningInstanceId}`;
+    const target = [...document.querySelectorAll<HTMLButtonElement>('button[data-scene-actor]')]
+      .find((button) => button.dataset.sceneActor === actorKey);
+    target?.focus({ preventScroll: true });
+  }
+
+  async function setJournalOpen(open: boolean) {
+    journalOpen = open;
+    await tick();
+    document.querySelector<HTMLElement>(open ? '[data-bar-control="journal-close"]' : '[data-bar-control="journal"]')?.focus({ preventScroll: true });
+  }
+
+  async function handleEscape(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    if (document.querySelector('dialog[open]')) return;
+
+    if (keepsakeDialogOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      await closeKeepsakeDialog();
+      return;
+    }
+
+    if (journalOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      await setJournalOpen(false);
+      return;
+    }
+
+    if (talkOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      talkOpen = false;
+      await tick();
+      const hand = document.querySelector<HTMLElement>('.patron-dialogue.bar-hand');
+      const preferredIndex = Number(hand?.dataset.nextCardFocusIndex);
+      const preferredCard = Number.isSafeInteger(preferredIndex) && preferredIndex >= 0
+        ? document.querySelector<HTMLElement>(`.service-card-hand.bar-hand [data-card-index="${preferredIndex}"]:not([data-card-burn-active="true"])`)
+        : null;
+      (document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index][aria-pressed="true"]')
+        ?? preferredCard
+        ?? document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index]:not([data-card-burn-active="true"])'))
+        ?.focus({ preventScroll: true });
+      return;
+    }
+
+    if (dialogueBusy) return;
+
+    if (patron && !interactionBlocked) {
+      event.preventDefault();
+      await returnToBar();
+    }
+  }
+
+  async function openKeepsake(slot: TrinketSlot) {
+    if (interactionBlocked || patron) return;
+    selectedTrinketSlot = slot;
+    selectedTrinketId = collection.find((item) => item.slot === slot)?.id ?? collection.find((item) => item.slot === null)?.id ?? '';
+    keepsakeDialogOpen = true;
+    await tick();
+    document.querySelector<HTMLButtonElement>('[aria-label="Close keepsake details"]')?.focus({ preventScroll: true });
+  }
+
+  async function closeKeepsakeDialog(completed = false) {
+    if (keepsakeBusy && !completed) return;
+    const returningSlot = selectedTrinketSlot;
+    keepsakeDialogOpen = false;
+    selectedTrinketSlot = null;
+    if (completed) keepsakeBusy = false;
+    await tick();
+    if (returningSlot !== null) document.querySelector<HTMLElement>(`[data-keepsake-slot="${returningSlot + 1}"]`)?.focus({ preventScroll: true });
+  }
+
+  const enhanceClose: SubmitFunction = ({ formData, cancel }) => {
+    if (!data.snapshot || pending) {
+      cancel();
+      return;
+    }
+
+    closeCommand ??= {
+      actionId: crypto.randomUUID(),
+      saveId: data.snapshot.save.id,
+      revision: data.snapshot.save.revision
+    };
+    for (const [key, value] of Object.entries(closeCommand)) formData.set(key, String(value));
     pending = true;
-    localError = null;
+    closeError = null;
+
     return async ({ result, update }) => {
-      // Unknown outcomes retain the entire command; selection cannot alter a retry.
       if (result.type === 'error' || (result.type === 'failure' && result.status >= 500)) {
         pending = false;
-        localError = 'The serving outcome is unknown. Retry the same pour to check whether it was recorded.';
+        closeError = 'The close result is uncertain. Retry the same close to check whether it was recorded.';
         return;
       }
-      unresolved = null;
+
+      if (result.type === 'success') {
+        closeDialogOpen = false;
+        closeCommand = null;
+      } else if (result.type === 'failure') {
+        closeError = result.data?.message ?? 'The tavern could not close. Retry the same close.';
+      }
+
       try {
         await update({ reset: false, invalidateAll: true });
-        // Enhanced form failures do not invalidate loads, even when requested.
         if (result.type === 'failure') await invalidateAll();
       } catch {
-        localError = result.type === 'success'
-          ? 'Your pour was recorded, but the latest bar could not be loaded. Refresh the bar to continue.'
-          : 'The bar could not be refreshed. Refresh the bar to continue.';
-      } finally { pending = false; }
+        closeError = result.type === 'success'
+          ? 'The tavern closed, but the latest status could not be loaded. Refresh to continue.'
+          : 'The latest tavern status could not be loaded. Retry the same close.';
+      } finally {
+        pending = false;
+      }
     };
   };
+
+  async function refreshCloseStatus() {
+    pending = true;
+    try {
+      await invalidateAll();
+      closeError = null;
+    } catch {
+      closeError = 'The latest tavern status could not be loaded. Try refreshing again.';
+    } finally {
+      pending = false;
+    }
+  }
 
   async function refreshBar() {
     pending = true;
-    try { await invalidateAll(); localError = null; }
-    catch { localError = 'The bar is still unavailable. Please try refreshing again.'; }
-    finally { pending = false; }
-  }
-
-  function signed(value: number) { return value > 0 ? `+${value}` : String(value); }
-  function archivePageHref(cursor: string) {
-    const params = new URLSearchParams();
-    if (data.archived) params.set('archive', '1');
-    if (patron) params.set('npc', patron.instanceId);
-    params.set('questCursor', cursor);
-    return `/bar?${params}`;
+    try {
+      await invalidateAll();
+    } finally {
+      pending = false;
+    }
   }
 </script>
+
+<svelte:window onkeydown={handleEscape} />
 
 <svelte:head>
   <title>The bar · By Rook and Crook</title>
@@ -121,118 +265,165 @@
 <main class="bar-page">
   {#if data.settlement && isActiveSettlement(data.settlement)}
     <SettlementInterlude settlement={data.settlement} />
+  {:else if data.archived}
+    <section class="codex-transfer" aria-labelledby="codex-transfer-title">
+      <p class="eyebrow">Past residents</p>
+      <h1 id="codex-transfer-title">Their stories live in the Codex.</h1>
+      <p>Open the Codex for resident journals, conversations, hospitality, and past residents.</p>
+      <a class="primary-button inline-button" href={codexHref}>Open the Codex</a>
+      <a class="return-link" href="/bar">Return to the common room</a>
+    </section>
   {:else if !data.snapshot}
-    <section class="empty-state panel bar-empty-state">
-      <h2>Open the doors</h2><p>Start your tavern in the garden, then bring your first brew to the bar.</p>
+    <section class="empty-state bar-empty-state" aria-labelledby="bar-empty-title">
+      <p class="eyebrow">The tavern is waiting</p>
+      <h1 id="bar-empty-title">Open the doors</h1>
+      <p>Start your tavern in the garden, then bring your first brew to the bar.</p>
       <a class="primary-button inline-button" href="/garden">Start your tavern</a>
+      <button class="text-button" type="button" disabled={pending} onclick={refreshBar}>Refresh the bar</button>
     </section>
   {:else}
-    <SettlementInterlude settlement={data.settlement} />
-    <div class="tavern-dashboard">
-      <BarStatusRail day={data.snapshot.save.currentDay} gold={data.snapshot.save.gold} drinks={data.snapshot.beverages.length} foods={data.snapshot.foods.length} recent={data.snapshot.history.length} />
-      {#if data.archived}
-        <section class="panel empty-state compact-empty">
-          <h2>Past residents</h2>
-          <p>This is a read-only record. Departed and dismissed residents never return to the active tavern scene.</p>
-          {#if displayedPatrons.length > 0}
-            <div class="archived-resident-picker">
-              <label for="archived-resident">Select a past resident</label>
-              <select id="archived-resident" bind:value={selectedInstanceId} disabled={!hydrated}>
-                {#each displayedPatrons as resident (resident.instanceId)}
-                  <option value={resident.instanceId}>{resident.name}</option>
-                {/each}
-              </select>
-            </div>
+    <div class="bar-shell">
+      <TavernScene
+        presentation="player-hand"
+        {patrons}
+        selected={patron}
+        focusedKey={focusedInstanceId}
+        trinkets={collection}
+        day={data.snapshot.save.currentDay}
+        gold={data.snapshot.save.gold}
+        archiveHref={codexHref}
+        disabled={!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand}
+        closeDisabled={!hydrated || pending || dialogueBusy || keepsakeBusy}
+        {cardSelected}
+        composerOpen={talkOpen}
+        {deckOpen}
+        onselect={selectPatron}
+        onfocus={(instanceId) => (focusedInstanceId = instanceId)}
+        onback={returnToBar}
+        onclose={() => { closeError = null; closeDialogOpen = true; }}
+        onkeepsake={openKeepsake}
+      >
+        {#snippet interaction()}
+          {#if patron && data.snapshot && journal}
+            <NpcDialogue
+              npcId={patron.npcId}
+              instanceId={patron.instanceId}
+              saveId={data.snapshot.save.id}
+              name={patron.name}
+              {journal}
+              stock={data.snapshot}
+              unavailable={data.dialogueUnavailable}
+              archiveHref={null}
+              embedded={true}
+              barHand={true}
+              cardBurnStyle={data.cardBurnStyle}
+              suspended={journalOpen}
+              blocked={pending || !!closeCommand}
+              focusActive={true}
+              composerOpen={talkOpen}
+              deckOpen={deckOpen}
+              onbusychange={(busy) => (dialogueBusy = busy)}
+              oncomposerchange={(open) => (talkOpen = open)}
+              ondeckchange={() => (deckOpen = Boolean(patron))}
+              onselectionchange={(selected) => {
+                cardSelected = selected;
+                if (selected) journalOpen = false;
+              }}
+            />
+          {:else if patron}
+            <p class="quiet-line" role="status">This resident’s journal is unavailable right now.</p>
           {/if}
-        </section>
-      {:else}
-        <TavernScene patrons={data.snapshot.patrons} selected={patron} focusedKey={focusedInstanceId} journals={data.journals} day={data.snapshot.save.currentDay}
-          disabled={!hydrated || pending || !!unresolved}
-          onselect={(instanceId) => { if (!unresolved) selectedInstanceId = instanceId; }}
-          onfocus={(instanceId) => { focusedInstanceId = instanceId; }} />
+        {/snippet}
+      </TavernScene>
+
+      {#if patron}
+        {@const snapshot = data.snapshot}
+        <ResidentInspector
+          {patron}
+          {journal}
+          history={snapshot.history}
+          archiveHref={codexCursorHref}
+          {codexHref}
+          {journalOpen}
+          interactionOpen={talkOpen}
+          onjournalchange={setJournalOpen}
+        />
+      {:else if patrons.length === 0}
+        <p class="quiet-room" role="status">The common room is quiet. The scene’s keepsake slots still open their manager; past residents are in the Codex.</p>
       {/if}
-      <GuestInspector selected={patron} journal={patron ? data.journals[patron.instanceId] ?? null : null} stock={data.snapshot}
-        archived={data.archived} disabled={!hydrated || pending || !!unresolved}
-        archiveHref={patron && data.journals[patron.instanceId]?.questArchive.nextCursor ? archivePageHref(data.journals[patron.instanceId].questArchive.nextCursor!) : null}
-        onarchive={(archived)=>window.location.assign(archived ? '/bar?archive=1' : '/bar')} />
-      {#if patron && data.journals[patron.instanceId]}{#key patron.instanceId}<NpcDialogue npcId={patron.npcId} name={patron.name} journal={data.journals[patron.instanceId]} stock={data.snapshot} unavailable={data.dialogueUnavailable} archived={data.archived} archiveHref={data.journals[patron.instanceId].questArchive.nextCursor ? archivePageHref(data.journals[patron.instanceId].questArchive.nextCursor!) : null}/>{/key}{/if}
-    </div>
-
-    {#if !data.archived}<div class="bar-utilities">
-      <section class="panel serving-panel" aria-labelledby="pour-title">
-        <p class="eyebrow">From your cellar</p><h2 id="pour-title">Serve food or drink</h2>
-        {#if data.snapshot.beverages.length === 0 && data.snapshot.foods.length === 0 && !unresolved}
-          <div class="empty-state compact-empty"><h3>No hospitality ready to serve</h3>
-            <p>Brew a drink or bake some food before offering it at the bar.</p>
-            <div class="empty-actions"><a class="secondary-link compact" href="/brewery">Visit the brewery</a><a class="secondary-link compact" href="/bakery">Visit the bakery</a></div>
+      {#if keepsakeDialogOpen && selectedTrinketSlot !== null && data.snapshot && !patron}
+        <FloatingSurface
+          as="section"
+          id="keepsake-manager"
+          class={'keepsake-surface ' + (selectedTrinketSlot % 2 === 0 ? 'slot-left' : 'slot-right')}
+          role="region"
+          aria-labelledby="keepsake-title"
+          style={'--slot-row:' + (selectedTrinketSlot < 2 ? '.19' : '.34')}
+        >
+          <header class="keepsake-heading">
+            <h2 id="keepsake-title">Keepsake slot {selectedTrinketSlot + 1}</h2>
+            <button type="button" class="surface-close" aria-label="Close keepsake details" disabled={keepsakeBusy} onclick={() => closeKeepsakeDialog()}>×</button>
+          </header>
+          <div class="keepsake-body">
+            <TrinketCollection
+              {collection}
+              saveId={data.snapshot.save.id}
+              revision={data.snapshot.save.revision}
+              selectedId={selectedTrinketId}
+              targetSlot={selectedTrinketSlot}
+              disabled={!hydrated || pending || !!closeCommand}
+              onselect={(id) => (selectedTrinketId = id)}
+              onbusychange={(busy) => (keepsakeBusy = busy)}
+              oncomplete={() => closeKeepsakeDialog(true)}
+            />
           </div>
-        {:else}
-          <form method="POST" action="?/serve" use:enhance={enhanceServe}>
-            <fieldset disabled={!hydrated || pending || !!unresolved}>
-              <legend>Choose food or drink</legend>
-              <div class="pour-options">
-                {#each data.snapshot.beverages as drink (drink.id)}
-                  <label class:selected={itemSelection === `beverage:${drink.id}`}>
-                    <input type="radio" value={`beverage:${drink.id}`} bind:group={itemSelection} />
-                    <span><strong>{drink.name}</strong><small>{qualityLabel(drink.qualityIndex)}</small></span>
-                  </label>
-                {/each}
-                {#each data.snapshot.foods as food (food.id)}
-                  <label class:selected={itemSelection === `food:${food.id}`}>
-                    <input type="radio" value={`food:${food.id}`} bind:group={itemSelection} />
-                    <span><strong>{food.name}</strong><small>{qualityLabel(food.qualityIndex)}</small></span>
-                  </label>
-                {/each}
-              </div>
-            </fieldset>
-            {#if item && patron}<div class="pour-summary"><p>{patron.name} receives this {qualityLabel(item.qualityIndex).toLowerCase()} offering.</p></div>{/if}
-            <button class="primary-button full-button" disabled={!hydrated || pending || (!item && !unresolved) || (!unresolved && (!patron || data.journals[patron.instanceId]?.availability!=='present'))}>{pending ? 'Serving…' : unresolved ? 'Retry the same serving' : `Serve to ${patron?.name ?? 'guest'}`}</button>
-          </form>
-        {/if}
-        {#if localError}
-          <p class="form-message error" role="alert">{localError}</p>{#if !unresolved}<button class="text-button" disabled={pending} onclick={refreshBar}>Refresh bar</button>{/if}
-        {:else if form?.message}
-          <div class="form-message" class:error={!('success' in form && form.success)} role={'success' in form ? 'status' : 'alert'}><p>{form.message}</p></div>
-        {/if}
-      </section>
-
-      <section class="panel close-tavern">
-        <p class="eyebrow">End the evening</p><h2>Close the tavern</h2><p>Your regulars will follow their intentions overnight. You can close without crafting today.</p>
-        <form method="POST" action="?/close" use:enhance={enhanceClose}><button class="primary-button full-button" disabled={!hydrated||pending}>{pending?'Closing…':'Close and begin next day'}</button></form>
-      </section>
-
-      <section class="panel serving-history" aria-labelledby="history-title">
-        <p class="eyebrow">The keeper's journal</p><h2 id="history-title">Recent hospitality</h2>
-        {#if data.snapshot.history.length === 0}<p class="muted">Your first serving will begin the journal.</p>
-        {:else}<ol>{#each data.snapshot.history as event (event.actionId)}<li><div><strong>{event.itemName}</strong><small>Day {event.dayNumber} · {qualityLabel(event.qualityIndex)}</small></div><p class="serve-effects">+{event.goldEarned} gold · Relationship {signed(event.relationshipChange)}</p></li>{/each}</ol>{/if}
-      </section>
-    </div>{/if}
+        </FloatingSurface>
+      {/if}
+    </div>
   {/if}
 </main>
 
+<Dialog id="close-tavern" title="End evening?" bind:open={closeDialogOpen}>
+  <p class="dialog-copy">Your regulars will follow their intentions overnight. You can close without crafting today.</p>
+  {#if closeError}
+    <p class="form-message error" role="alert">{closeError}</p>
+    <button class="text-button" type="button" disabled={pending} onclick={refreshCloseStatus}>Refresh tavern status</button>
+  {:else if form?.message}
+    <p class="form-message" role="status">{form.message}</p>
+  {/if}
+  <form method="POST" action="?/close" use:enhance={enhanceClose}>
+    <button class="primary-button full-button" disabled={!hydrated || pending || dialogueBusy}>
+      {pending ? 'Closing…' : closeCommand ? 'Retry the same close' : 'Close and begin the next day'}
+    </button>
+  </form>
+</Dialog>
+
+
+
 <style>
-  .archived-resident-picker {
-    display: grid;
-    gap: .4rem;
-    width: min(100%, 24rem);
-  }
-
-  .archived-resident-picker label {
-    color: #c9b891;
-    font-size: .9rem;
-  }
-
-  .archived-resident-picker select {
-    min-height: 44px;
-    padding: .5rem .65rem;
-    border: 1px solid #765324;
-    color: #e2cc97;
-    background: #100a05;
-    font: inherit;
-  }
-
-  .archived-resident-picker select:focus-visible {
-    outline: 3px solid #f0d383;
-    outline-offset: 2px;
-  }
+  .bar-page { width: min(100%, 100rem); margin-inline: auto; padding: clamp(.5rem, 1.8vw, 1.25rem); }
+  .bar-shell { position: relative; min-width: 0; container-type: inline-size; --bar-scene-height: calc(100cqw * 9 / 16); }
+  .return-link:focus-visible, .text-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
+  .quiet-room { margin: 0; padding: .3rem 0; color: #b9aa88; font-size: .9rem; }
+  .codex-transfer { display: grid; justify-items: start; gap: .65rem; max-width: 40rem; margin: clamp(2rem, 12vh, 7rem) auto; color: #e8ddc4; }
+  .codex-transfer .eyebrow { margin: 0; color: #d3b46d; font: 600 .7rem 'Cinzel', Georgia, serif; letter-spacing: .09em; text-transform: uppercase; }
+  .codex-transfer h1 { margin: 0; color: #f0d27a; font: 600 clamp(1.5rem, 4vw, 2.25rem) 'Cinzel', Georgia, serif; }
+  .codex-transfer p:not(.eyebrow) { max-width: 34rem; margin: 0 0 .3rem; color: #c9bb9b; line-height: 1.5; }
+  .return-link { color: #ddc998; text-underline-offset: .2em; }
+  .bar-empty-state { max-width: 36rem; margin: 8vh auto; text-align: center; }
+  .bar-empty-state .text-button { display: block; margin: .6rem auto; }
+  .bar-shell :global(.keepsake-surface) { position: absolute; z-index: 60; top: calc(var(--bar-scene-height) * var(--slot-row) + 3.5rem); display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(24rem, calc(100% - 2rem)); max-height: min(65dvh, 32rem); padding: 1rem; overflow: hidden; background: rgb(32 24 19 / .76); }
+  .bar-shell :global(.slot-left) { left: calc(3.5% + 3.5rem); }
+  .bar-shell :global(.slot-right) { right: calc(15% + 3.5rem); }
+  .keepsake-heading { display: flex; gap: 1rem; align-items: center; justify-content: space-between; padding-bottom: .75rem; border-bottom: 1px solid rgb(230 205 161 / .25); }
+  .keepsake-heading h2 { margin: 0; color: #e3ca8d; font: 600 .8rem 'Cinzel', Georgia, serif; }
+  .surface-close { width: 2.75rem; height: 2.75rem; flex: 0 0 auto; border: 1px solid #8c754a; border-radius: .5rem; background: transparent; color: #eee2c4; font-size: 1.2rem; cursor: pointer; }
+  .surface-close:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
+  .surface-close:disabled { opacity: .5; cursor: wait; }
+  .keepsake-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: .75rem; }
+  @media (max-width: 820px) { .bar-shell { --bar-scene-height: calc(100cqw * 2 / 3); } }
+  @media (max-width: 620px) { .bar-shell :global(.keepsake-surface) { left: 1rem; right: 1rem; width: auto; } }
+  .dialog-copy { color: #d6c8a6; line-height: 1.5; }
+  .full-button { width: 100%; }
+  .primary-button:focus-visible, .inline-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
 </style>

@@ -156,6 +156,17 @@
     if (typeof item === 'number' || typeof item === 'string') return String(item);
     return JSON.stringify(item);
   }
+
+  function visiblePreviewEntries(value: Preview): Array<[string, unknown]> {
+    const privateConditionFields = new Set([
+      'foodStoresBefore',
+      'foodStoresAfter',
+      'requirements'
+    ]);
+    return Object.entries(value).filter(([key]) => ![
+      'commandKind', 'basedOnRevision', 'rulesVersion', 'normalizedPayload'
+    ].includes(key) && !privateConditionFields.has(key));
+  }
 </script>
 
 <section class="provision-panel" aria-labelledby="provision-heading">
@@ -227,7 +238,7 @@
         <form method="POST" action="?/apiaryPreview" use:enhance={previewEnhancer('apiary', 'split', () => (splitTargetHiveId || emptyHives[0]?.hive?.id) ? { sourceColonyId: colony!.id, targetHiveId: splitTargetHiveId || emptyHives[0]!.hive!.id } : null)}>
           <label>Empty destination hive
             <select bind:value={splitTargetHiveId} disabled={!emptyHives.length}>
-              {#each emptyHives as cell}<option value={cell.hive!.id}>{cell.layoutKey} · equipment {cell.hive!.equipmentCondition}%</option>{/each}
+            {#each emptyHives as cell}<option value={cell.hive!.id}>{cell.layoutKey} · hive equipment</option>{/each}
             </select>
           </label>
           <button type="submit" class="secondary-button" data-apiary-command="split" disabled={pending || !emptyHives.length}>Preview colony split</button>
@@ -241,8 +252,7 @@
       <p class="eyebrow">Preview</p>
       <h3>{actionLabel(preview.commandKind)}</h3>
       <dl>
-        <div><dt>Current garden state</dt><dd>{preview.basedOnRevision}</dd></div>
-        {#each Object.entries(preview).filter(([key]) => !['commandKind','basedOnRevision','rulesVersion','normalizedPayload'].includes(key)) as [key, item]}
+        {#each visiblePreviewEntries(preview) as [key, item]}
           <div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{fieldValue(key, item)}</dd></div>
         {/each}
       </dl>

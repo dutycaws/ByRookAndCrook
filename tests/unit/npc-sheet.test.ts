@@ -15,6 +15,23 @@ describe('npc-sheet-v2', () => {
     expect(milestoneIntention(value, 0)?.targets).toEqual(['old-road']);
   });
 
+  it('accepts only supported initial-quest keepsake effects and artwork', () => {
+    const value = sheet();
+    value.campaign.initialQuestTrinket = {
+      catalogId: 'food_revenue', artworkId: 'copper-leaf', name: 'Roadside Token',
+      dedication: 'A small reminder of the road watch and the friends who came home.'
+    };
+    expect(validateNpcSheet(value)).toEqual([]);
+
+    const missingArtwork = structuredClone(value);
+    delete (missingArtwork.campaign.initialQuestTrinket as unknown as Record<string, unknown>).artworkId;
+    expect(codes(missingArtwork)).toContain('trinket_reward');
+
+    const unsupportedArtwork = structuredClone(value);
+    (unsupportedArtwork.campaign.initialQuestTrinket as unknown as Record<string, unknown>).artworkId = '/uploads/unreviewed.svg';
+    expect(codes(unsupportedArtwork)).toContain('trinket_reward');
+  });
+
   it('enforces appearance silhouette and normalized palette values', () => {
     const value = sheet(); value.appearance.silhouette = 'short'; value.appearance.palette = ['Forest-Green', 'forest-green', 'bad_value'];
     expect(codes(value)).toEqual(expect.arrayContaining(['text_length', 'palette']));

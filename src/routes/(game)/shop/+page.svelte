@@ -1,6 +1,5 @@
 <script lang="ts">
   import ShopMarket from '$lib/components/shop/ShopMarket.svelte';
-  import GeneratedSupplies from '$lib/components/shop/GeneratedSupplies.svelte';
   import type { PageProps } from './$types';
 
   let { data, form }: PageProps = $props();
@@ -13,10 +12,7 @@
 
 <main class="page-shell shop-page">
   {#if data.snapshot}
-    <ShopMarket snapshot={data.snapshot} />
-    {#if data.supplies}
-      <GeneratedSupplies supplies={data.supplies} saveId={data.snapshot.save.id} revision={data.snapshot.save.revision} {form} />
-    {/if}
+    <ShopMarket snapshot={data.snapshot} burnStyle={data.cardBurnStyle} supplies={data.supplies} {form} />
   {:else}
     <section class="panel empty-state" aria-labelledby="shop-onboarding-title">
       <p class="eyebrow">Elara's storefront</p>
@@ -28,5 +24,5 @@
 </main>
 
 <style>
-  .shop-page { width:min(1600px,calc(100% - 24px)); }
+  .shop-page { width:min(1600px,calc(100% - 24px)); margin:1rem auto; padding:0; }
 </style>

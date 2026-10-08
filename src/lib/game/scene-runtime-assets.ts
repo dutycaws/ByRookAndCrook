@@ -21,10 +21,17 @@ export const SCENE_RUNTIME_ASSETS = [
 export type SceneRuntimeAssetId = (typeof SCENE_RUNTIME_ASSETS)[number]['id'];
 export type SceneRuntimeAsset = (typeof SCENE_RUNTIME_ASSETS)[number];
 
+/** The authored residents share their neutral artwork across scene and journal. */
+export function barResidentArtworkId(name: string): 'bar-lira' | 'bar-torvin' | null {
+  if (name === 'Lira Nightwind') return 'bar-lira';
+  if (name === 'Torvin Ashbeard') return 'bar-torvin';
+  return null;
+}
+
 function isLocalSupabaseUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port === '57321';
+    return ['http:', 'https:'].includes(url.protocol) && ['127.0.0.1', 'localhost'].includes(url.hostname);
   } catch {
     return false;
   }

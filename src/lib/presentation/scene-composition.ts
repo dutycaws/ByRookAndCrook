@@ -45,6 +45,8 @@ export interface SceneActorDefinition extends ScenePlacement {
   placeholder: string;
   label: string;
   hitBounds: SceneRect;
+  /** Optional normalized pointer mask; visual art and keyboard focus remain unmasked. */
+  hitAreaPolygon?: readonly (readonly [number, number])[];
 }
 
 export interface SceneComposition {
@@ -95,7 +97,7 @@ export const SCENE_COMPOSITIONS: Readonly<Record<ComposedSceneId, SceneCompositi
     background: {
       kind: 'background', key: 'bar-background', alt: 'The candlelit common room of the tavern',
       x: 0, y: 0, width: 1672, height: 941, depth: 0,
-      compact: { x: -286, y: 0, width: 1672, height: 941 },
+      compact: { x: -100, y: 0, width: 1672, height: 941 },
       entrance: { x: 0, y: 0 }, exit: { x: 0, y: 0 }
     },
     actors: [
@@ -103,14 +105,27 @@ export const SCENE_COMPOSITIONS: Readonly<Record<ComposedSceneId, SceneCompositi
         kind: 'actor', key: 'bar-lira', label: 'Speak with Lira Nightwind', placeholder: 'Lira artwork',
         x: 408, y: 42, width: 690, height: 825, depth: 5,
         compact: { x: 148, y: 80, width: 610, height: 729 },
-        hitBounds: { x: 462, y: 98, width: 438, height: 690 },
+        hitBounds: { x: 569, y: 112, width: 361, height: 709 },
         entrance: { x: 85, y: 0 }, exit: { x: 150, y: 0 }
       },
       {
         kind: 'actor', key: 'bar-torvin', label: 'Speak with Torvin Ashbeard', placeholder: 'Torvin artwork',
         x: 730, y: 104, width: 590, height: 720, depth: 5,
         compact: { x: 500, y: 156, width: 510, height: 622 },
-        hitBounds: { x: 900, y: 152, width: 360, height: 604 },
+        hitBounds: { x: 785, y: 110, width: 474, height: 714 },
+        // Follows the visible silhouette while leaving the transparent left
+        // corridor open for Lira’s exposed arm in the overview.
+        hitAreaPolygon: [
+          [0.453, 0.004], [0.360, 0.065], [0.316, 0.138], [0.324, 0.155],
+          [0.199, 0.200], [0.106, 0.317], [0.105, 0.373], [0.137, 0.407],
+          [0.291, 0.424], [0.215, 0.541], [0.255, 0.570], [0.240, 0.614],
+          [0.258, 0.637], [0.199, 0.799], [0.226, 0.855], [0.216, 0.917],
+          [0.174, 0.973], [0.193, 1.000], [0.341, 1.000], [0.356, 0.984],
+          [0.802, 0.979], [0.907, 0.951], [0.883, 0.917], [0.797, 0.889],
+          [0.770, 0.833], [0.779, 0.715], [0.811, 0.693], [0.747, 0.502],
+          [0.834, 0.418], [0.858, 0.351], [0.715, 0.216], [0.627, 0.177],
+          [0.601, 0.121], [0.617, 0.059], [0.559, 0.004]
+        ],
         entrance: { x: 85, y: 0 }, exit: { x: 150, y: 0 }
       }
     ],
@@ -118,7 +133,7 @@ export const SCENE_COMPOSITIONS: Readonly<Record<ComposedSceneId, SceneCompositi
       {
         kind: 'foreground', key: 'bar-counter-occlusion', alt: '',
         x: 0, y: 665, width: 1672, height: 276, depth: 8,
-        compact: { x: -286, y: 665, width: 1672, height: 276 },
+        compact: { x: -100, y: 665, width: 1672, height: 276 },
         entrance: { x: 0, y: 40 }, exit: { x: 0, y: 40 }
       }
     ]
