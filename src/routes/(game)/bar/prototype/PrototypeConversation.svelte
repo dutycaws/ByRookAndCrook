@@ -1,7 +1,13 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import type { BarPrototypeModel } from './types';
-  let { model }: { model: BarPrototypeModel } = $props();
+  let {
+    model,
+    presentation = 'standard'
+  }: {
+    model: BarPrototypeModel;
+    presentation?: 'standard' | 'player-hand';
+  } = $props();
   let latestEntries = $derived(model.history.slice(-3));
 
   async function closeConversation() {
@@ -14,14 +20,27 @@
   }
 </script>
 
-<section class="conversation-card" aria-label="Conversation with {model.selected?.name}">
-  <header>
-    <div>
-      <p class="conversation-kicker">Card selected · {model.selectedCard?.kind === 'hospitality' ? 'hospitality' : 'intent'}</p>
-      <h2>{model.selected?.name}</h2>
-    </div>
-    <button class="close-chat" type="button" aria-label="Close conversation" onclick={closeConversation}>×</button>
-  </header>
+<section class="conversation-card" class:player-hand={presentation === 'player-hand'} aria-label="Conversation with {model.selected?.name}">
+  {#if presentation === 'player-hand' && model.selectedCard}
+    <header class="player-hand-header">
+      <span class="card-thumb {model.selectedCard.color}" aria-hidden="true">{model.selectedCard.kind === 'hospitality' ? '♨' : '✦'}</span>
+      <div class="card-identity">
+        <p class="conversation-kicker">{model.selectedCard.kind === 'hospitality' ? 'Hospitality' : 'Intent'} card</p>
+        <h2>{model.selectedCard.title}</h2>
+        <span class="card-detail">{model.selectedCard.detail}</span>
+      </div>
+      <span class="recipient-name">{model.selected?.name}</span>
+      <button class="close-chat" type="button" aria-label="Close conversation" onclick={closeConversation}>×</button>
+    </header>
+  {:else}
+    <header>
+      <div>
+        <p class="conversation-kicker">Card selected · {model.selectedCard?.kind === 'hospitality' ? 'hospitality' : 'intent'}</p>
+        <h2>{model.selected?.name}</h2>
+      </div>
+      <button class="close-chat" type="button" aria-label="Close conversation" onclick={closeConversation}>×</button>
+    </header>
+  {/if}
 
   <div class="recent-messages" aria-live="polite">
     {#if latestEntries.length}
@@ -36,8 +55,8 @@
   </div>
 
   <label class="conversation-composer">
-    <span>To {model.selected?.name}</span>
-    <textarea data-prototype-conversation-input value={model.draft} oninput={(event) => model.ondraft(event.currentTarget.value)} placeholder="Write a short note…" rows="2"></textarea>
+    {#if presentation === 'standard'}<span>To {model.selected?.name}</span>{/if}
+    <textarea data-prototype-conversation-input aria-label="Write to {model.selected?.name}" value={model.draft} oninput={(event) => model.ondraft(event.currentTarget.value)} placeholder="Write a short note…" rows={presentation === 'player-hand' ? 1 : 2}></textarea>
   </label>
   <div class="conversation-actions">
     {#if model.selectedCard?.kind === 'hospitality'}
@@ -69,4 +88,34 @@
   .conversation-actions button { min-height: 2.15rem; padding: .38rem .65rem; border: 1px solid #806631; border-radius: .35rem; color: #211607; background: #dfbd65; font: inherit; font-size: .73rem; font-weight: 700; cursor: pointer; }
   .conversation-actions button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
   .conversation-notice { margin: 0; color: #d8c589; font-size: .68rem; }
+  .conversation-card.player-hand { grid-template-rows: 2.6rem minmax(2rem, 1fr) 2.65rem 2.5rem auto; gap: .28rem; padding: .55rem .72rem; border-color: #e0c783; color: #fff0c9; background: linear-gradient(165deg, rgb(50 38 19 / .98), rgb(22 16 9 / .98)); }
+  .player-hand-header { display: flex; min-width: 0; align-items: center; gap: .55rem; }
+  .card-thumb { display: grid; width: 2rem; height: 2.45rem; flex: 0 0 auto; place-items: center; border: 1px solid #e4c56c; border-radius: .22rem .3rem .28rem .22rem; color: #ffe9a3; background: linear-gradient(155deg, #65502a, #281b0c 68%); box-shadow: inset 0 0 0 2px rgb(242 220 161 / .14); font: 1rem Georgia, serif; }
+  .card-thumb.sage { background: linear-gradient(155deg, #48613d, #192218 68%); }
+  .card-thumb.copper { background: linear-gradient(155deg, #925b37, #2d160c 68%); }
+  .card-thumb.plum { background: linear-gradient(155deg, #6d506b, #241625 68%); }
+  .card-identity { display: grid; min-width: 0; gap: .03rem; }
+  .conversation-card.player-hand .conversation-kicker { margin: 0; font-size: .56rem; }
+  .conversation-card.player-hand h2 { overflow: hidden; color: #ffe39a; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
+  .card-identity .card-detail { overflow: hidden; color: #d4c399; font-size: .6rem; text-overflow: ellipsis; white-space: nowrap; }
+  .recipient-name { margin-left: auto; color: #f1e4c6; font: 600 .68rem 'Cinzel', Georgia, serif; white-space: nowrap; }
+  .conversation-card.player-hand .close-chat { width: 2.5rem; height: 2.5rem; }
+  .conversation-card.player-hand .recent-messages { display: grid; min-height: 0; max-height: 100%; align-content: start; gap: .35rem; overflow-x: hidden; overflow-y: auto; }
+  .conversation-card.player-hand .recent-messages p { min-width: 0; padding: .3rem .42rem; font-size: .74rem; line-height: 1.35; overflow-wrap: anywhere; white-space: normal; }
+  .conversation-card.player-hand .conversation-composer { min-height: 0; display: block; }
+  .conversation-card.player-hand .conversation-composer textarea { min-height: 2.65rem; height: 2.65rem; resize: none; padding: .42rem .55rem; color: #fff5da; background: #100b07; font-size: .85rem; }
+  .conversation-card.player-hand .conversation-actions { align-items: center; }
+  .conversation-card.player-hand .conversation-actions button { min-height: 2.5rem; padding: .24rem .7rem; }
+  .conversation-card.player-hand .conversation-notice { max-height: 1rem; overflow: hidden; font-size: .6rem; }
+  @media (max-width: 1000px) {
+    .conversation-card.player-hand { grid-template-rows: 2.5rem minmax(2rem, 1fr) 2.5rem 2.5rem auto; gap: .2rem; padding: .4rem .5rem; }
+    .card-thumb { width: 1.55rem; height: 1.9rem; font-size: .8rem; }
+    .conversation-card.player-hand h2 { font-size: .78rem; }
+    .card-identity .card-detail { display: none; }
+    .recipient-name { font-size: .62rem; }
+    .conversation-card.player-hand .close-chat { width: 2.5rem; height: 2.5rem; }
+    .conversation-card.player-hand .recent-messages p { font-size: .74rem; }
+    .conversation-card.player-hand .conversation-composer textarea { min-height: 2.5rem; height: 2.5rem; padding: .28rem .42rem; font-size: .85rem; }
+    .conversation-card.player-hand .conversation-actions button { min-height: 2.5rem; padding: .18rem .55rem; font-size: .73rem; }
+  }
 </style>

@@ -15,14 +15,27 @@
   } = $props();
 
   function railKeydown(event: KeyboardEvent) {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const directional = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+    const endpoint = variant === 'B' && (event.key === 'Home' || event.key === 'End');
+    if (!directional && !endpoint) return;
     const rail = event.currentTarget as HTMLElement;
     const buttons = [...rail.querySelectorAll<HTMLButtonElement>('button')];
     const index = buttons.indexOf(event.target as HTMLButtonElement);
     if (index < 0 || buttons.length === 0) return;
     event.preventDefault();
     event.stopPropagation();
-    buttons[(index + (event.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (index + (event.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length;
+    const nextButton = buttons[nextIndex];
+    if (variant === 'B') {
+      nextButton?.focus({ preventScroll: true });
+      nextButton?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    } else {
+      nextButton?.focus();
+    }
   }
 
   async function selectCard(id: string) {
@@ -42,7 +55,7 @@
         class:selected={selectedCardId === card.id}
         aria-pressed={selectedCardId === card.id}
         data-prototype-card-id={card.id}
-        style={`--card-index:${index};--card-count:${cards.length};--fan-tilt:${(index - (cards.length - 1) / 2) * 12}deg;--mobile-tilt:${(index - (cards.length - 1) / 2) * 8}deg;--ribbon-tilt:${(index - (cards.length - 1) / 2) * 5}deg;--fan-lift:${Math.abs(index - (cards.length - 1) / 2) * 8}px;--ribbon-lift:${Math.abs(index - (cards.length - 1) / 2) * 3}px`}
+        style={`--card-index:${index};--card-count:${cards.length};--fan-tilt:${(index - (cards.length - 1) / 2) * 12}deg;--mobile-tilt:${(index - (cards.length - 1) / 2) * 8}deg;--ribbon-tilt:${(index - (cards.length - 1) / 2) * 5}deg;--player-tilt:${(index - (cards.length - 1) / 2) * 5}deg;--player-mobile-tilt:${(index - (cards.length - 1) / 2) * 3}deg;--fan-lift:${Math.abs(index - (cards.length - 1) / 2) * 8}px;--player-lift:${Math.abs(index - (cards.length - 1) / 2) * 44}px;--player-mobile-lift:${Math.abs(index - (cards.length - 1) / 2) * 20}px;--ribbon-lift:${Math.abs(index - (cards.length - 1) / 2) * 3}px`}
         onclick={() => selectCard(card.id)}
       >
         <span class="card-type">{card.kind === 'intent' ? 'Intent' : 'Hospitality'}</span>
@@ -95,5 +108,21 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .fan-card { transition: none; }
+  }
+
+  /* B: a wide player-side hand; its selected card stays clear of the layered composer. */
+  .hand-space.B { width: 92%; max-width: 92%; margin-inline: auto; }
+  .hand-space.B .card-fan { width: 100%; height: clamp(13rem, 28vh, 14rem); min-height: 0; align-items: end; justify-content: space-between; gap: .6rem; padding: 0 1.15rem .05rem; overflow: visible; }
+  .hand-space.B .fan-card { width: clamp(10.625rem, 16vw, 13.75rem); height: clamp(11.25rem, 25vh, 13.75rem); flex: 0 0 clamp(10.625rem, 16vw, 13.75rem); margin-right: 0; transform: translateY(var(--player-lift)) rotate(var(--player-tilt)); scroll-snap-align: center; }
+  @media (max-width: 1000px) {
+    .hand-space.B { width: 96%; max-width: 96%; }
+    .hand-space.B .card-fan { width: 100%; height: 190px; min-height: 190px; align-items: flex-start; justify-content: flex-start; gap: .35rem; padding: 0 .45rem; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; scroll-snap-type: x proximity; scrollbar-width: thin; }
+    .hand-space.B .fan-card { width: clamp(5.2rem, 21.5vw, 5.8rem); height: 145px; flex: 0 0 clamp(5.2rem, 21.5vw, 5.8rem); margin-right: 0; padding: .48rem .4rem; transform: translateY(var(--player-mobile-lift)) rotate(var(--player-mobile-tilt)); }
+    .hand-space.B .fan-card strong { font-size: .72rem; }
+    .hand-space.B .card-detail { font-size: .6rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hand-space.B .fan-card { transition: opacity 80ms ease; }
+    .hand-space.B .fan-card:hover, .hand-space.B .fan-card.selected { translate: 0 0; }
   }
 </style>

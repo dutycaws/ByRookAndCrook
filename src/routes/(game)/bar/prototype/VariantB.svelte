@@ -31,21 +31,27 @@
   >
     {#snippet interaction()}
       {#if model.selected}
-        <div class="player-stage">
+        <div class="player-interaction">
           <div class="stage-controls">
             <button class="unfocus" type="button" aria-label="Close {model.selected.name} and return to the room" title="Return to the room" onclick={model.onback}>×</button>
             <button class="journal-toggle" type="button" data-prototype-opener="journal" aria-expanded={model.mode === 'journal'} onclick={model.onjournal}>Journal</button>
           </div>
 
-          <div class="player-hand">
-            <PrototypeCardFan cards={model.cards} selectedCardId={model.selectedCardId} variant="B" oncard={model.oncard} />
+          <div
+            class="player-stage"
+            class:has-chat={model.mode === 'talk' && Boolean(model.selectedCard)}
+            class:has-journal={model.mode === 'journal'}
+          >
+            <div class="player-hand">
+              <PrototypeCardFan cards={model.cards} selectedCardId={model.selectedCardId} variant="B" oncard={model.oncard} />
+            </div>
+
+            {#if model.mode === 'talk' && model.selectedCard}
+              <div class="conversation-float"><PrototypeConversation {model} presentation="player-hand" /></div>
+            {/if}
+
+            <PrototypeJournal {model} />
           </div>
-
-          {#if model.mode === 'talk' && model.selectedCard}
-            <div class="conversation-float"><PrototypeConversation {model} /></div>
-          {/if}
-
-          <PrototypeJournal {model} />
         </div>
       {/if}
     {/snippet}
@@ -55,6 +61,7 @@
 <style>
   .variant-b { position: relative; min-width: 0; color: #eee2c4; }
   .variant-b :global(.scene-interaction) { z-index: 20; inset: 0; width: auto; max-height: none; margin: 0; padding: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; pointer-events: none; }
+  .player-interaction { position: absolute; z-index: 20; inset: 0; pointer-events: none; }
   .player-stage { position: absolute; inset: 0; pointer-events: none; }
   .stage-controls { position: absolute; z-index: 35; top: .65rem; right: .65rem; display: flex; align-items: center; justify-content: flex-end; gap: .4rem; pointer-events: auto; }
   .stage-controls button { min-height: 2rem; border: 1px solid rgb(197 161 89 / .78); color: #f5e9c9; background: rgb(19 14 8 / .89); box-shadow: 0 3px 10px rgb(0 0 0 / .35); cursor: pointer; }
@@ -62,20 +69,34 @@
   .stage-controls .journal-toggle { min-height: 1.85rem; padding: .28rem .55rem; border-radius: 999px; font: 600 .68rem 'Cinzel', Georgia, serif; }
   .stage-controls button:hover, .stage-controls button:focus-visible { border-color: #ffe08a; }
   .stage-controls button:focus-visible { outline: 2px solid #ffe08a; outline-offset: 2px; }
-  .conversation-float { position: absolute; z-index: 25; top: 4rem; right: 1.15rem; width: min(22rem, calc(100% - 2.3rem)); pointer-events: auto; }
-  .player-hand { position: absolute; z-index: 28; right: 0; bottom: .1rem; left: 0; display: flex; justify-content: center; pointer-events: none; }
+  .conversation-float { position: absolute; z-index: 40; right: auto; bottom: 1rem; left: 50%; display: flex; width: min(680px, 68vw); justify-content: center; transform: translateX(-50%); pointer-events: none; animation: composer-rise 200ms cubic-bezier(.2,.75,.25,1) both; }
+  .conversation-float :global(.conversation-card) { width: 100%; height: 230px; pointer-events: auto; }
+  .player-hand { position: absolute; z-index: 28; right: 0; bottom: 2rem; left: 0; display: flex; justify-content: center; pointer-events: none; }
+  .player-hand :global(.fan-card) { transition: opacity 150ms ease, transform 150ms ease, translate 150ms ease, border-color 150ms ease, box-shadow 150ms ease; }
+  .player-stage.has-chat .player-hand :global(.fan-card:not(.selected)) { opacity: .4; }
+  .player-stage.has-chat .player-hand :global(.fan-card.selected) { opacity: .76; }
   .player-hand :global(.hand-space) { animation: hand-rise 270ms cubic-bezier(.2,.75,.25,1) both; }
   @keyframes hand-rise { from { opacity: 0; translate: 0 6rem; } to { opacity: 1; translate: 0 0; } }
+  @keyframes composer-rise { from { opacity: 0; translate: 0 3rem; } to { opacity: 1; translate: 0 0; } }
+  @keyframes composer-fade { from { opacity: 0; } to { opacity: 1; } }
   @media (max-width: 1000px) {
     .variant-b :global(.scene-interaction) { position: relative; inset: auto; width: auto; max-height: none; margin-top: .45rem; padding: 0; overflow: visible; pointer-events: auto; }
-    .player-stage { position: relative; inset: auto; display: grid; gap: .25rem; pointer-events: auto; }
+    .player-interaction { position: relative; inset: auto; }
     .stage-controls { position: relative; inset: auto; min-height: 2rem; }
-    .conversation-float { position: relative; inset: auto; width: auto; }
-    .player-hand { position: relative; inset: auto; display: block; }
+    .player-stage { position: relative; inset: auto; height: 280px; pointer-events: auto; }
+    .conversation-float { bottom: 14px; width: 92%; }
+    .conversation-float :global(.conversation-card) { width: 100%; height: 230px; }
+    .player-hand { right: 0; bottom: 90px; left: 0; }
+    .player-stage.has-journal { display: grid; height: auto; gap: .25rem; }
+    .player-stage.has-journal .player-hand { position: relative; inset: auto; }
   }
   @media (max-width: 620px) {
     .stage-controls { margin-inline: .1rem; }
-    .conversation-float { width: 100%; }
+    .player-stage { height: 320px; }
   }
-  @media (prefers-reduced-motion: reduce) { .player-hand :global(.hand-space) { animation: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .player-hand :global(.hand-space) { animation: none; }
+    .player-hand :global(.fan-card) { transition: opacity 80ms ease; }
+    .conversation-float { animation: composer-fade 80ms ease-out both; }
+  }
 </style>
