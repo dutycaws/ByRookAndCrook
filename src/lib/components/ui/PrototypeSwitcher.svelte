@@ -1,13 +1,12 @@
 <script lang="ts">
   import { replaceState } from '$app/navigation';
   import { page } from '$app/state';
-  type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D';
+  type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
   const variants: { key: BarPrototypeVariant; name: string }[] = [
-    { key: 'A', name: 'Face-side float' },
-    { key: 'B', name: 'Player’s hand' },
-    { key: 'C', name: 'Conversation ribbon' },
-    { key: 'D', name: 'Previous countertop' }
+    { key: 'B', name: 'Balanced' },
+    { key: 'E', name: 'Quick' },
+    { key: 'F', name: 'Soft' }
   ];
 
   let {
@@ -63,7 +62,7 @@
 {#if import.meta.env.DEV}
   <nav class="prototype-switcher" aria-label="Bar prototype variants">
     <button type="button" aria-label="Previous variant" onclick={() => change(-1)}>←</button>
-    <span class="variant-name"><strong>{current}</strong><span>{variants.find((variant) => variant.key === current)?.name}</span></span>
+    <span class="variant-name"><strong>{current}{variants.some((variant) => variant.key === current) ? ' · B foundation' : ''}</strong><span>{variants.find((variant) => variant.key === current)?.name ?? 'Earlier comparison'}</span></span>
     <button type="button" aria-label="Next variant" onclick={() => change(1)}>→</button>
     <details class="prototype-tools">
       <summary aria-label="Show prototype state and controls">⋯</summary>

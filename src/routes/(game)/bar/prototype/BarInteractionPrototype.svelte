@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Question: which card-first conversation layout works best? The old B was closest; a persistent fan and card-first flow are accepted, while the new layout winner is pending.
+  // B is the locked layout. B/E/F compare motion, transparency, chat density, and utility placement.
   import { tick } from 'svelte';
   import PrototypeSwitcher from '$lib/components/ui/PrototypeSwitcher.svelte';
   import type { OwnedTrinket } from '$lib/game/trinkets';
@@ -158,6 +158,12 @@
   function stateForDebug() {
     return {
       variant,
+      treatment: variant === 'E' ? 'Quick' : variant === 'F' ? 'Soft' : 'Balanced',
+      presentation: variant === 'E'
+        ? { handRiseMs: 170, chatRiseMs: 140, handOpacity: .55, chatOpacity: .96, inputRows: 1, cardDetail: false, tools: 'left scene edge' }
+        : variant === 'F'
+          ? { handRiseMs: 320, chatRiseMs: 240, handOpacity: .32, chatOpacity: .82, inputRows: 3, cardDetail: true, tools: 'upper right' }
+          : { handRiseMs: 240, chatRiseMs: 180, handOpacity: .42, chatOpacity: .9, inputRows: 2, cardDetail: true, tools: 'upper left' },
       selectedNpc: selected ? { id: selected.instanceId, name: selected.name } : null,
       focusedNpc: focusedInstanceId,
       mode,
@@ -211,6 +217,7 @@
 
   async function handleEscape(event: KeyboardEvent) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
+    if (document.querySelector('[data-prototype-tool-open]')) return;
     if (document.querySelector('dialog[open]')) return;
     if (mode === 'journal') {
       event.preventDefault();
@@ -240,8 +247,8 @@
 <section class="bar-prototype" aria-label="Bar interaction prototype">
   {#if variant === 'A'}
     <VariantA {...model} />
-  {:else if variant === 'B'}
-    <VariantB {...model} />
+  {:else if variant === 'B' || variant === 'E' || variant === 'F'}
+    <VariantB {model} treatment={variant} />
   {:else if variant === 'C'}
     <VariantC {...model} />
   {:else}

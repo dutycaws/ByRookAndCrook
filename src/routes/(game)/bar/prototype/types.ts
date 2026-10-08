@@ -1,7 +1,7 @@
 import type { OwnedTrinket, TrinketSlot } from '$lib/game/trinkets';
 import type { Patron } from '$lib/game/serving';
 
-export type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D';
+export type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 export type PrototypeMode = 'overview' | 'talk' | 'cards' | 'journal';
 export type MockCardKind = 'intent' | 'hospitality';
 

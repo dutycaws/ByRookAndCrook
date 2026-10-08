@@ -19,7 +19,7 @@
 
   function parsePrototypeVariant(value: string | null): BarPrototypeVariant | null {
     const normalized = value?.toUpperCase();
-    return normalized === 'A' || normalized === 'B' || normalized === 'C' || normalized === 'D'
+    return normalized === 'A' || normalized === 'B' || normalized === 'C' || normalized === 'D' || normalized === 'E' || normalized === 'F'
       ? normalized
       : null;
   }
