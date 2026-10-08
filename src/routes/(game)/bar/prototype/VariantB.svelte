@@ -58,9 +58,7 @@
 </div>
 
 <style>
-  .variant-b { position: relative; min-width: 0; color: #eee2c4; container-type: inline-size; --prototype-scene-height: calc(100cqw * 9 / 16); --hand-time: 240ms; --chat-time: 180ms; --chat-width: min(620px, 68vw); --chat-height: 270px; --chat-opacity: .9; --hand-opacity: .42; --selected-opacity: .76; }
-  .variant-b[data-treatment='E'] { --hand-time: 170ms; --chat-time: 140ms; --chat-width: min(520px, 68vw); --chat-height: 230px; --chat-opacity: .96; --hand-opacity: .55; --selected-opacity: .84; }
-  .variant-b[data-treatment='F'] { --hand-time: 320ms; --chat-time: 240ms; --chat-width: min(700px, 76vw); --chat-height: 310px; --chat-opacity: .82; --hand-opacity: .32; --selected-opacity: .68; }
+  .variant-b { position: relative; min-width: 0; color: #eee2c4; container-type: inline-size; --prototype-scene-height: calc(100cqw * 9 / 16); --hand-time: 320ms; --chat-time: 240ms; --chat-width: min(700px, 76vw); --chat-height: 310px; --chat-opacity: .82; --hand-opacity: .32; --selected-opacity: .68; }
   .variant-b :global(.scene-interaction) { z-index: 20; inset: 0; width: auto; max-height: none; margin: 0; padding: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; pointer-events: none; }
   .player-interaction, .player-stage { position: absolute; inset: 0; pointer-events: none; }
   .stage-controls { position: absolute; z-index: 35; top: .65rem; right: .65rem; pointer-events: auto; }

@@ -14,19 +14,31 @@
     treatment?: 'B' | 'E' | 'F';
   };
 
-  let { model, treatment = 'B' }: Props = $props();
-  const slots: readonly TrinketSlot[] = [0, 1, 2, 3];
+  type SlotAnchor = {
+    slot: TrinketSlot;
+    left: string;
+    top: string;
+  };
 
-  let trinketsOpen = $state(false);
-  let selectedSlot = $state<TrinketSlot>(0);
+  let { model, treatment = 'B' }: Props = $props();
+
+  const slotAnchors: readonly SlotAnchor[] = [
+    { slot: 0, left: '3.5%', top: '19%' },
+    { slot: 1, left: '85%', top: '19%' },
+    { slot: 2, left: '3.5%', top: '34%' },
+    { slot: 3, left: '85%', top: '34%' }
+  ];
+
+  let activeSlot = $state<TrinketSlot | null>(null);
+  let activeSlotOpener = $state<HTMLButtonElement>();
   let selectedTrinketId = $state<string | null>(null);
   let localSlotAssignments = $state<Record<string, TrinketSlot | null>>({});
   let sampleTrinkets = $state<OwnedTrinket[]>([]);
   let announcement = $state('');
+  let choosingTrinket = $state(false);
 
   let journalCloseButton = $state<HTMLButtonElement>();
-  let trinketsButton = $state<HTMLButtonElement>();
-  let trinketsCloseButton = $state<HTMLButtonElement>();
+  let slotCloseButton = $state<HTMLButtonElement>();
   let detailElement = $state<HTMLElement>();
 
   const collection = $derived([...model.trinkets, ...sampleTrinkets]);
@@ -36,9 +48,6 @@
   const selectedTrinketSlot = $derived(
     selectedTrinket ? slotFor(selectedTrinket) : null
   );
-  const equippedBySlot = $derived(
-    slots.map((slot) => collection.find((item) => slotFor(item) === slot) ?? null)
-  );
 
   function slotFor(item: OwnedTrinket): TrinketSlot | null {
     return Object.prototype.hasOwnProperty.call(localSlotAssignments, item.id)
@@ -47,7 +56,10 @@
   }
 
   async function openJournal() {
-    trinketsOpen = false;
+    if (!model.selected) return;
+    activeSlot = null;
+    activeSlotOpener = undefined;
+    selectedTrinketId = null;
     model.onjournal();
     await tick();
     journalCloseButton?.focus({ preventScroll: true });
@@ -57,36 +69,60 @@
     model.onjournalclose();
   }
 
-  async function toggleTrinkets() {
-    if (trinketsOpen) {
-      await closeTrinkets();
+  async function toggleSlotDetails(slot: TrinketSlot, event: MouseEvent) {
+    if (model.selected) return;
+
+    if (activeSlot === slot) {
+      await closeSlotDetails();
       return;
     }
 
-    if (model.mode === 'journal') model.onjournalclose();
-    trinketsOpen = true;
+    activeSlotOpener = event.currentTarget as HTMLButtonElement;
+    activeSlot = slot;
+    selectedTrinketId = collection.find((item) => slotFor(item) === slot)?.id ?? null;
+    choosingTrinket = selectedTrinketId === null;
+    announcement = '';
     await tick();
-    trinketsCloseButton?.focus({ preventScroll: true });
+    slotCloseButton?.focus({ preventScroll: true });
   }
 
-  async function closeTrinkets() {
-    trinketsOpen = false;
+  async function closeSlotDetails() {
+    const opener = activeSlotOpener;
+    activeSlot = null;
+    activeSlotOpener = undefined;
+    selectedTrinketId = null;
     await tick();
-    trinketsButton?.focus({ preventScroll: true });
-  }
-
-  function handlePopupKeydown(event: KeyboardEvent, popup: 'journal' | 'trinkets') {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if (popup === 'journal') closeJournal();
-    else void closeTrinkets();
+    if (!model.selected && opener?.isConnected && !opener.disabled) {
+      opener.focus({ preventScroll: true });
+    }
   }
 
   function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
-    if (trinketsOpen) handlePopupKeydown(event, 'trinkets');
-    else if (model.mode === 'journal') handlePopupKeydown(event, 'journal');
+
+    if (activeSlot !== null && !model.selected) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void closeSlotDetails();
+    } else if (model.mode === 'journal' && model.selected) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeJournal();
+    }
+  }
+
+  $effect(() => {
+    if (!model.selected || activeSlot === null) return;
+    activeSlot = null;
+    activeSlotOpener = undefined;
+    selectedTrinketId = null;
+  });
+
+  async function selectTrinket(id: string) {
+    selectedTrinketId = id;
+    choosingTrinket = false;
+    await tick();
+    detailElement?.focus({ preventScroll: true });
   }
 
   function addSampleTrinkets() {
@@ -117,30 +153,24 @@
       }
     ];
     selectedTrinketId = 'prototype-sample-copper-leaf';
+    choosingTrinket = false;
     announcement = 'Two local sample trinkets added to the preview.';
   }
 
-  async function selectTrinket(id: string) {
-    selectedTrinketId = id;
-    await tick();
-    detailElement?.focus({ preventScroll: true });
-    detailElement?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
-  }
-
   async function placeSelectedTrinket() {
-    if (!selectedTrinket) return;
+    const destination = activeSlot;
+    if (!selectedTrinket || destination === null) return;
 
     const nextAssignments = { ...localSlotAssignments };
-
     for (const item of collection) {
-      if (item.id !== selectedTrinket.id && slotFor(item) === selectedSlot) {
+      if (item.id !== selectedTrinket.id && slotFor(item) === destination) {
         nextAssignments[item.id] = null;
       }
     }
 
-    nextAssignments[selectedTrinket.id] = selectedSlot;
+    nextAssignments[selectedTrinket.id] = destination;
     localSlotAssignments = nextAssignments;
-    announcement = `${selectedTrinket.name} placed in slot ${selectedSlot + 1} for this preview.`;
+    announcement = selectedTrinket.name + ' placed in slot ' + (destination + 1) + ' for this preview.';
     await tick();
     detailElement?.focus({ preventScroll: true });
   }
@@ -152,7 +182,7 @@
       ...localSlotAssignments,
       [selectedTrinket.id]: null
     };
-    announcement = `${selectedTrinket.name} removed from slot ${previousSlot + 1} in this preview.`;
+    announcement = selectedTrinket.name + ' removed from slot ' + (previousSlot + 1) + ' in this preview.';
     await tick();
     detailElement?.focus({ preventScroll: true });
   }
@@ -160,28 +190,57 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div class="prototype-scene-tools treatment-{treatment.toLowerCase()}" aria-label="Scene tools">
-  <div class="tool-buttons" role="group" aria-label="Journal and trinkets">
-    <button
-      class="tool-button"
-      type="button"
-      data-prototype-opener="journal"
-      aria-expanded={model.mode === 'journal'}
-      aria-controls="prototype-scene-journal"
-      disabled={!model.selected}
-      onclick={openJournal}
-    >Journal</button>
-    <button
-      bind:this={trinketsButton}
-      class="tool-button"
-      type="button"
-      aria-expanded={trinketsOpen}
-      aria-controls="prototype-scene-trinkets"
-      onclick={toggleTrinkets}
-    >Trinkets</button>
+<div class="prototype-scene-tools treatment-{treatment.toLowerCase()}">
+  <div
+    class="scene-keepsake-anchors"
+    class:has-patron={model.selected !== null}
+    role="group"
+    aria-label="Keepsake display slots"
+    aria-hidden={model.selected ? 'true' : undefined}
+    inert={model.selected !== null}
+  >
+    {#each slotAnchors as anchor (anchor.slot)}
+      {@const item = collection.find((entry) => slotFor(entry) === anchor.slot) ?? null}
+      <button
+        class="scene-keepsake-place"
+        class:active={activeSlot === anchor.slot}
+        type="button"
+        data-keepsake-slot={anchor.slot + 1}
+        style={'left:' + anchor.left + ';top:' + anchor.top}
+        aria-label={item
+          ? 'Keepsake slot ' + (anchor.slot + 1) + ', ' + item.name + '. Open its details.'
+          : 'Keepsake slot ' + (anchor.slot + 1) + ', empty. Open its collection.'}
+        aria-expanded={activeSlot === anchor.slot}
+        aria-controls="prototype-slot-details"
+        aria-pressed={activeSlot === anchor.slot}
+        disabled={model.selected !== null}
+        onclick={(event) => void toggleSlotDetails(anchor.slot, event)}
+      >
+        {#if item}
+          <span class="scene-keepsake-art" aria-hidden="true">
+            <img src={TRINKET_ARTWORK[item.artworkId].src} alt="" />
+          </span>
+        {:else}
+          <span class="scene-keepsake-empty" aria-hidden="true">◇</span>
+        {/if}
+      </button>
+    {/each}
   </div>
 
-  {#if model.mode === 'journal'}
+  {#if model.selected}
+    <div class="tool-buttons" role="group" aria-label="Scene tools">
+      <button
+        class="tool-button journal-opener"
+        type="button"
+        data-prototype-opener="journal"
+        aria-expanded={model.mode === 'journal'}
+        aria-controls="prototype-scene-journal"
+        onclick={openJournal}
+      >Journal</button>
+    </div>
+  {/if}
+
+  {#if model.selected && model.mode === 'journal'}
     <FloatingSurface
       as="section"
       class="tool-popover journal-popover"
@@ -190,11 +249,10 @@
       aria-labelledby="prototype-journal-title"
       tabindex={-1}
       data-prototype-tool-open
-      onkeydown={(event) => handlePopupKeydown(event, 'journal')}
     >
-      <header class="popover-header">
+      <header class="popover-header journal-header">
         <div>
-          <p class="eyebrow">{model.selected?.name ?? 'Bar journal'}</p>
+          <p class="eyebrow">{model.selected.name}</p>
           <h2 id="prototype-journal-title">Recent notes</h2>
         </div>
         <button
@@ -206,68 +264,55 @@
         >×</button>
       </header>
 
-      {#if model.history.length > 0}
-        <ol class="journal-entries" aria-label="Journal entries">
-          {#each model.history as entry (entry.id)}
-            <li class="journal-entry">
-              <span class="entry-label">{entry.label ?? entry.kind}</span>
-              <p>{entry.text}</p>
-            </li>
-          {/each}
-        </ol>
-      {:else}
-        <p class="empty-message">Nothing has been recorded yet.</p>
-      {/if}
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable journal needs keyboard focus.) -->
+      <div class="journal-body" role="region" tabindex="0" aria-label="Journal entries">
+        {#if model.history.length > 0}
+          <ol class="journal-entries">
+            {#each model.history as entry (entry.id)}
+              <li class="journal-entry">
+                <span class="entry-label">{entry.label ?? entry.kind}</span>
+                <p>{entry.text}</p>
+              </li>
+            {/each}
+          </ol>
+        {:else}
+          <p class="empty-message">Nothing has been recorded yet.</p>
+        {/if}
+      </div>
 
-      <a class="archive-link" href={model.archiveHref}>Open the archive</a>
+      <footer class="journal-footer">
+        <a class="archive-link" href={model.archiveHref}>Open the archive</a>
+      </footer>
     </FloatingSurface>
   {/if}
 
-  {#if trinketsOpen}
+  {#if activeSlot !== null && !model.selected}
     <FloatingSurface
       as="section"
-      class="tool-popover trinkets-popover"
-      id="prototype-scene-trinkets"
+      class={'tool-popover slot-popover ' + (activeSlot % 2 === 0 ? 'slot-left' : 'slot-right')}
+      id="prototype-slot-details"
       role="region"
-      aria-labelledby="prototype-trinkets-title"
+      aria-labelledby="prototype-slot-title"
       tabindex={-1}
+      style={'--slot-y:' + (activeSlot < 2 ? '19%' : '34%')}
       data-prototype-tool-open
-      onkeydown={(event) => handlePopupKeydown(event, 'trinkets')}
     >
       <header class="popover-header">
         <div>
-          <p class="eyebrow">Keepsake collection</p>
-          <h2 id="prototype-trinkets-title">Trinkets</h2>
+          <p class="eyebrow">Keepsake slot {activeSlot + 1}</p>
+          <h2 id="prototype-slot-title">{choosingTrinket ? 'Choose a trinket' : selectedTrinket?.name ?? 'Empty slot'}</h2>
         </div>
         <button
-          bind:this={trinketsCloseButton}
+          bind:this={slotCloseButton}
           class="close-button"
           type="button"
-          aria-label="Close trinkets"
-          onclick={closeTrinkets}
+          aria-label="Close slot details"
+          onclick={closeSlotDetails}
         >×</button>
       </header>
 
-      <div class="slot-picker" role="group" aria-label="Choose a trinket slot">
-        {#each slots as slot}
-          {@const item = equippedBySlot[slot]}
-          <button
-            class="slot-button"
-            type="button"
-            aria-pressed={selectedSlot === slot}
-            aria-label={`Slot ${slot + 1}${item ? `, ${item.name}` : ', empty'}`}
-            onclick={() => (selectedSlot = slot)}
-          >
-            <span class="slot-number">Slot {slot + 1}</span>
-            <span class="slot-name">{item?.name ?? 'Empty'}</span>
-          </button>
-        {/each}
-      </div>
-
-      <div class="collection-heading">
-        <h3>Collection</h3>
-      </div>
-
+      <div class="slot-body">
+      {#if choosingTrinket}
       {#if collection.length === 0}
         <div class="empty-collection">
           <p>Your collection is empty.</p>
@@ -276,6 +321,9 @@
           </button>
         </div>
       {:else}
+        <div class="collection-heading">
+          <h3>Collection</h3>
+        </div>
         <ul class="collection-list" aria-label="Trinket collection">
           {#each collection as item (item.id)}
             {@const assignedSlot = slotFor(item)}
@@ -294,7 +342,7 @@
                       ? 'Local sample'
                       : assignedSlot === null
                         ? 'In collection'
-                        : `In slot ${assignedSlot + 1}`}
+                        : 'In slot ' + (assignedSlot + 1)}
                   </small>
                 </span>
               </button>
@@ -303,18 +351,21 @@
         </ul>
       {/if}
 
-      {#if selectedTrinket}
-        <article bind:this={detailElement} tabindex="-1" class="trinket-detail" aria-label={`Details for ${selectedTrinket.name}`}>
+      {:else if selectedTrinket}
+        <article
+          bind:this={detailElement}
+          tabindex="-1"
+          class="trinket-detail"
+          aria-label={'Details for ' + selectedTrinket.name}
+        >
           <div class="detail-copy">
-            <p class="eyebrow">Selected trinket</p>
-            <h3>{selectedTrinket.name}</h3>
             <p class="effect-label">{TRINKET_EFFECT_CATALOG[selectedTrinket.catalogId].label}</p>
             <p class="dedication">{selectedTrinket.dedication}</p>
           </div>
           <div class="detail-actions">
-            {#if selectedTrinketSlot !== selectedSlot}
+            {#if selectedTrinketSlot !== activeSlot}
               <button class="secondary-button" type="button" onclick={placeSelectedTrinket}>
-                Place in slot {selectedSlot + 1}
+                Place in slot {activeSlot + 1}
               </button>
             {/if}
             {#if selectedTrinketSlot !== null}
@@ -322,11 +373,18 @@
                 Remove from slot {selectedTrinketSlot + 1}
               </button>
             {/if}
+            <button class="text-button" type="button" onclick={() => (choosingTrinket = true)}>Replace trinket</button>
           </div>
         </article>
+      {:else}
+        <p class="selection-prompt">Choose a trinket to see its effect and dedication.</p>
       {/if}
 
-      {#if announcement}<p class="preview-feedback" role="status">{announcement}</p>{/if}
+      </div>
+
+      {#if announcement}
+        <p class="preview-feedback" role="status">{announcement}</p>
+      {/if}
     </FloatingSurface>
   {/if}
 </div>
@@ -335,38 +393,102 @@
   .prototype-scene-tools {
     position: absolute;
     z-index: 60;
+    inset: 0 auto auto 0;
+    width: 100%;
+    height: var(--prototype-scene-height, 56.25vw);
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .scene-keepsake-anchors {
+    position: absolute;
+    z-index: 10;
+    inset: 0;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 180ms ease;
+  }
+
+  .scene-keepsake-anchors.has-patron {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .scene-keepsake-place {
+    position: absolute;
     display: grid;
-    gap: 0.5rem;
-    width: max-content;
-    max-width: calc(100vw - 2rem);
+    width: clamp(2.75rem, 5vw, 3.4rem);
+    height: clamp(2.75rem, 5vw, 3.4rem);
+    place-items: center;
+    padding: 0.22rem;
+    border: 0;
+    border-radius: 50%;
+    color: #dfbf72;
+    background: transparent;
+    pointer-events: auto;
+    cursor: pointer;
   }
 
-  .treatment-b {
-    top: 4rem;
-    left: 1rem;
+  .scene-keepsake-place::before {
+    position: absolute;
+    inset: 0;
+    border: 1px solid #c49a4a;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgb(48 33 13 / 0.94), rgb(13 9 5 / 0.92));
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.65), inset 0 0 0 3px rgb(238 207 130 / 0.12);
+    content: '';
+    transition: border-color 150ms ease, box-shadow 150ms ease;
   }
 
-  .treatment-e {
-    top: 50%;
-    left: 1rem;
+  .scene-keepsake-place:hover::before,
+  .scene-keepsake-place:focus-visible::before,
+  .scene-keepsake-place.active::before {
+    border-color: #ffe09a;
+    box-shadow: 0 0 0 3px rgb(255 220 137 / 0.3), 0 2px 12px rgb(0 0 0 / 0.75);
   }
 
-  .treatment-f {
-    top: 4rem;
-    right: 1rem;
+  .scene-keepsake-place:focus-visible {
+    outline: 2px solid #f0d27a;
+    outline-offset: 3px;
+  }
+
+  .scene-keepsake-place:disabled {
+    cursor: default;
+  }
+
+  .scene-keepsake-art,
+  .scene-keepsake-empty {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+  }
+
+  .scene-keepsake-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.6));
+  }
+
+  .scene-keepsake-empty {
+    color: #dfbf72;
+    font: 1.55rem Georgia, serif;
   }
 
   .tool-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
+    position: absolute;
+    z-index: 30;
+    inset: 0;
+    pointer-events: none;
   }
 
   .tool-button,
   .secondary-button,
   .text-button,
   .close-button,
-  .slot-button,
   .collection-item {
     min-height: 2.75rem;
     font: inherit;
@@ -374,62 +496,133 @@
 
   .tool-button,
   .secondary-button,
-  .slot-button,
   .collection-item {
     border: 1px solid rgb(232 209 166 / 35%);
     border-radius: 0.6rem;
     color: #f7ead2;
-    background: rgb(30 22 17 / 91%);
+    background: rgb(30 22 17 / 0.91);
     cursor: pointer;
   }
 
-  .tool-button {
+  .journal-opener {
+    position: absolute;
+    min-width: 5.25rem;
     padding: 0.55rem 0.9rem;
-    box-shadow: 0 0.25rem 0.8rem rgb(0 0 0 / 22%);
+    box-shadow: 0 0.25rem 0.8rem rgb(0 0 0 / 0.22);
+    pointer-events: auto;
   }
 
-  .tool-button:disabled {
-    cursor: not-allowed;
-    opacity: 0.48;
+  .treatment-b .journal-opener {
+    top: calc(var(--prototype-scene-height) - 5.75rem);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .treatment-e .journal-opener {
+    top: 5.25rem;
+    right: 1rem;
+  }
+
+  .treatment-f .journal-opener {
+    top: 50%;
+    left: 1rem;
+    transform: translateY(-50%);
   }
 
   .tool-button[aria-expanded='true'],
-  .slot-button[aria-pressed='true'],
   .collection-item[aria-pressed='true'] {
     border-color: #e5be72;
     background: #453523;
   }
 
+  .tool-button:focus-visible,
+  .secondary-button:focus-visible,
+  .text-button:focus-visible,
+  .close-button:focus-visible,
+  .collection-item:focus-visible,
+  .archive-link:focus-visible,
+  .journal-body:focus-visible {
+    outline: 3px solid #f0c76f;
+    outline-offset: 2px;
+  }
+
   .prototype-scene-tools :global(.tool-popover) {
     position: absolute;
-    top: calc(100% + 0.5rem);
-    left: 0;
-    z-index: 2;
-    width: min(20rem, calc(100vw - 2rem));
+    z-index: 40;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: min(24rem, calc(100vw - 2rem));
     min-width: min(20rem, calc(100vw - 2rem));
-    max-height: min(40vh, 32rem);
-    overflow: auto;
+    max-height: min(42vh, 32rem);
+    overflow: hidden;
     padding: 1rem;
     border: 1px solid rgb(230 205 161 / 45%);
     border-radius: 0.9rem;
     color: #f7ead2;
-    background: #201813;
-    box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 42%);
-    animation: popover-fade-in 140ms ease-out both;
+    background: rgb(32 24 19 / 0.76);
+    box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 0.34);
+    -webkit-backdrop-filter: blur(12px) saturate(115%);
+    backdrop-filter: blur(12px) saturate(115%);
+    pointer-events: auto;
+    animation: folio-open 180ms ease-out both;
   }
 
-  .treatment-f :global(.tool-popover) {
-    right: 0;
+  .prototype-scene-tools :global(.journal-popover) {
+    max-height: min(48vh, 30rem);
+    padding: 0;
+  }
+
+  .treatment-f :global(.journal-popover) {
+    top: 50%;
+    left: 4.5rem;
+    transform: translateY(-50%);
+    width: min(26rem, calc(100vw - 6rem));
+  }
+
+  .treatment-e :global(.journal-popover) {
+    top: 8.75rem;
+    right: 1rem;
+    left: auto;
+    width: min(25rem, calc(100vw - 2rem));
+  }
+
+  .treatment-b :global(.journal-popover) {
+    top: auto;
+    bottom: 5.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(44rem, calc(100vw - 2rem));
+    max-height: min(30vh, 19rem);
+  }
+
+  .prototype-scene-tools :global(.slot-popover) {
+    top: calc(var(--slot-y) + 3.35rem);
+    max-height: min(40vh, 30rem);
+  }
+
+  .prototype-scene-tools :global(.slot-left) {
+    right: auto;
+    left: calc(3.5% + 3.5rem);
+  }
+
+  .prototype-scene-tools :global(.slot-right) {
+    right: calc(15% + 3.5rem);
     left: auto;
   }
 
   .popover-header {
     display: flex;
+    min-height: 3.8rem;
     align-items: flex-start;
     justify-content: space-between;
     gap: 1rem;
-    padding-bottom: 0.7rem;
-    border-bottom: 1px solid rgb(232 209 166 / 22%);
+    padding: 0.9rem 1rem 0.7rem;
+    border-bottom: 1px solid rgb(232 209 166 / 0.22);
+  }
+
+  .journal-header {
+    flex: 0 0 auto;
+    border-bottom-color: rgb(232 209 166 / 0.3);
   }
 
   .popover-header h2,
@@ -453,13 +646,20 @@
     width: 2.75rem;
     flex: 0 0 2.75rem;
     place-items: center;
-    border: 1px solid rgb(232 209 166 / 30%);
+    border: 1px solid rgb(232 209 166 / 0.3);
     border-radius: 0.55rem;
     color: inherit;
-    background: transparent;
+    background: rgb(31 23 18 / 0.36);
     cursor: pointer;
     font-size: 1.5rem;
     line-height: 1;
+  }
+
+  .journal-body {
+    min-height: 0;
+    padding: 0.35rem 1rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .journal-entries,
@@ -471,30 +671,38 @@
 
   .journal-entry {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(5rem, 7rem) minmax(0, 1fr);
     gap: 0.6rem;
     padding: 0.75rem 0;
-    border-bottom: 1px solid rgb(232 209 166 / 16%);
+    border-bottom: 1px solid rgb(232 209 166 / 0.16);
   }
 
   .entry-label,
   .collection-item small {
-    color: #d4b87e;
+    color: #e1c17b;
     font-size: 0.78rem;
   }
 
   .journal-entry p,
   .empty-message,
   .empty-collection p,
+  .selection-prompt,
   .dedication {
     margin: 0;
     line-height: 1.45;
   }
 
   .empty-message,
-  .empty-collection {
+  .empty-collection,
+  .selection-prompt {
     padding: 0.9rem 0;
     color: #e5d7bf;
+  }
+
+  .journal-footer {
+    flex: 0 0 auto;
+    padding: 0.35rem 1rem 0.75rem;
+    border-top: 1px solid rgb(232 209 166 / 0.22);
   }
 
   .archive-link {
@@ -506,33 +714,16 @@
     text-underline-offset: 0.18em;
   }
 
-  .slot-picker {
+  .empty-collection {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.45rem;
-    padding: 0.85rem 0 1rem;
-    border-bottom: 1px solid rgb(232 209 166 / 16%);
+    gap: 0.6rem;
+    justify-items: start;
   }
 
-  .slot-button {
-    display: grid;
-    min-width: 0;
-    align-content: center;
-    gap: 0.15rem;
-    padding: 0.4rem;
-    text-align: left;
-  }
-
-  .slot-number {
-    color: #d4b87e;
-    font-size: 0.72rem;
-  }
-
-  .slot-name {
-    overflow: hidden;
-    font-size: 0.8rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .secondary-button {
+    padding: 0.5rem 0.75rem;
+    color: #f7ead2;
+    background: #493b2a;
   }
 
   .collection-heading {
@@ -543,9 +734,8 @@
     padding: 0.85rem 0 0.4rem;
   }
 
-
   .collection-list > li + li {
-    border-top: 1px solid rgb(232 209 166 / 15%);
+    border-top: 1px solid rgb(232 209 166 / 0.15);
   }
 
   .collection-item {
@@ -556,11 +746,11 @@
     padding: 0.45rem;
     border-color: transparent;
     border-radius: 0.4rem;
+    background: transparent;
     text-align: left;
   }
 
-  .collection-item img,
-  .trinket-art {
+  .collection-item img {
     width: 2.35rem;
     height: 2.35rem;
     flex: 0 0 2.35rem;
@@ -580,27 +770,8 @@
     white-space: nowrap;
   }
 
-  .empty-collection {
-    display: grid;
-    gap: 0.6rem;
-    justify-items: start;
-  }
-
-  .secondary-button {
-    padding: 0.5rem 0.75rem;
-    color: #f7ead2;
-    background: #493b2a;
-  }
-
-  .trinket-detail {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: center;
-    gap: 0.9rem;
-    margin-top: 0.75rem;
-    padding-top: 0.85rem;
-    border-top: 1px solid rgb(232 209 166 / 22%);
-  }
+  .slot-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .trinket-detail { margin-top: 0; padding: 0.5rem 0; }
 
   .effect-label {
     margin: 0.35rem 0;
@@ -608,14 +779,16 @@
   }
 
   .dedication {
-    color: #ded0bb;
+    color: #f0e3cf;
     font-size: 0.9rem;
   }
 
   .detail-actions {
-    display: grid;
-    justify-items: stretch;
-    gap: 0.3rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding-top: 0.65rem;
   }
 
   .text-button {
@@ -628,72 +801,52 @@
     text-underline-offset: 0.18em;
   }
 
-  .tool-button:focus-visible,
-  .secondary-button:focus-visible,
-  .text-button:focus-visible,
-  .close-button:focus-visible,
-  .slot-button:focus-visible,
-  .collection-item:focus-visible,
-  .archive-link:focus-visible {
-    outline: 3px solid #f0c76f;
-    outline-offset: 2px;
+  .preview-feedback {
+    margin: 0.6rem 0 0;
+    color: #d9bc78;
+    font-size: 0.75rem;
+    line-height: 1.35;
   }
 
-  .trinket-detail:focus-visible { outline: 2px solid #f0c76f; outline-offset: 2px; }
-  .preview-feedback { margin: .6rem 0 0; color: #d9bc78; font-size: .75rem; line-height: 1.35; }
-
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    clip-path: inset(50%);
-  }
-
-  @keyframes popover-fade-in {
+  @keyframes folio-open {
     from { opacity: 0; }
     to { opacity: 1; }
   }
 
   @media (max-width: 1000px) {
-    .prototype-scene-tools {
-      top: calc(var(--prototype-scene-height, 100vw) + 0.45rem);
+    .prototype-scene-tools :global(.journal-popover) {
+      top: calc(var(--prototype-scene-height) + 3.7rem);
+      right: 1rem;
+      bottom: auto;
+      left: 1rem;
+      width: auto;
+      max-height: min(42vh, 24rem);
+      transform: none;
+    }
+
+    .treatment-b .journal-opener,
+    .treatment-e .journal-opener,
+    .treatment-f .journal-opener {
+      top: calc(var(--prototype-scene-height) + 0.45rem);
       right: auto;
       left: 0.1rem;
-      width: min(calc(100vw - 1.5rem), 25rem);
-      max-width: calc(100vw - 1.5rem);
+      transform: none;
     }
 
-    .tool-buttons {
-      gap: 0.35rem;
-    }
-
-    .tool-button {
-      min-height: 2.75rem;
-      padding: 0.45rem 0.75rem;
-    }
-
-    .prototype-scene-tools :global(.tool-popover) {
-      right: auto;
-      left: 0;
-      width: min(20rem, calc(100vw - 2rem));
-      min-width: min(20rem, calc(100vw - 2rem));
-      max-height: min(40vh, 32rem);
-    }
-
-    .trinket-detail {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .detail-actions {
-      grid-template-columns: repeat(2, minmax(0, max-content));
-      justify-content: start;
+    .prototype-scene-tools :global(.slot-popover) {
+      top: calc(var(--slot-y) + 3.35rem);
+      right: 1rem;
+      left: 1rem;
+      width: auto;
+      max-height: min(42vh, 24rem);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .scene-keepsake-anchors {
+      transition: none;
+    }
+
     .prototype-scene-tools :global(.tool-popover) {
       animation: none;
     }

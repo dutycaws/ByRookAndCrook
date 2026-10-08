@@ -4,9 +4,9 @@
   type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
   const variants: { key: BarPrototypeVariant; name: string }[] = [
-    { key: 'B', name: 'Balanced' },
-    { key: 'E', name: 'Quick' },
-    { key: 'F', name: 'Soft' }
+    { key: 'B', name: 'Top ledger' },
+    { key: 'E', name: 'Right folio' },
+    { key: 'F', name: 'Left folio' }
   ];
 
   let {

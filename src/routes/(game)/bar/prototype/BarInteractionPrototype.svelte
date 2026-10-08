@@ -158,12 +158,21 @@
   function stateForDebug() {
     return {
       variant,
-      treatment: variant === 'E' ? 'Quick' : variant === 'F' ? 'Soft' : 'Balanced',
-      presentation: variant === 'E'
-        ? { handRiseMs: 170, chatRiseMs: 140, handOpacity: .55, chatOpacity: .96, inputRows: 1, cardDetail: false, tools: 'left scene edge' }
-        : variant === 'F'
-          ? { handRiseMs: 320, chatRiseMs: 240, handOpacity: .32, chatOpacity: .82, inputRows: 3, cardDetail: true, tools: 'upper right' }
-          : { handRiseMs: 240, chatRiseMs: 180, handOpacity: .42, chatOpacity: .9, inputRows: 2, cardDetail: true, tools: 'upper left' },
+      treatment: variant === 'E' ? 'Right folio' : variant === 'F' ? 'Left folio' : 'Top ledger',
+      presentation: {
+        handRiseMs: 320,
+        chatRiseMs: 240,
+        handOpacity: .32,
+        selectedOpacity: .68,
+        chatOpacity: .82,
+        chatMaxWidthPx: 700,
+        chatHeightPx: 310,
+        inputRows: 3,
+        recentMessages: 5,
+        cardDetail: true,
+        journalPlacement: variant === 'E' ? 'right folio' : variant === 'F' ? 'left folio' : 'top ledger',
+        trinkets: 'scene slots; overview only'
+      },
       selectedNpc: selected ? { id: selected.instanceId, name: selected.name } : null,
       focusedNpc: focusedInstanceId,
       mode,

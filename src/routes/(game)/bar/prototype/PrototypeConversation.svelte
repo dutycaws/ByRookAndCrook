@@ -10,7 +10,7 @@
     presentation?: 'standard' | 'player-hand';
     treatment?: 'B' | 'E' | 'F';
   } = $props();
-  let latestEntries = $derived(model.history.slice(presentation === 'standard' ? -3 : treatment === 'E' ? -2 : treatment === 'F' ? -5 : -3));
+  let latestEntries = $derived(model.history.slice(presentation === 'standard' ? -3 : -5));
 
   async function closeConversation() {
     model.onchatclose();
@@ -29,7 +29,7 @@
       <div class="card-identity">
         <p class="conversation-kicker">{model.selectedCard.kind === 'hospitality' ? 'Hospitality' : 'Intent'} card</p>
         <h2>{model.selectedCard.title}</h2>
-        {#if treatment !== 'E'}<span class="card-detail">{model.selectedCard.detail}</span>{/if}
+        <span class="card-detail">{model.selectedCard.detail}</span>
       </div>
       <span class="recipient-name">{model.selected?.name}</span>
       <button class="close-chat" type="button" aria-label="Close conversation" onclick={closeConversation}>×</button>
@@ -58,7 +58,7 @@
 
   <label class="conversation-composer">
     {#if presentation === 'standard'}<span>To {model.selected?.name}</span>{/if}
-    <textarea data-prototype-conversation-input aria-label="Write to {model.selected?.name}" value={model.draft} oninput={(event) => model.ondraft(event.currentTarget.value)} placeholder="Write a short note…" rows={presentation === 'standard' ? 2 : treatment === 'E' ? 1 : treatment === 'F' ? 3 : 2}></textarea>
+    <textarea data-prototype-conversation-input aria-label="Write to {model.selected?.name}" value={model.draft} oninput={(event) => model.ondraft(event.currentTarget.value)} placeholder="Write a short note…" rows={presentation === 'standard' ? 2 : 3}></textarea>
   </label>
   <div class="conversation-actions">
     {#if model.selectedCard?.kind === 'hospitality'}
@@ -90,9 +90,7 @@
   .conversation-actions button { min-height: 2.15rem; padding: .38rem .65rem; border: 1px solid #806631; border-radius: .35rem; color: #211607; background: #dfbd65; font: inherit; font-size: .73rem; font-weight: 700; cursor: pointer; }
   .conversation-actions button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
   .conversation-notice { margin: 0; color: #d8c589; font-size: .68rem; }
-  .conversation-card.player-hand { --composer-height: 3.5rem; grid-template-rows: 2.75rem minmax(2rem, 1fr) var(--composer-height) 2.75rem auto; gap: .28rem; padding: .55rem .72rem; border-color: #e0c783; color: #fff0c9; background: linear-gradient(165deg, rgb(50 38 19 / var(--chat-opacity, .9)), rgb(22 16 9 / var(--chat-opacity, .9))); }
-  .conversation-card.player-hand[data-treatment='E'] { --composer-height: 2.75rem; }
-  .conversation-card.player-hand[data-treatment='F'] { --composer-height: 5rem; }
+  .conversation-card.player-hand { --composer-height: 5rem; grid-template-rows: 2.75rem minmax(2rem, 1fr) var(--composer-height) 2.75rem auto; gap: .28rem; padding: .55rem .72rem; border-color: #e0c783; color: #fff0c9; background: linear-gradient(165deg, rgb(50 38 19 / var(--chat-opacity, .9)), rgb(22 16 9 / var(--chat-opacity, .9))); }
   .player-hand-header { display: flex; min-width: 0; align-items: center; gap: .55rem; }
   .card-thumb { display: grid; width: 2rem; height: 2.45rem; flex: 0 0 auto; place-items: center; border: 1px solid #e4c56c; border-radius: .22rem .3rem .28rem .22rem; color: #ffe9a3; background: linear-gradient(155deg, #65502a, #281b0c 68%); box-shadow: inset 0 0 0 2px rgb(242 220 161 / .14); font: 1rem Georgia, serif; }
   .card-thumb.sage { background: linear-gradient(155deg, #48613d, #192218 68%); }
