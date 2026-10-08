@@ -49,3 +49,10 @@ The selected category burns before its item hand opens. Selecting an item burns 
 Final desktop review confirmed sibling hiding, full inspection erosion, and result accounting (Soil Builder: 26 to 18 gold, stock 5 to 4). Escape restored item/order focus and canceled an order without spending. Phone review at 390 × 844 confirmed no page-level horizontal overflow and computed hand padding of 67.2 px. Reduced-motion paths were reviewed in source; browser media emulation was unavailable. Screenshots are local only in `/tmp/rook-shop-flow/`. Random preference verification follows below.
 
 Random was verified after reload and through all three levels: one run resolved Crawl/700 ms for the category, Drip/1000 ms consistently across all four sibling cards, and Ash/1300 ms for the order. Changing style during an item burn canceled selection and restored the selected-item focus. Garden expansion remained inspectable with the unaffordable order disabled. `npm run check` passed with zero errors and warnings; whitespace, secret, and staged-media checks passed before publication.
+
+
+### Profile preference destination
+
+Card burn style is now a per-user option in `/settings/profile`, saved separately from community/public author settings. The signed-in user's validated `card_burn_style` Auth metadata supplies the shop default. Missing or invalid values use Drip. The shop toolbar selector and browser-wide localStorage preference are removed. A valid `burn` query remains a development-only comparison override and never changes the profile. Crawl, Drip, Ash, Random, their existing speeds, and airy padding remain unchanged.
+
+Profile verification: saved Ash and Random independently of the community form; each survived a fresh profile load. Shop navigation used saved Ash with a 1300 ms category burn and no shop selector. Desktop and 390 × 844 profile controls were inspected. `npm run check` passed with 0 errors and 0 warnings. Screenshots remain local in `/tmp/rook-profile-effects/`.

@@ -4,13 +4,14 @@
   import type { GameSnapshot } from '$lib/game/contracts';
   import { shopItemAssetPublicUrl } from '$lib/game/shop-runtime-assets';
   import { sceneRuntimeAssetPublicUrl, type SceneRuntimeAssetId } from '$lib/game/scene-runtime-assets';
-  import { BURN_TREATMENTS, DEFAULT_BURN_TREATMENT, type BurnStyle, type BurnTreatment, type PrototypeModel, type ShopCategoryKey, type ShopCategory, type ShopEntry, type ShopStage, type ShopVariant, type ShopTransitionPhase } from './types';
+  import { BURN_TREATMENTS, type BurnStyle, type BurnTreatment } from '$lib/card-effects';
+  import { DEFAULT_BURN_TREATMENT, type PrototypeModel, type ShopCategoryKey, type ShopCategory, type ShopEntry, type ShopStage, type ShopVariant, type ShopTransitionPhase } from './types';
   import VariantA from './VariantA.svelte';
   import VariantB from './VariantB.svelte';
   import VariantC from './VariantC.svelte';
 
-  type Props = { snapshot: GameSnapshot; variant: ShopVariant; burnStyle: BurnStyle; onBurnStyleChange: (style: BurnStyle) => void };
-  let { snapshot, variant, burnStyle, onBurnStyleChange }: Props = $props();
+  type Props = { snapshot: GameSnapshot; variant: ShopVariant; burnStyle: BurnStyle };
+  let { snapshot, variant, burnStyle }: Props = $props();
 
   const definitions: Omit<ShopCategory, 'count'>[] = [
     { key: 'seeds', label: 'Seeds', icon: '✿', description: 'Start something growing.' },
@@ -37,7 +38,7 @@
   let transitionPhase = $state<ShopTransitionPhase>('idle');
   let transitionKey = $state<string | null>(null);
   let transitionSequence = $state(0);
-  let activeBurnTreatment = $state<BurnTreatment>(DEFAULT_BURN_TREATMENT);
+  let activeBurnTreatment = $state<BurnTreatment>('drip');
   let transitionTimer: ReturnType<typeof setTimeout> | undefined;
   let legacyTimer: ReturnType<typeof setTimeout> | undefined;
   let lastCommittedSequence = -1;
@@ -485,20 +486,7 @@
         <span>Shop</span>{#if stage !== 'categories'}<span aria-hidden="true"> / </span><span>{currentCategory.label}</span>{/if}{#if selectedEntry && stage !== 'items'}<span aria-hidden="true"> / </span><span>{selectedEntry.name}</span>{/if}
       </p>
     </div>
-    <div class="prototype-toolbar">
-      {#if variant === 'C'}
-        <label class="burn-style-choice">
-          <span>Card burn style</span>
-          <select aria-label="Card burn style" value={burnStyle} onchange={(event) => onBurnStyleChange(event.currentTarget.value as BurnStyle)}>
-            {#each BURN_TREATMENTS as treatment}
-              <option value={treatment.value}>{treatment.name} · {treatment.preview}</option>
-            {/each}
-            <option value="random">Random · each burn action</option>
-          </select>
-        </label>
-      {/if}
-      <div class="gold-balance"><span>Gold</span><strong>{mockGold}</strong></div>
-    </div>
+    <div class="gold-balance"><span>Gold</span><strong>{mockGold}</strong></div>
   </header>
 
   <div class="prototype-nav">
@@ -524,7 +512,6 @@
 <style>
   .shop-prototype { --ink: #f1e3c2; --muted: #c7b992; --gold: #d4ae66; --panel: rgba(24, 18, 11, .88); width: 100%; min-width: 0; color: var(--ink); }
   .prototype-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .2rem .2rem .7rem; }
-  .prototype-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: .65rem; }
   .eyebrow { margin: 0 0 .12rem; color: #c9a969; font-size: .67rem; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
   h1 { margin: 0; font-size: clamp(1.25rem, 2vw, 1.85rem); letter-spacing: -.035em; }
   .prototype-path { margin: .22rem 0 0; color: var(--muted); font-size: .74rem; }
@@ -533,18 +520,12 @@
   .prototype-nav button:focus-visible { outline: 2px solid #f5d484; outline-offset: 2px; }
   .gold-balance { display: flex; align-items: baseline; gap: .5rem; padding: .48rem .72rem; border: 1px solid rgba(215, 174, 94, .42); border-radius: 999px; color: var(--muted); background: rgba(23, 17, 10, .82); white-space: nowrap; }
   .gold-balance strong { color: #f4d891; font-size: 1.1rem; }
-  .burn-style-choice { display: grid; gap: .18rem; color: #d9c89e; font-size: .63rem; font-weight: 700; letter-spacing: .025em; }
-  .burn-style-choice select { max-width: min(12.5rem, 38vw); min-height: 2.2rem; padding: .32rem .58rem; border: 1px solid rgba(215, 174, 94, .5); border-radius: .65rem; color: #f4e7c8; background: rgba(23, 17, 10, .88); font: inherit; letter-spacing: normal; }
-  .burn-style-choice select:focus-visible { outline: 2px solid #f5d484; outline-offset: 2px; }
   .prototype-stage { min-width: 0; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   @media (max-width: 600px) {
     .prototype-heading { align-items: flex-start; padding-inline: 0; }
     .prototype-path { font-size: .68rem; }
     .gold-balance { padding: .38rem .58rem; }
-    .prototype-toolbar { flex-direction: column-reverse; align-items: flex-end; gap: .35rem; }
-    .burn-style-choice { justify-items: end; }
-    .burn-style-choice select { max-width: 10rem; min-height: 1.9rem; }
     .prototype-nav { margin-bottom: .35rem; }
   }
 </style>

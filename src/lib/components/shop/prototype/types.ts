@@ -1,18 +1,12 @@
 import type { ShopItem } from '$lib/game/contracts';
 import type { SceneRuntimeAsset } from '$lib/components/scene/ComposedScene.svelte';
+import type { BurnTreatment } from '$lib/card-effects';
 
 export type ShopVariant = 'A' | 'B' | 'C';
-export type BurnTreatment = 'crawl' | 'drip' | 'ash';
-export type BurnStyle = BurnTreatment | 'random';
+export type { BurnTreatment, BurnStyle } from '$lib/card-effects';
+export { DEFAULT_BURN_STYLE, DEFAULT_BURN_TREATMENT, BURN_TREATMENTS } from '$lib/card-effects';
 export type ShopTransitionPhase = 'idle' | 'category-burn' | 'item-burn' | 'item-zoom' | 'order-burn';
 export type PreviewBridgeTransform = { translateX: number; translateY: number; scaleX: number; scaleY: number };
-export const DEFAULT_BURN_TREATMENT: BurnTreatment = 'drip';
-export const DEFAULT_BURN_STYLE: BurnStyle = DEFAULT_BURN_TREATMENT;
-export const BURN_TREATMENTS = [
-  { value: 'crawl', name: 'Crawl', durationMs: 700, preview: '0.7s' },
-  { value: 'drip', name: 'Drip', durationMs: 1000, preview: '1.0s' },
-  { value: 'ash', name: 'Ash', durationMs: 1300, preview: '1.3s' }
-] as const satisfies readonly { value: BurnTreatment; name: string; durationMs: number; preview: string }[];
 export type ShopCategoryKey = 'seeds' | 'garden' | 'apiary';
 export type ShopStage = 'categories' | 'items' | 'preview' | 'result';
 
