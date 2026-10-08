@@ -1,6 +1,9 @@
 <script lang="ts">
 	import TavernCardArt from './TavernCardArt.svelte';
+	import type { BurnTreatment } from '$lib/card-effects';
 	import type { TavernCardChoice } from './card-types';
+
+	type BurningCard = { turnId: string; itemId: string; treatment: BurnTreatment; durationMs: number };
 
 	let {
 		choice,
@@ -11,6 +14,7 @@
 		index = 0,
 		handCount = 1,
 		barHand = false,
+		burningCard = null,
 		onselect
 	}: {
 		choice: TavernCardChoice;
@@ -21,6 +25,7 @@
 		index?: number;
 		handCount?: number;
 		barHand?: boolean;
+		burningCard?: BurningCard | null;
 		onselect?: () => void;
 	} = $props();
 
@@ -56,6 +61,11 @@
 		aria-pressed={selected}
 		aria-disabled={disabled ? 'true' : undefined}
 		data-card-index={index}
+		data-card-burn-active={burningCard ? 'true' : undefined}
+		data-card-burn-item-id={burningCard?.itemId}
+		data-card-burn-turn-id={burningCard?.turnId}
+		data-card-burn-treatment={burningCard?.treatment}
+		data-card-burn-duration-ms={burningCard?.durationMs}
 		style={barHandStyle}
 		disabled={disabled && !barHand}
 		onclick={disabled && barHand ? undefined : onselect}
@@ -63,7 +73,20 @@
 		{@render cardFace()}
 	</button>
 {:else}
-	<div class="tavern-card card-{choice.kind}" class:selected class:compact class:bar-hand={barHand} role="group" aria-label={accessibleLabel} style={barHandStyle}>
+	<div
+		class="tavern-card card-{choice.kind}"
+		class:selected
+		class:compact
+		class:bar-hand={barHand}
+		role="group"
+		aria-label={accessibleLabel}
+		data-card-burn-active={burningCard ? 'true' : undefined}
+		data-card-burn-item-id={burningCard?.itemId}
+		data-card-burn-turn-id={burningCard?.turnId}
+		data-card-burn-treatment={burningCard?.treatment}
+		data-card-burn-duration-ms={burningCard?.durationMs}
+		style={barHandStyle}
+	>
 		{@render cardFace()}
 	</div>
 {/if}

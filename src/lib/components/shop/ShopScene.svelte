@@ -27,19 +27,32 @@
 
 <style>
   .shop-composed-scene {
-    min-width: 0;
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    max-width: none;
+    margin: 0;
     overflow: hidden;
-    border: 1px solid #6b4e24;
-    background: radial-gradient(circle at 50% 30%, #6c4b25, #1c1209 64%, #090603);
-    view-transition-name: shop-merchant;
+    background: #140d06;
+    isolation: isolate;
   }
-  .shop-composed-scene :global(.composed-scene) { display: block; width: 100%; }
-  .shop-composed-scene :global([data-scene-composition='shop']) { min-width: 100%; }
+  .shop-composed-scene :global(.composed-scene) {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
+  }
+  .shop-composed-scene :global([data-scene-composition='shop']) {
+    width: 100%;
+    min-width: 100%;
+    height: 100%;
+  }
   .shop-composed-scene :global([data-scene-actor='shop-elara']) { border-radius: 50%; }
   .shop-composed-scene :global([data-scene-actor='shop-elara']:focus-visible) { outline-offset: -7px; }
   .detail-mode { box-shadow: inset 0 0 0 1px #bd9140; }
-
   @media (max-width: 799px) {
-    .shop-composed-scene { max-width: 48rem; margin-inline: auto; }
+    .shop-composed-scene { max-width: none; margin: 0; }
   }
 </style>

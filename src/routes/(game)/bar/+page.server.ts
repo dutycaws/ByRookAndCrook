@@ -4,12 +4,14 @@ import { advanceDay, GameServiceError } from '$lib/server/game';
 import { dialogueAvailability } from '$lib/server/dialogue/runtime';
 import { presentBarPatrons } from '$lib/game/bar-scene';
 import { parsePublicSettlementStatus } from '$lib/game/evolving-world';
+import { profileBurnStyle } from '$lib/card-effects';
 import { getNpcHistory } from '$lib/server/npc-history';
 import type { Journal } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const load: PageServerLoad = async ({locals,setHeaders,url})=>{
- if(!await locals.getVerifiedUser())redirect(303,'/login');
+ const user=await locals.getVerifiedUser();
+ if(!user)redirect(303,'/login');
  setHeaders({'cache-control':'private, no-store'});
  const requested=uuid.test(url.searchParams.get('npc')??'')?url.searchParams.get('npc'):null;
  const historyCursor=uuid.test(url.searchParams.get('questCursor')??'')?url.searchParams.get('questCursor'):null;
@@ -24,7 +26,7 @@ export const load: PageServerLoad = async ({locals,setHeaders,url})=>{
    try {const result=await (locals.supabase.rpc as any)('world_settlement_status',{p_save_id:snapshot.save.id,p_settlement_id:null});if(result.error)throw result.error;settlement=parsePublicSettlementStatus(result.data);}
    catch(cause){console.warn('bar_settlement_status_unavailable',{cause:cause instanceof Error?cause.name:'unknown'});}
   }
-  return {snapshot,journals:history.journals,archived:url.searchParams.get('archive')==='1',selectedNpcInstanceId:requested,questArchiveCursor:historyCursor,dialogueUnavailable:dialogueAvailability(),settlement};
+  return {snapshot,journals:history.journals,archived:url.searchParams.get('archive')==='1',selectedNpcInstanceId:requested,questArchiveCursor:historyCursor,dialogueUnavailable:dialogueAvailability(),settlement,cardBurnStyle:profileBurnStyle(user.user_metadata)};
  }catch(cause){console.error('bar_load_failed',cause);error(500,'The bar ledger is unavailable. Please try again.');}
 };
 

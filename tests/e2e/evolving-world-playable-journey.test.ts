@@ -21,6 +21,7 @@ test('a generated provision remains ordinary inventory while a promoted procedur
 
     await page.goto('/shop');
     await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'Provisions', exact: true }).click();
     const supplies = page.locator('[aria-labelledby="generated-supplies-title"]');
     await expect(supplies.getByRole('heading', { name: 'New provisions' })).toBeVisible();
     await expect(supplies.getByRole('heading', { name: fixture.provisionName })).toHaveCount(1);
@@ -28,6 +29,7 @@ test('a generated provision remains ordinary inventory while a promoted procedur
     await expect(supplies.getByRole('status')).toContainText('Provision purchased.');
     await page.reload();
     await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'Provisions', exact: true }).click();
     await expect(supplies.getByText(`1 × ${fixture.provisionName}`)).toBeVisible();
     await expect(supplies.getByText(fixture.provisionName, { exact: true })).toHaveCount(1);
 

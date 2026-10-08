@@ -152,7 +152,15 @@
       event.stopPropagation();
       talkOpen = false;
       await tick();
-      document.querySelector<HTMLElement>('[data-card-index][aria-pressed="true"]')?.focus({ preventScroll: true });
+      const hand = document.querySelector<HTMLElement>('.patron-dialogue.bar-hand');
+      const preferredIndex = Number(hand?.dataset.nextCardFocusIndex);
+      const preferredCard = Number.isSafeInteger(preferredIndex) && preferredIndex >= 0
+        ? document.querySelector<HTMLElement>(`.service-card-hand.bar-hand [data-card-index="${preferredIndex}"]:not([data-card-burn-active="true"])`)
+        : null;
+      (document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index][aria-pressed="true"]')
+        ?? preferredCard
+        ?? document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index]:not([data-card-burn-active="true"])'))
+        ?.focus({ preventScroll: true });
       return;
     }
 
@@ -308,6 +316,7 @@
               archiveHref={null}
               embedded={true}
               barHand={true}
+              cardBurnStyle={data.cardBurnStyle}
               suspended={journalOpen}
               blocked={pending || !!closeCommand}
               focusActive={true}

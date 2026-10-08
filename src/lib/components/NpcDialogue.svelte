@@ -8,8 +8,18 @@
 	import type { TavernCardChoice, TavernCardKind } from '$lib/components/tavern/card-types';
 	import { serviceCardStacks } from '$lib/game/service-cards';
 	import { qualityLabel, type IntentCardKey } from '$lib/game/contracts';
+	import { resolveBurnAction, type BurnStyle, type BurnTreatment } from '$lib/card-effects';
 	import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
 	import type { BarSnapshot, ServeReceipt } from '$lib/game/serving';
+
+	type BurningCard = {
+		turnId: string;
+		itemId: string;
+		choice: TavernCardChoice;
+		index: number;
+		treatment: BurnTreatment;
+		durationMs: number;
+	};
 
 	let {
 		npcId,
@@ -27,6 +37,7 @@
 		blocked = false,
 		focusActive = true,
 		barHand = false,
+		cardBurnStyle = 'drip',
 		suspended = false,
 		composerOpen = false,
 		deckOpen = false,
@@ -50,6 +61,7 @@
 		blocked?: boolean;
 		focusActive?: boolean;
 		barHand?: boolean;
+		cardBurnStyle?: BurnStyle;
 		suspended?: boolean;
 		composerOpen?: boolean;
 		deckOpen?: boolean;
@@ -77,15 +89,33 @@
 	let restoredTurn = $state<string | null>(null);
 	let cancelling = $state(false);
 	let canRetry = $state(true);
+	let burningCard = $state<BurningCard | null>(null);
+	let nextCardFocusIndex = $state<number | null>(null);
 	let composerOpenLocal = $state(false);
 	let deckOpenLocal = $state(false);
 	const handOpen = $derived(deckOpenLocal && (!barHand || focusActive));
 	const conversationVisible = $derived(composerOpenLocal && !suspended);
 	let operation = 0;
 	let posting: AbortController | undefined;
+	let lastBurnedTurnId: string | null = null;
+	let observedResidentKey: string | undefined;
 
-	$effect(() => { composerOpenLocal = composerOpen; });
+	$effect(() => {
+		composerOpenLocal = composerOpen;
+		if (!composerOpen && burningCard) cancelBurn();
+	});
 	$effect(() => { deckOpenLocal = deckOpen; });
+	$effect(() => {
+		if (observedResidentKey === undefined) {
+			observedResidentKey = residentKey;
+			return;
+		}
+		if (observedResidentKey === residentKey) return;
+		observedResidentKey = residentKey;
+		cancelBurn();
+		nextCardFocusIndex = null;
+		lastBurnedTurnId = null;
+	});
 	$effect(() => { onbusychange?.(busy || frozen !== null); });
 	$effect(() => { onselectionchange?.(!!intentCardId || !!offeringSelection); });
 	$effect(() => {
@@ -122,7 +152,10 @@
 		draftLoaded = true;
 		hydrated = true;
 	});
-	onDestroy(() => onbusychange?.(false));
+	onDestroy(() => {
+		cancelBurn();
+		onbusychange?.(false);
+	});
 
 	let intentOptions = $derived.by(() => {
 		const grouped = new Map<string, { card: (typeof stock.intentCards)[number]; count: number; ids: string[] }>();
@@ -207,6 +240,37 @@
 		offeringSelection = '';
 	}
 
+	function finishBurn(turnId: string) {
+		if (burningCard?.turnId !== turnId) return;
+		burningCard = null;
+	}
+
+	function cancelBurn() {
+		burningCard = null;
+	}
+
+	function startBurnForCompletedTurn(command: DialogueInput) {
+		if (!barHand || lastBurnedTurnId === command.turnId) return;
+		const itemId = command.intentCardId ?? command.offering?.itemId;
+		if (!itemId) return;
+		const choice = cardChoices.find((candidate) => candidate.itemIds.includes(itemId));
+		if (!choice) return;
+
+		const index = cardChoices.findIndex((candidate) => candidate.key === choice.key);
+		const { treatment, durationMs } = resolveBurnAction(cardBurnStyle);
+		cancelBurn();
+		burningCard = {
+			turnId: command.turnId,
+			itemId,
+			choice: { ...choice, itemIds: [itemId], quantity: 1 },
+			index,
+			treatment,
+			durationMs
+		};
+		nextCardFocusIndex = index;
+		lastBurnedTurnId = command.turnId;
+	}
+
 	async function removeChoice() {
 		clearChoice();
 		await focusComposer();
@@ -220,6 +284,7 @@
 	}
 
 	function setComposerOpen(open: boolean) {
+		if (!open) cancelBurn();
 		composerOpenLocal = open;
 		oncomposerchange?.(open);
 	}
@@ -235,7 +300,9 @@
 			if (barHand) {
 				const handCard = document.querySelector<HTMLElement>(
 					'.service-card-hand.bar-hand [data-card-index][aria-pressed="true"]'
-				) ?? document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index="0"]');
+				) ?? (nextCardFocusIndex !== null
+					? document.querySelector<HTMLElement>(`.service-card-hand.bar-hand [data-card-index="${nextCardFocusIndex}"]:not([data-card-burn-active="true"])`)
+					: null) ?? document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index]:not([data-card-burn-active="true"])');
 				handCard?.focus({ preventScroll: true });
 				return;
 			}
@@ -250,7 +317,10 @@
 
 	function handleEscape(event: KeyboardEvent) {
 		if (event.key !== 'Escape') return;
-		if (barHand) return;
+		if (barHand) {
+			cancelBurn();
+			return;
+		}
 		if (deckOpenLocal) {
 			event.preventDefault();
 			event.stopPropagation();
@@ -293,6 +363,7 @@
 		if (blocked || busy || frozen) return;
 		const itemId = choice.itemIds[0];
 		if (!itemId) return;
+		nextCardFocusIndex = cardChoices.findIndex((candidate) => candidate.key === choice.key);
 		if (choice.kind === 'food' || choice.kind === 'beverage') {
 			intentCardId = '';
 			offeringSelection = `${choice.kind}:${itemId}`;
@@ -308,6 +379,8 @@
 	async function acceptStatus(body: any, completedNotice = 'Your last reply was saved.') {
 		failure = false;
 		if (body.status === 'completed') {
+			if (frozen) startBurnForCompletedTurn(frozen);
+			const completedBurn = burningCard;
 			frozen = null;
 			message = '';
 			clearChoice();
@@ -315,6 +388,9 @@
 				? `${name}: ${body.reply}`
 				: completedNotice;
 			await invalidateAll();
+			if (completedBurn && burningCard?.turnId === completedBurn.turnId && cardChoices.length > 0) {
+				nextCardFocusIndex = Math.min(completedBurn.index, cardChoices.length - 1);
+			}
 		} else if (body.status === 'cancelled' || body.status === 'stale') {
 			frozen = null;
 			notice = body.status === 'cancelled'
@@ -458,6 +534,7 @@
 	class:journal-only={journalOnly}
 	class:bar-hand={barHand}
 	class:suspended
+	data-next-card-focus-index={nextCardFocusIndex}
 	aria-labelledby={dialogueHeadingId}
 	onkeydown={handleEscape}
 >
@@ -485,9 +562,11 @@
 				{selectedItemId}
 				{barHand}
 				conversationOpen={conversationVisible}
+				burningCard={burningCard}
 				disabled={blocked || busy || !!frozen}
 				onselect={chooseCard}
 				onclose={returnToTalk}
+				onburncomplete={finishBurn}
 			/>
 			{#if barHand && !conversationVisible && !suspended && (busy || frozen)}
 				<button type="button" class="bar-resume-chat" disabled={blocked} onclick={resumeConversation}>Return to unfinished reply</button>

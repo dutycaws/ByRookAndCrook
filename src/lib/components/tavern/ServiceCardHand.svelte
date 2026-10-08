@@ -1,7 +1,19 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import CardBurnSurface from '$lib/components/ui/CardBurnSurface.svelte';
+	import type { BurnTreatment } from '$lib/card-effects';
 	import TavernCard from './TavernCard.svelte';
 	import type { TavernCardChoice } from './card-types';
+
+	type BurningCard = {
+		turnId: string;
+		itemId: string;
+		choice: TavernCardChoice;
+		index: number;
+		treatment: BurnTreatment;
+		durationMs: number;
+	};
+	type HandEntry = { choice: TavernCardChoice; ghostOnly: boolean };
 
 	let {
 		choices,
@@ -9,26 +21,40 @@
 		barHand = false,
 		conversationOpen = false,
 		disabled = false,
+		burningCard = null,
 		onselect,
-		onclose
+		onclose,
+		onburncomplete
 	}: {
 		choices: TavernCardChoice[];
 		selectedItemId?: string;
 		barHand?: boolean;
 		conversationOpen?: boolean;
 		disabled?: boolean;
+		burningCard?: BurningCard | null;
 		onselect: (choice: TavernCardChoice) => void;
 		onclose: () => void;
+		onburncomplete?: (turnId: string) => void;
 	} = $props();
 
 	const totalCardCount = $derived(choices.reduce((count, choice) => count + choice.quantity, 0));
+	const handEntries = $derived.by((): HandEntry[] => {
+		const entries = choices.map((choice) => ({ choice, ghostOnly: false }));
+		if (burningCard && !choices.some((choice) => choice.key === burningCard.choice.key)) {
+			entries.splice(Math.max(0, Math.min(burningCard.index, entries.length)), 0, {
+				choice: burningCard.choice,
+				ghostOnly: true
+			});
+		}
+		return entries;
+	});
 	let viewport = $state<HTMLDivElement>();
 	let focusedIndex = $state(0);
 	let canScrollLeft = $state(false);
 	let canScrollRight = $state(false);
 	$effect(() => {
-		if (choices.length === 0) focusedIndex = 0;
-		else if (focusedIndex >= choices.length) focusedIndex = choices.length - 1;
+		if (handEntries.length === 0) focusedIndex = 0;
+		else if (focusedIndex >= handEntries.length) focusedIndex = handEntries.length - 1;
 		void tick().then(updateScrollHints);
 	});
 
@@ -47,12 +73,26 @@
 	}
 
 	function cardAt(index: number) {
-		return viewport?.querySelector<HTMLButtonElement>(`[data-card-index="${index}"]`);
+		return viewport?.querySelector<HTMLButtonElement>(`[data-card-index="${index}"]:not([data-card-burn-active="true"])`);
 	}
 
 	function focusCard(index: number) {
-		if (choices.length === 0) return;
-		focusedIndex = Math.max(0, Math.min(index, choices.length - 1));
+		if (handEntries.length === 0) return;
+		const desiredIndex = Math.max(0, Math.min(index, handEntries.length - 1));
+		let focusableIndex = desiredIndex;
+		if (handEntries[desiredIndex].ghostOnly) {
+			focusableIndex = handEntries.findIndex((entry, candidateIndex) => candidateIndex >= desiredIndex && !entry.ghostOnly);
+			if (focusableIndex < 0) {
+				for (let candidateIndex = desiredIndex - 1; candidateIndex >= 0; candidateIndex -= 1) {
+					if (!handEntries[candidateIndex].ghostOnly) {
+						focusableIndex = candidateIndex;
+						break;
+					}
+				}
+			}
+		}
+		if (focusableIndex < 0) return;
+		focusedIndex = focusableIndex;
 		const card = cardAt(focusedIndex);
 		if (!card || !viewport) return;
 		card.focus({ preventScroll: true });
@@ -77,7 +117,7 @@
 			focusCard(0);
 		} else if (event.key === 'End') {
 			event.preventDefault();
-			focusCard(choices.length - 1);
+			focusCard(handEntries.length - 1);
 		}
 	}
 
@@ -102,12 +142,12 @@
 		{/if}
 	</header>
 
-	{#if choices.length}
+	{#if handEntries.length}
 		{#if !barHand}
 			<div class="hand-controls" aria-label="Card navigation">
 				<button type="button" class="step-button" aria-label="Previous card" disabled={focusedIndex <= 0} onclick={() => focusCard(focusedIndex - 1)}>‹</button>
-				<p class="hand-count">{choices.length} card{choices.length === 1 ? '' : 's'}</p>
-				<button type="button" class="step-button" aria-label="Next card" disabled={focusedIndex >= choices.length - 1} onclick={() => focusCard(focusedIndex + 1)}>›</button>
+				<p class="hand-count">{handEntries.length} card{handEntries.length === 1 ? '' : 's'}</p>
+				<button type="button" class="step-button" aria-label="Next card" disabled={focusedIndex >= handEntries.length - 1} onclick={() => focusCard(focusedIndex + 1)}>›</button>
 			</div>
 		{/if}
 		<div class="card-viewport-shell" class:can-scroll-left={canScrollLeft} class:can-scroll-right={canScrollRight}>
@@ -124,16 +164,67 @@
 				onscroll={updateScrollHints}
 			>
 				<div class="card-track" class:bar-hand-track={barHand} class:conversation-open={conversationOpen}>
-					{#each choices as choice, index (choice.key)}
-						<TavernCard
-							{choice}
-							{index}
-							handCount={choices.length}
-							{barHand}
-							selected={choice.itemIds.includes(selectedItemId)}
-							{disabled}
-							onselect={() => onselect(choice)}
-						/>
+					{#each handEntries as entry, index (entry.choice.key)}
+						{@const choice = entry.choice}
+						{@const isBurnTarget = !!burningCard && choice.key === burningCard.choice.key}
+						<div class="card-slot" data-card-slot-index={index}>
+							{#if entry.ghostOnly && burningCard}
+								{@const burnTurnId = burningCard.turnId}
+								{#key burnTurnId}
+									<CardBurnSurface
+										active={true}
+										treatment={burningCard.treatment}
+										durationMs={burningCard.durationMs}
+										oncomplete={() => onburncomplete?.(burnTurnId)}
+									>
+										<TavernCard
+											choice={burningCard.choice}
+											{index}
+											handCount={handEntries.length}
+											{barHand}
+											selected={false}
+											disabled={true}
+											burningCard={burningCard}
+											onselect={() => {}}
+										/>
+									</CardBurnSurface>
+								{/key}
+							{:else}
+								<TavernCard
+									{choice}
+									{index}
+									handCount={handEntries.length}
+									{barHand}
+									selected={choice.itemIds.includes(selectedItemId)}
+									{disabled}
+									onselect={() => onselect(choice)}
+								/>
+								{#if isBurnTarget && burningCard}
+									{@const burnTurnId = burningCard.turnId}
+									<div class="burning-card-ghost" aria-hidden="true">
+										{#key burnTurnId}
+											<CardBurnSurface
+												active={true}
+												treatment={burningCard.treatment}
+												durationMs={burningCard.durationMs}
+												oncomplete={() => onburncomplete?.(burnTurnId)}
+											>
+												<TavernCard
+													choice={burningCard.choice}
+													{index}
+													handCount={handEntries.length}
+													{barHand}
+													selected={false}
+													disabled={true}
+													burningCard={burningCard}
+													onselect={() => {}}
+												/>
+											</CardBurnSurface>
+										{/key}
+									</div>
+								{/if}
+							{/if}
+						</div>
 					{/each}
 				</div>
 			</div>
@@ -168,11 +259,14 @@
 	.hand-count { min-width: 3.5rem; margin: 0; color: #bcb099; font-size: 0.7rem; text-align: center; }
 	.card-viewport { overflow-x: auto; overflow-y: visible; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scrollbar-color: #806332 transparent; scrollbar-width: thin; padding: 0.45rem 0.35rem 0.7rem; }
 	.card-track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(9rem, 10.25rem); align-items: start; gap: 0.65rem; width: max-content; min-width: 100%; }
-	.card-track :global(.tavern-card) { scroll-snap-align: center; }
-	.card-track :global(.tavern-card:nth-child(3n + 1)) { transform: rotate(0.9deg) translateY(0.2rem); }
-	.card-track :global(.tavern-card:nth-child(3n + 2)) { transform: rotate(-0.2deg) translateY(0); }
-	.card-track :global(.tavern-card:nth-child(3n)) { transform: rotate(-0.9deg) translateY(0.2rem); }
+	.card-slot { position: relative; min-width: 0; }
+	.card-track :global(.card-slot) { scroll-snap-align: center; }
+	.card-track :global(.card-slot:nth-child(3n + 1) .tavern-card) { transform: rotate(0.9deg) translateY(0.2rem); }
+	.card-track :global(.card-slot:nth-child(3n + 2) .tavern-card) { transform: rotate(-0.2deg) translateY(0); }
+	.card-track :global(.card-slot:nth-child(3n) .tavern-card) { transform: rotate(-0.9deg) translateY(0.2rem); }
 	.card-track :global(.tavern-card:hover), .card-track :global(.tavern-card.selected), .card-track :global(.tavern-card:focus-visible) { transform: translateY(-0.3rem) rotate(0deg); }
+	.burning-card-ghost { position: absolute; z-index: 16; inset: 0; pointer-events: none; }
+	.burning-card-ghost :global(.card-burn-surface) { width: 100%; height: 100%; }
 	.hand-empty { margin: 0.15rem 0.3rem 0; color: #bcb099; font-size: 0.74rem; }
 	.bar-empty-hand { display: grid; justify-items: center; gap: 0.75rem; max-width: 54rem; margin: 0 auto; padding: 1rem 1.1rem; border: 1px solid rgb(180 145 77 / 45%); border-radius: 0.7rem; color: #eee2c5; background: rgb(20 15 9 / 0.9); text-align: center; }
 	.bar-empty-hand .hand-empty { max-width: 34rem; margin: 0; font-size: 0.82rem; line-height: 1.45; }
@@ -190,6 +284,7 @@
 	.service-card-hand.bar-hand .bar-hand-heading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
 	.service-card-hand :global(.card-viewport.bar-hand-viewport) { max-height: 19rem; overflow-x: auto; overflow-y: hidden; padding: 3.75rem 0 1rem; scroll-snap-type: x proximity; scrollbar-color: #806332 rgb(255 255 255 / 5%); }
 	.service-card-hand :global(.card-track.bar-hand-track) { display: flex; width: max-content; min-width: 100%; align-items: end; justify-content: space-evenly; gap: 0.55rem; padding: 0 1.2rem; }
+	.service-card-hand :global(.card-track.bar-hand-track > .card-slot) { width: clamp(10rem, 14vw, 12.4rem); flex: 0 0 clamp(10rem, 14vw, 12.4rem); align-self: end; }
 	.service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand) { transform: translateY(clamp(-3rem, var(--hand-lift, 0px), 0px)) rotate(clamp(-18deg, var(--hand-angle, 0deg), 18deg)); }
 	.service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand:hover:not(:disabled)), .service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand.selected) { transform: translateY(calc(clamp(-3rem, var(--hand-lift, 0px), 0px) - 0.45rem)) rotate(0deg); }
 	.service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand.selected) { z-index: 8; }
@@ -207,6 +302,7 @@
 		.service-card-hand.bar-hand { width: 100%; }
 		.service-card-hand :global(.card-viewport.bar-hand-viewport) { max-height: 14rem; padding: 1.65rem 0 0.9rem; }
 		.service-card-hand :global(.card-track.bar-hand-track) { justify-content: space-evenly; gap: 0.5rem; padding-inline: 1rem; }
+		.service-card-hand :global(.card-track.bar-hand-track > .card-slot) { width: clamp(10.625rem, 45vw, 12.25rem); flex-basis: clamp(10.625rem, 45vw, 12.25rem); }
 		.service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand) { transform: translateY(clamp(-1.2rem, var(--hand-lift, 0px), 0px)) rotate(clamp(-11deg, var(--hand-angle, 0deg), 11deg)); }
 		.service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand:hover:not(:disabled)), .service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand.selected) { transform: translateY(calc(clamp(-1.2rem, var(--hand-lift, 0px), 0px) - 0.35rem)) rotate(0deg); }
 		.service-card-hand :global(.card-track.bar-hand-track .tavern-card.bar-hand:focus-visible) { transform: translateY(calc(clamp(-1.2rem, var(--hand-lift, 0px), 0px) - 0.45rem)) rotate(0deg); }
