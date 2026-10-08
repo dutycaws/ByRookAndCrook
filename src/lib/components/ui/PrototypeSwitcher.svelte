@@ -1,12 +1,13 @@
 <script lang="ts">
   import { replaceState } from '$app/navigation';
   import { page } from '$app/state';
-  type BarPrototypeVariant = 'A' | 'B' | 'C';
+  type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D';
 
   const variants: { key: BarPrototypeVariant; name: string }[] = [
-    { key: 'A', name: 'Beside the patron' },
-    { key: 'B', name: 'Countertop spread' },
-    { key: 'C', name: 'Conversation thread' }
+    { key: 'A', name: 'Face-side float' },
+    { key: 'B', name: 'Player’s hand' },
+    { key: 'C', name: 'Conversation ribbon' },
+    { key: 'D', name: 'Previous countertop' }
   ];
 
   let {

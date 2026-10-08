@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Question: which floating conversation surface best supports the bar flow? Three layouts share /bar?variant= on the existing route.
+  // Question: which card-first conversation layout works best? The old B was closest; a persistent fan and card-first flow are accepted, while the new layout winner is pending.
   import { tick } from 'svelte';
   import PrototypeSwitcher from '$lib/components/ui/PrototypeSwitcher.svelte';
   import type { OwnedTrinket } from '$lib/game/trinkets';
@@ -7,6 +7,7 @@
   import VariantA from './VariantA.svelte';
   import VariantB from './VariantB.svelte';
   import VariantC from './VariantC.svelte';
+  import VariantReference from './VariantReference.svelte';
   import {
     PROTOTYPE_CARDS,
     type BarPrototypeModel,
@@ -40,12 +41,19 @@
   const activeCard = $derived(PROTOTYPE_CARDS.find((card) => card.id === selectedCardId) ?? null);
   const history = $derived(selected ? historyByNpc[selected.instanceId] ?? [] : []);
 
-  function choosePatron(instanceId: string) {
+  async function choosePatron(instanceId: string) {
     if (!patrons.some((patron) => patron.instanceId === instanceId)) return;
     selectedInstanceId = instanceId;
     focusedInstanceId = instanceId;
-    mode = 'overview';
+    selectedCardId = null;
+    draft = '';
+    mode = variant === 'D' ? 'overview' : 'cards';
     notice = '';
+    await tick();
+    const firstControl = variant === 'D'
+      ? document.querySelector<HTMLButtonElement>('[data-bar-control="talk"]')
+      : document.querySelector<HTMLButtonElement>('[data-prototype-cardrail] button');
+    firstControl?.focus({ preventScroll: true });
   }
 
   async function returnToOverview() {
@@ -102,8 +110,8 @@
       return;
     }
     const reply = activeCard?.id === 'intent-kindness'
-      ? selected.name + ' pauses, then shares what has been weighing on them.'
-      : selected.name + ' tells you about a winding road and a familiar face along it.';
+      ? 'After a pause, they share what has been weighing on them.'
+      : 'They tell you about a winding road and a familiar face along it.';
     appendEntries([
       { kind: 'player', label: 'You', text: message },
       { kind: 'patron', label: selected.name, text: reply }
@@ -188,7 +196,15 @@
     onjournal: openJournal,
     onjournalclose: closeJournal,
     ondraft: (value: string) => (draft = value),
-    oncard: (id: string) => (selectedCardId = id),
+    oncard: (id: string) => {
+      selectedCardId = id;
+      mode = 'talk';
+      notice = '';
+    },
+    onchatclose: () => {
+      mode = 'cards';
+      notice = '';
+    },
     onsend: sendMessage,
     onserve: serveCard
   } satisfies BarPrototypeModel);
@@ -202,13 +218,12 @@
       await closeJournal();
       return;
     }
-    if (mode === 'talk' || mode === 'cards') {
+    if (mode === 'talk') {
       event.preventDefault();
       event.stopPropagation();
-      const opener = mode === 'talk' ? 'talk' : 'deck';
-      mode = 'overview';
+      mode = 'cards';
       await tick();
-      document.querySelector<HTMLElement>('[data-bar-control="' + opener + '"]')
+      document.querySelector<HTMLElement>('[data-prototype-card-id="' + selectedCardId + '"]')
         ?.focus({ preventScroll: true });
       return;
     }
@@ -227,8 +242,10 @@
     <VariantA {...model} />
   {:else if variant === 'B'}
     <VariantB {...model} />
-  {:else}
+  {:else if variant === 'C'}
     <VariantC {...model} />
+  {:else}
+    <VariantReference {...model} />
   {/if}
   <PrototypeSwitcher current={variant} state={stateForDebug} onreset={resetPrototype} {onvariantchange} />
 </section>

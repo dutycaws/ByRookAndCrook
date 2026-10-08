@@ -1,7 +1,7 @@
 import type { OwnedTrinket, TrinketSlot } from '$lib/game/trinkets';
 import type { Patron } from '$lib/game/serving';
 
-export type BarPrototypeVariant = 'A' | 'B' | 'C';
+export type BarPrototypeVariant = 'A' | 'B' | 'C' | 'D';
 export type PrototypeMode = 'overview' | 'talk' | 'cards' | 'journal';
 export type MockCardKind = 'intent' | 'hospitality';
 
@@ -55,6 +55,7 @@ export type BarPrototypeModel = {
   onjournalclose: () => void;
   ondraft: (value: string) => void;
   oncard: (id: string) => void;
+  onchatclose: () => void;
   onsend: () => void;
   onserve: () => void;
 };

@@ -21,6 +21,7 @@
     gold: number;
     archiveHref: string;
     disabled?: boolean;
+    hideControls?: boolean;
     closeDisabled?: boolean;
     cardSelected?: boolean;
     composerOpen?: boolean;
@@ -44,6 +45,7 @@
     gold,
     archiveHref,
     disabled = false,
+    hideControls = false,
     closeDisabled = disabled,
     cardSelected = false,
     composerOpen = false,
@@ -154,9 +156,9 @@
     />
     <div class="scene-vignette" aria-hidden="true"></div>
 
-    <BarStatusRail day={day} gold={gold} disabled={closeDisabled} onclose={onclose} />
+    <BarStatusRail day={day} gold={gold} disabled={closeDisabled} statusOnly={hideControls} onclose={onclose} />
 
-    {#if !selected}
+    {#if !hideControls && !selected}
       <div class="scene-keepsake-anchors" role="group" aria-label="Keepsake display slots">
         {#each trinketAnchors as anchor (anchor.slot)}
           {@const item = trinkets.find((entry) => entry.slot === anchor.slot) ?? null}
@@ -184,7 +186,7 @@
     {/if}
   </figure>
 
-  {#if selected}
+  {#if selected && !hideControls}
     <div class="scene-actions" aria-label={`Actions for ${selected.name}`}>
       <button class="back-to-bar" type="button" data-bar-control="back" disabled={disabled} onclick={onback}>Back to bar</button>
       <div class="focus-actions">
@@ -210,7 +212,7 @@
         ><TavernDeckBack /><span>Card Deck</span></button>
       </div>
     </div>
-  {:else}
+  {:else if !hideControls}
     <a class="archive-link" href={archiveHref}>Past residents</a>
   {/if}
 

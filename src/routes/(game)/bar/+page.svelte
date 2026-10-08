@@ -18,7 +18,10 @@
   let { data, form }: PageProps = $props();
 
   function parsePrototypeVariant(value: string | null): BarPrototypeVariant | null {
-    return value === 'A' || value === 'B' || value === 'C' ? value : null;
+    const normalized = value?.toUpperCase();
+    return normalized === 'A' || normalized === 'B' || normalized === 'C' || normalized === 'D'
+      ? normalized
+      : null;
   }
 
   let prototypeVariant = $state<BarPrototypeVariant | null>(
