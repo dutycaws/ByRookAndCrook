@@ -7,6 +7,7 @@
   import type { TrinketSlot } from '$lib/game/trinkets';
   import NpcDialogue from '$lib/components/NpcDialogue.svelte';
   import Dialog from '$lib/components/ui/Dialog.svelte';
+  import FloatingSurface from '$lib/components/ui/FloatingSurface.svelte';
   import ResidentInspector from '$lib/components/tavern/ResidentInspector.svelte';
   import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
   import TavernScene from '$lib/components/tavern/TavernScene.svelte';
@@ -26,7 +27,7 @@
   let focusedInstanceId = $state<string | null>(validInitialSelection());
   let journalOpen = $state(false);
   let talkOpen = $state(false);
-  let deckOpen = $state(false);
+  let deckOpen = $state(Boolean(validInitialSelection()));
   let cardSelected = $state(false);
   let dialogueBusy = $state(false);
   let hydrated = $state(false);
@@ -35,6 +36,7 @@
   let closeError = $state<string | null>(null);
   let closeCommand: { actionId: string; saveId: string; revision: number } | null = $state(null);
   let keepsakeDialogOpen = $state(false);
+  let keepsakeBusy = $state(false);
   let selectedTrinketSlot = $state<TrinketSlot | null>(null);
   let selectedTrinketId = $state('');
 
@@ -42,7 +44,7 @@
   const collection = $derived(data.snapshot?.trinkets?.collection ?? []);
   const patron = $derived(patrons.find((resident) => resident.instanceId === selectedInstanceId) ?? null);
   const journal = $derived(patron ? data.journals[patron.instanceId] ?? null : null);
-  const interactionBlocked = $derived(!hydrated || pending || dialogueBusy || !!closeCommand);
+  const interactionBlocked = $derived(!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand);
   const codexHref = $derived(patron
     ? `/codex?section=residents&resident=${encodeURIComponent(patron.instanceId)}`
     : '/codex?section=residents');
@@ -74,7 +76,7 @@
       selectedInstanceId = nextSelection;
       if (nextSelection) focusedInstanceId = nextSelection;
       talkOpen = false;
-      deckOpen = false;
+      deckOpen = Boolean(nextSelection);
       cardSelected = false;
       journalOpen = false;
     };
@@ -90,14 +92,18 @@
     replaceState(`/bar${query ? `?${query}` : ''}`, page.state);
   }
 
-  function selectPatron(instanceId: string) {
+  async function selectPatron(instanceId: string) {
     if (interactionBlocked || !patrons.some((resident) => resident.instanceId === instanceId)) return;
     selectedInstanceId = instanceId;
     focusedInstanceId = instanceId;
+    keepsakeDialogOpen = false;
+    selectedTrinketSlot = null;
     journalOpen = false;
     talkOpen = false;
-    deckOpen = false;
+    deckOpen = true;
     cardSelected = false;
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-card-index="0"]')?.focus({ preventScroll: true });
   }
 
   async function returnToBar() {
@@ -117,63 +123,40 @@
     target?.focus({ preventScroll: true });
   }
 
-  async function toggleTalk() {
-    if (interactionBlocked || !patron) return;
-    const opening = !talkOpen;
-    journalOpen = false;
-    talkOpen = opening;
-    deckOpen = false;
-    if (opening) {
-      await tick();
-      document.querySelector<HTMLTextAreaElement>('.dialogue-form textarea')?.focus({ preventScroll: true });
-    }
-  }
-
-  async function toggleDeck() {
-    if (interactionBlocked || !patron) return;
-    const opening = !deckOpen;
-    journalOpen = false;
-    deckOpen = opening;
-    talkOpen = false;
-    if (opening) {
-      await tick();
-      document.querySelector<HTMLButtonElement>('[data-card-index="0"]')?.focus({ preventScroll: true });
-    }
-  }
-
-  function setJournalOpen(open: boolean) {
+  async function setJournalOpen(open: boolean) {
     journalOpen = open;
-    if (open) {
-      talkOpen = false;
-      deckOpen = false;
-    }
+    await tick();
+    document.querySelector<HTMLElement>(open ? '[data-bar-control="journal-close"]' : '[data-bar-control="journal"]')?.focus({ preventScroll: true });
   }
 
   async function handleEscape(event: KeyboardEvent) {
     if (event.key !== 'Escape' || event.defaultPrevented) return;
     if (document.querySelector('dialog[open]')) return;
 
+    if (keepsakeDialogOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      await closeKeepsakeDialog();
+      return;
+    }
+
     if (journalOpen) {
       event.preventDefault();
       event.stopPropagation();
-      journalOpen = false;
+      await setJournalOpen(false);
+      return;
+    }
+
+    if (talkOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      talkOpen = false;
       await tick();
-      document.querySelector<HTMLElement>('[data-bar-control="journal"]')?.focus({ preventScroll: true });
+      document.querySelector<HTMLElement>('[data-card-index][aria-pressed="true"]')?.focus({ preventScroll: true });
       return;
     }
 
     if (dialogueBusy) return;
-
-    if (talkOpen || deckOpen) {
-      event.preventDefault();
-      event.stopPropagation();
-      const control = talkOpen ? 'talk' : 'deck';
-      talkOpen = false;
-      deckOpen = false;
-      await tick();
-      document.querySelector<HTMLElement>(`[data-bar-control="${control}"]`)?.focus({ preventScroll: true });
-      return;
-    }
 
     if (patron && !interactionBlocked) {
       event.preventDefault();
@@ -181,16 +164,23 @@
     }
   }
 
-  function openKeepsake(slot: TrinketSlot) {
-    if (interactionBlocked) return;
+  async function openKeepsake(slot: TrinketSlot) {
+    if (interactionBlocked || patron) return;
     selectedTrinketSlot = slot;
     selectedTrinketId = collection.find((item) => item.slot === slot)?.id ?? collection.find((item) => item.slot === null)?.id ?? '';
     keepsakeDialogOpen = true;
+    await tick();
+    document.querySelector<HTMLButtonElement>('[aria-label="Close keepsake details"]')?.focus({ preventScroll: true });
   }
 
-  function closeKeepsakeDialog() {
+  async function closeKeepsakeDialog(completed = false) {
+    if (keepsakeBusy && !completed) return;
+    const returningSlot = selectedTrinketSlot;
     keepsakeDialogOpen = false;
     selectedTrinketSlot = null;
+    if (completed) keepsakeBusy = false;
+    await tick();
+    if (returningSlot !== null) document.querySelector<HTMLElement>(`[data-keepsake-slot="${returningSlot + 1}"]`)?.focus({ preventScroll: true });
   }
 
   const enhanceClose: SubmitFunction = ({ formData, cancel }) => {
@@ -286,6 +276,7 @@
   {:else}
     <div class="bar-shell">
       <TavernScene
+        presentation="player-hand"
         {patrons}
         selected={patron}
         focusedKey={focusedInstanceId}
@@ -293,16 +284,14 @@
         day={data.snapshot.save.currentDay}
         gold={data.snapshot.save.gold}
         archiveHref={codexHref}
-        disabled={!hydrated || pending || dialogueBusy || !!closeCommand}
-        closeDisabled={!hydrated || pending || dialogueBusy}
+        disabled={!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand}
+        closeDisabled={!hydrated || pending || dialogueBusy || keepsakeBusy}
         {cardSelected}
         composerOpen={talkOpen}
         {deckOpen}
         onselect={selectPatron}
         onfocus={(instanceId) => (focusedInstanceId = instanceId)}
         onback={returnToBar}
-        ontalk={toggleTalk}
-        ondeck={toggleDeck}
         onclose={() => { closeError = null; closeDialogOpen = true; }}
         onkeepsake={openKeepsake}
       >
@@ -318,26 +307,19 @@
               unavailable={data.dialogueUnavailable}
               archiveHref={null}
               embedded={true}
+              barHand={true}
+              suspended={journalOpen}
               blocked={pending || !!closeCommand}
               focusActive={true}
               composerOpen={talkOpen}
               deckOpen={deckOpen}
               onbusychange={(busy) => (dialogueBusy = busy)}
-              oncomposerchange={(open) => {
-                talkOpen = open;
-                if (open) {
-                  journalOpen = false;
-                  deckOpen = false;
-                }
+              oncomposerchange={(open) => (talkOpen = open)}
+              ondeckchange={() => (deckOpen = Boolean(patron))}
+              onselectionchange={(selected) => {
+                cardSelected = selected;
+                if (selected) journalOpen = false;
               }}
-              ondeckchange={(open) => {
-                deckOpen = open;
-                if (open) {
-                  journalOpen = false;
-                  talkOpen = false;
-                }
-              }}
-              onselectionchange={(selected) => (cardSelected = selected)}
             />
           {:else if patron}
             <p class="quiet-line" role="status">This resident’s journal is unavailable right now.</p>
@@ -354,11 +336,39 @@
           archiveHref={codexCursorHref}
           {codexHref}
           {journalOpen}
-          interactionOpen={talkOpen || deckOpen}
+          interactionOpen={talkOpen}
           onjournalchange={setJournalOpen}
         />
       {:else if patrons.length === 0}
         <p class="quiet-room" role="status">The common room is quiet. The scene’s keepsake slots still open their manager; past residents are in the Codex.</p>
+      {/if}
+      {#if keepsakeDialogOpen && selectedTrinketSlot !== null && data.snapshot && !patron}
+        <FloatingSurface
+          as="section"
+          id="keepsake-manager"
+          class={'keepsake-surface ' + (selectedTrinketSlot % 2 === 0 ? 'slot-left' : 'slot-right')}
+          role="region"
+          aria-labelledby="keepsake-title"
+          style={'--slot-row:' + (selectedTrinketSlot < 2 ? '.19' : '.34')}
+        >
+          <header class="keepsake-heading">
+            <h2 id="keepsake-title">Keepsake slot {selectedTrinketSlot + 1}</h2>
+            <button type="button" class="surface-close" aria-label="Close keepsake details" disabled={keepsakeBusy} onclick={() => closeKeepsakeDialog()}>×</button>
+          </header>
+          <div class="keepsake-body">
+            <TrinketCollection
+              {collection}
+              saveId={data.snapshot.save.id}
+              revision={data.snapshot.save.revision}
+              selectedId={selectedTrinketId}
+              targetSlot={selectedTrinketSlot}
+              disabled={!hydrated || pending || !!closeCommand}
+              onselect={(id) => (selectedTrinketId = id)}
+              onbusychange={(busy) => (keepsakeBusy = busy)}
+              oncomplete={() => closeKeepsakeDialog(true)}
+            />
+          </div>
+        </FloatingSurface>
       {/if}
     </div>
   {/if}
@@ -379,27 +389,11 @@
   </form>
 </Dialog>
 
-<Dialog id="keepsake-manager" title="Arrange a keepsake" bind:open={keepsakeDialogOpen}>
-  {#if selectedTrinketSlot !== null}
-    <p class="keepsake-context">Choose what belongs in display slot {selectedTrinketSlot + 1}.</p>
-  {/if}
-  {#if data.snapshot}
-    <TrinketCollection
-      collection={collection}
-      saveId={data.snapshot.save.id}
-      revision={data.snapshot.save.revision}
-      selectedId={selectedTrinketId}
-      targetSlot={selectedTrinketSlot}
-      disabled={!hydrated || pending || !!closeCommand}
-      onselect={(id) => (selectedTrinketId = id)}
-      oncomplete={closeKeepsakeDialog}
-    />
-  {/if}
-</Dialog>
+
 
 <style>
   .bar-page { width: min(100%, 100rem); margin-inline: auto; padding: clamp(.5rem, 1.8vw, 1.25rem); }
-  .bar-shell { position: relative; min-width: 0; }
+  .bar-shell { position: relative; min-width: 0; container-type: inline-size; --bar-scene-height: calc(100cqw * 9 / 16); }
   .return-link:focus-visible, .text-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
   .quiet-room { margin: 0; padding: .3rem 0; color: #b9aa88; font-size: .9rem; }
   .codex-transfer { display: grid; justify-items: start; gap: .65rem; max-width: 40rem; margin: clamp(2rem, 12vh, 7rem) auto; color: #e8ddc4; }
@@ -409,7 +403,17 @@
   .return-link { color: #ddc998; text-underline-offset: .2em; }
   .bar-empty-state { max-width: 36rem; margin: 8vh auto; text-align: center; }
   .bar-empty-state .text-button { display: block; margin: .6rem auto; }
-  .keepsake-context { margin: 0 0 .8rem; color: #c9bb9b; }
+  .bar-shell :global(.keepsake-surface) { position: absolute; z-index: 60; top: calc(var(--bar-scene-height) * var(--slot-row) + 3.5rem); display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(24rem, calc(100% - 2rem)); max-height: min(65dvh, 32rem); padding: 1rem; overflow: hidden; background: rgb(32 24 19 / .76); }
+  .bar-shell :global(.slot-left) { left: calc(3.5% + 3.5rem); }
+  .bar-shell :global(.slot-right) { right: calc(15% + 3.5rem); }
+  .keepsake-heading { display: flex; gap: 1rem; align-items: center; justify-content: space-between; padding-bottom: .75rem; border-bottom: 1px solid rgb(230 205 161 / .25); }
+  .keepsake-heading h2 { margin: 0; color: #e3ca8d; font: 600 .8rem 'Cinzel', Georgia, serif; }
+  .surface-close { width: 2.75rem; height: 2.75rem; flex: 0 0 auto; border: 1px solid #8c754a; border-radius: .5rem; background: transparent; color: #eee2c4; font-size: 1.2rem; cursor: pointer; }
+  .surface-close:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
+  .surface-close:disabled { opacity: .5; cursor: wait; }
+  .keepsake-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: .75rem; }
+  @media (max-width: 820px) { .bar-shell { --bar-scene-height: calc(100cqw * 2 / 3); } }
+  @media (max-width: 620px) { .bar-shell :global(.keepsake-surface) { left: 1rem; right: 1rem; width: auto; } }
   .dialog-copy { color: #d6c8a6; line-height: 1.5; }
   .full-button { width: 100%; }
   .primary-button:focus-visible, .inline-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }

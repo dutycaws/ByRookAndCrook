@@ -9,6 +9,8 @@
 		interactive = true,
 		compact = false,
 		index = 0,
+		handCount = 1,
+		barHand = false,
 		onselect
 	}: {
 		choice: TavernCardChoice;
@@ -17,10 +19,17 @@
 		interactive?: boolean;
 		compact?: boolean;
 		index?: number;
+		handCount?: number;
+		barHand?: boolean;
 		onselect?: () => void;
 	} = $props();
 
 	const artSeed = $derived(`${choice.key}-${index}-${compact ? 'small' : 'full'}`);
+	const fanOffset = $derived(index - (handCount - 1) / 2);
+	const handAngle = $derived(Math.max(-18, Math.min(18, fanOffset * 5.5)));
+	const fanRadius = $derived(Math.max(1, (handCount - 1) / 2));
+	const handLift = $derived(handCount <= 2 ? 0 : -48 * (1 - (fanOffset / fanRadius) ** 2));
+	const barHandStyle = $derived(barHand ? `--hand-angle:${handAngle}deg;--hand-lift:${handLift}px;` : undefined);
 	const accessibleLabel = $derived(
 		`${choice.eyebrow}. ${choice.title}. ${choice.detail}${choice.quantity > 1 ? `. ${choice.quantity} available` : ''}`
 	);
@@ -42,16 +51,19 @@
 		class="tavern-card card-{choice.kind}"
 		class:selected
 		class:compact
+		class:bar-hand={barHand}
 		aria-label={accessibleLabel}
 		aria-pressed={selected}
+		aria-disabled={disabled ? 'true' : undefined}
 		data-card-index={index}
-		disabled={disabled}
-		onclick={onselect}
+		style={barHandStyle}
+		disabled={disabled && !barHand}
+		onclick={disabled && barHand ? undefined : onselect}
 	>
 		{@render cardFace()}
 	</button>
 {:else}
-	<div class="tavern-card card-{choice.kind}" class:selected class:compact role="group" aria-label={accessibleLabel}>
+	<div class="tavern-card card-{choice.kind}" class:selected class:compact class:bar-hand={barHand} role="group" aria-label={accessibleLabel} style={barHandStyle}>
 		{@render cardFace()}
 	</div>
 {/if}
@@ -138,16 +150,34 @@
 	}
 	button.tavern-card:hover:not(:disabled) { transform: translateY(-0.25rem) rotate(0deg); border-color: var(--card-accent); }
 	.tavern-card.selected { transform: translateY(-0.35rem) rotate(0deg); border-color: var(--card-accent); box-shadow: 0 0 0 2px rgb(240 210 122 / 34%), 0 0.75rem 1.3rem rgb(0 0 0 / 30%); }
+	.tavern-card.bar-hand { width: clamp(10rem, 14vw, 12.4rem); min-height: 13.25rem; flex: 0 0 clamp(10rem, 14vw, 12.4rem); grid-template-rows: 6.4rem minmax(0, 1fr); align-self: end; gap: 0.3rem; padding: 0.55rem; scroll-snap-align: center; }
+	button.tavern-card.bar-hand { transform: translateY(clamp(-3rem, var(--hand-lift, 0px), 0px)) rotate(clamp(-18deg, var(--hand-angle, 0deg), 18deg)); transform-origin: 50% 108%; transition: transform 150ms ease, opacity 150ms ease, border-color 150ms ease, box-shadow 150ms ease; }
+	.tavern-card.bar-hand .card-art { width: 100%; height: 6.4rem; }
+	.tavern-card.bar-hand .card-copy { align-content: start; gap: 0.2rem; }
+	.tavern-card.bar-hand .card-copy strong { font-size: 0.8rem; }
+	.tavern-card.bar-hand .card-detail { font-size: 0.64rem; line-height: 1.3; }
+	button.tavern-card.bar-hand:hover:not(:disabled), button.tavern-card.bar-hand.selected { transform: translateY(calc(clamp(-3rem, var(--hand-lift, 0px), 0px) - 0.45rem)) rotate(0deg); }
 	.tavern-card.compact.selected:not(button) { animation: compact-selected-float 3.8s ease-in-out infinite; }
 	.tavern-card:focus-visible { outline: 2px solid #ffe49c; outline-offset: 3px; }
 	.tavern-card:disabled { cursor: not-allowed; opacity: 0.62; }
+	.tavern-card.bar-hand[aria-disabled="true"] { cursor: not-allowed; }
 	.tavern-card.compact { min-height: 0; padding: 0.55rem 0.65rem; border-radius: 0.65rem; grid-template-columns: 2.4rem minmax(0, 1fr); gap: 0.5rem; }
 	.compact .card-art { width: 2.4rem; height: 2.7rem; }
 	.compact .card-copy { gap: 0.15rem; }
 	.compact .card-copy strong { font-size: 0.78rem; }
 	.compact .card-detail { font-size: 0.68rem; }
+	@media (max-width: 1000px) {
+		.tavern-card.bar-hand { width: clamp(10.625rem, 45vw, 12.25rem); min-height: 11rem; flex-basis: clamp(10.625rem, 45vw, 12.25rem); grid-template-rows: 5.4rem minmax(0, 1fr); padding: 0.48rem; }
+		.tavern-card.bar-hand .card-art { height: 5.4rem; }
+		.tavern-card.bar-hand .card-eyebrow { font-size: 0.58rem; }
+		.tavern-card.bar-hand .card-copy strong { font-size: 0.75rem; }
+		.tavern-card.bar-hand .card-detail { font-size: 0.67rem; }
+		button.tavern-card.bar-hand { transform: translateY(clamp(-1.2rem, var(--hand-lift, 0px), 0px)) rotate(clamp(-11deg, var(--hand-angle, 0deg), 11deg)); }
+		button.tavern-card.bar-hand:hover:not(:disabled), button.tavern-card.bar-hand.selected { transform: translateY(calc(clamp(-1.2rem, var(--hand-lift, 0px), 0px) - 0.35rem)) rotate(0deg); }
+	}
 	@media (prefers-reduced-motion: reduce) {
 		.tavern-card { transition: none; }
+		button.tavern-card.bar-hand, button.tavern-card.bar-hand:hover:not(:disabled), button.tavern-card.bar-hand.selected { transform: none; }
 		.tavern-card.compact.selected:not(button) { animation: none; transform: none; }
 		button.tavern-card:hover:not(:disabled), .tavern-card.selected { transform: none; }
 	}

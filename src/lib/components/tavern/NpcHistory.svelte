@@ -10,7 +10,8 @@
     instanceId,
     description = null,
     relationshipStage = null,
-    archiveHref = null
+    archiveHref = null,
+    compact = false
   }: {
     name: string;
     journal: Journal | null;
@@ -19,6 +20,7 @@
     description?: string | null;
     relationshipStage?: Patron['relationshipStage'] | null;
     archiveHref?: string | null;
+    compact?: boolean;
   } = $props();
 
   const titleId = $derived(`npc-history-${instanceId.replace(/[^a-zA-Z0-9_-]/g, '-')}-title`);
@@ -52,12 +54,19 @@
   }
 </script>
 
-<section class="npc-history" aria-labelledby={titleId}>
-  <header class="history-heading">
-    <p class="eyebrow">{availabilityLabel}</p>
-    <h2 id={titleId}>Journal</h2>
-    {#if relationshipStage}<p class="relationship-line">Relationship <strong>{stageLabel}</strong></p>{/if}
-  </header>
+<section
+  class="npc-history"
+  class:compact
+  aria-labelledby={compact ? undefined : titleId}
+  aria-label={compact ? `${name} journal history` : undefined}
+>
+  {#if !compact}
+    <header class="history-heading">
+      <p class="eyebrow">{availabilityLabel}</p>
+      <h2 id={titleId}>Journal</h2>
+      {#if relationshipStage}<p class="relationship-line">Relationship <strong>{stageLabel}</strong></p>{/if}
+    </header>
+  {/if}
 
   {#if !journal}
     <p class="history-empty" role="status">Their journal is unavailable right now. Try again later.</p>
@@ -194,6 +203,23 @@
     overscroll-behavior: contain;
     scrollbar-color: #72562c transparent;
     scrollbar-width: thin;
+  }
+
+  .npc-history.compact {
+    max-block-size: none;
+    overflow: visible;
+    overscroll-behavior: auto;
+  }
+
+  .npc-history.compact .history-section {
+    padding-block: .55rem;
+    border-bottom: 0;
+  }
+
+  .npc-history.compact .quest-steps li {
+    border-left: 0;
+    border-bottom: 1px solid rgb(145 112 52 / 20%);
+    background: transparent;
   }
 
   .history-heading { padding-bottom: .9rem; border-bottom: 1px solid rgb(145 112 52 / 45%); }

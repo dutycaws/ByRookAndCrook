@@ -2,6 +2,7 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import NpcHistory from '$lib/components/tavern/NpcHistory.svelte';
+	import ResidentExchange from '$lib/components/tavern/ResidentExchange.svelte';
 	import ServiceCardHand from '$lib/components/tavern/ServiceCardHand.svelte';
 	import TavernCard from '$lib/components/tavern/TavernCard.svelte';
 	import type { TavernCardChoice, TavernCardKind } from '$lib/components/tavern/card-types';
@@ -25,6 +26,8 @@
 		journalOnly = false,
 		blocked = false,
 		focusActive = true,
+		barHand = false,
+		suspended = false,
 		composerOpen = false,
 		deckOpen = false,
 		onbusychange,
@@ -46,6 +49,8 @@
 		journalOnly?: boolean;
 		blocked?: boolean;
 		focusActive?: boolean;
+		barHand?: boolean;
+		suspended?: boolean;
 		composerOpen?: boolean;
 		deckOpen?: boolean;
 		onbusychange?: (busy: boolean) => void;
@@ -74,6 +79,8 @@
 	let canRetry = $state(true);
 	let composerOpenLocal = $state(false);
 	let deckOpenLocal = $state(false);
+	const handOpen = $derived(deckOpenLocal && (!barHand || focusActive));
+	const conversationVisible = $derived(composerOpenLocal && !suspended);
 	let operation = 0;
 	let posting: AbortController | undefined;
 
@@ -207,7 +214,7 @@
 
 	async function dismissCardFromDeck() {
 		clearChoice();
-		setDeckOpen(false);
+		if (!barHand) setDeckOpen(false);
 		setComposerOpen(true);
 		await focusComposer();
 	}
@@ -225,6 +232,13 @@
 	async function focusControl(name: 'talk' | 'deck') {
 		await tick();
 		if (typeof document !== 'undefined') {
+			if (barHand) {
+				const handCard = document.querySelector<HTMLElement>(
+					'.service-card-hand.bar-hand [data-card-index][aria-pressed="true"]'
+				) ?? document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index="0"]');
+				handCard?.focus({ preventScroll: true });
+				return;
+			}
 			document.querySelector<HTMLElement>(`[data-bar-control="${name}"]`)?.focus();
 		}
 	}
@@ -236,6 +250,7 @@
 
 	function handleEscape(event: KeyboardEvent) {
 		if (event.key !== 'Escape') return;
+		if (barHand) return;
 		if (deckOpenLocal) {
 			event.preventDefault();
 			event.stopPropagation();
@@ -262,7 +277,16 @@
 
 	async function focusComposer() {
 		await tick();
-		if (typeof document !== 'undefined') document.getElementById(messageFieldId)?.focus();
+		if (typeof document !== 'undefined') {
+			const field = document.getElementById(messageFieldId) as HTMLTextAreaElement | null;
+			if (field && !field.matches(':disabled')) field.focus();
+			else if (barHand) document.querySelector<HTMLElement>('.patron-dialogue.bar-hand .close-composer')?.focus();
+		}
+	}
+
+	async function resumeConversation() {
+		setComposerOpen(true);
+		await focusComposer();
 	}
 
 	async function chooseCard(choice: TavernCardChoice) {
@@ -276,7 +300,7 @@
 			intentCardId = itemId;
 			offeringSelection = '';
 		}
-		setDeckOpen(false);
+		if (!barHand) setDeckOpen(false);
 		setComposerOpen(true);
 		await focusComposer();
 	}
@@ -432,6 +456,8 @@
 	class="patron-dialogue"
 	class:embedded
 	class:journal-only={journalOnly}
+	class:bar-hand={barHand}
+	class:suspended
 	aria-labelledby={dialogueHeadingId}
 	onkeydown={handleEscape}
 >
@@ -445,8 +471,8 @@
 			<p>{name} is not available for a new conversation. Their story remains in the tavern history.</p>
 		</div>
 	{:else}
-		{#if deckOpenLocal}
-			{#if staleSelection}
+		{#if handOpen}
+			{#if staleSelection && !barHand}
 				<div class="stale-selection-note" role="alert">
 					<p>{offeringSelection ? 'The selected item left your hand and has not been replaced. Choose a card below or remove it.' : 'The selected card left your hand and has not been replaced. Choose a card below or remove it.'}</p>
 					<div class="stale-selection-actions">
@@ -457,29 +483,44 @@
 			<ServiceCardHand
 				choices={cardChoices}
 				{selectedItemId}
+				{barHand}
+				conversationOpen={conversationVisible}
 				disabled={blocked || busy || !!frozen}
 				onselect={chooseCard}
 				onclose={returnToTalk}
 			/>
+			{#if barHand && !conversationVisible && !suspended && (busy || frozen)}
+				<button type="button" class="bar-resume-chat" disabled={blocked} onclick={resumeConversation}>Return to unfinished reply</button>
+			{/if}
+			{#if barHand && !conversationVisible && !suspended && notice}
+				<p class="form-message bar-hand-notice" class:error={failure} role={failure ? 'alert' : 'status'}>{notice}</p>
+			{/if}
 		{/if}
 
-		{#if composerOpenLocal}
-			<section class="dialogue-surface" aria-labelledby={`${dialogueHeadingId}-talk`}>
+		{#if conversationVisible}
+			<section class="dialogue-surface" class:bar-chat={barHand} aria-labelledby={`${dialogueHeadingId}-talk`}>
 				<header class="composer-heading">
 					<div>
-					<p class="dialogue-eyebrow">A word with {name}</p>
-					<h2 id={`${dialogueHeadingId}-talk`}>Talk</h2>
+					<p class="dialogue-eyebrow">{barHand && selectedChoice ? `${selectedChoice.eyebrow} · with ${name}` : `A word with ${name}`}</p>
+					<h2 id={`${dialogueHeadingId}-talk`}>{barHand && selectedChoice ? selectedChoice.title : 'Talk'}</h2>
 				</div>
-				<button type="button" class="dialogue-action close-composer" onclick={closeComposer}>Close talk</button>
+				<button type="button" class="dialogue-action close-composer" onclick={closeComposer}>{barHand ? 'Close conversation' : 'Close talk'}</button>
 			</header>
 
 			{#if unavailable}<p class="form-message provider-notice" role="note">{unavailable}</p>{/if}
 
 				{#if selectedChoice}
-					<div class="selected-card-row" aria-label="Card attached to this conversation">
-						<TavernCard choice={selectedChoice} selected={true} interactive={false} compact={true} />
-						<button type="button" class="dialogue-action remove-card" disabled={!!frozen || busy || blocked} onclick={removeChoice}>Remove card</button>
-					</div>
+					{#if barHand}
+						<div class="bar-card-context" aria-label="Card attached to this conversation">
+							<span>{selectedChoice.detail}</span>
+							<button type="button" class="dialogue-action remove-card" disabled={!!frozen || busy || blocked} onclick={removeChoice}>Remove card</button>
+						</div>
+					{:else}
+						<div class="selected-card-row" aria-label="Card attached to this conversation">
+							<TavernCard choice={selectedChoice} selected={true} interactive={false} compact={true} />
+							<button type="button" class="dialogue-action remove-card" disabled={!!frozen || busy || blocked} onclick={removeChoice}>Remove card</button>
+						</div>
+					{/if}
 					{#if selectedOffering}
 						<p class="service-consumption-note">One {selectedOffering.name} will be consumed if this reply succeeds.</p>
 					{/if}
@@ -490,14 +531,23 @@
 						<p>{offeringSelection ? 'That item is no longer in your hand. It has not been replaced with another item.' : 'That card is no longer in your hand. It has not been replaced with another card.'}</p>
 						<div class="stale-selection-actions">
 							<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={removeChoice}>Dismiss unavailable card</button>
-							<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={changeCard}>Choose another card</button>
+							{#if !barHand}<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={changeCard}>Choose another card</button>{/if}
 						</div>
 					</div>
 				{/if}
 
-				{#if journal.turns.length === 0}
-					<p class="first-conversation">Ask about their plans, share advice, or simply get to know them.</p>
-				{/if}
+				{#if barHand}
+                    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                    <div class="conversation-reading" role="log" aria-label={`Conversation with ${name}`} tabindex="0">
+                        {#if journal.turns.length}
+                            <ResidentExchange {name} turn={journal.turns[journal.turns.length - 1]} />
+                        {:else}
+                            <p class="first-conversation">Ask about their plans, share advice, or simply get to know them.</p>
+                        {/if}
+                    </div>
+                {:else if journal.turns.length === 0}
+                    <p class="first-conversation">Ask about their plans, share advice, or simply get to know them.</p>
+                {/if}
 
 			<form onsubmit={send} class="dialogue-form">
 				<fieldset disabled={!hydrated || busy || !!unavailable || blocked}>
@@ -527,20 +577,48 @@
 						<button type="button" class="dialogue-action" disabled={busy || blocked} onclick={() => recover(frozen!.turnId)}>Check reply</button>
 						<button type="button" class="dialogue-action" disabled={cancelling || blocked} onclick={cancel}>{cancelling ? 'Cancelling…' : 'Cancel unfinished message'}</button>
 					</div>
+					{/if}
+				</form>
+				{#if barHand && notice}
+					<p class="form-message dialogue-notice" class:error={failure} role={failure ? 'alert' : 'status'}>{notice}</p>
 				{/if}
-			</form>
-		</section>
+			</section>
 		{/if}
 	{/if}
 
-	{#if !journalOnly && notice}
+	{#if !barHand && !journalOnly && notice}
 		<p class="form-message dialogue-notice" class:error={failure} role={failure ? 'alert' : 'status'}>{notice}</p>
 	{/if}
 </section>
 
 <style>
 	.patron-dialogue { min-width: 0; color: #eee2c3; }
+	.patron-dialogue.bar-hand { position: absolute; z-index: 24; inset: 0; width: 100%; overflow: visible; pointer-events: none; }
+	.bar-hand :global(.service-card-hand.bar-hand) { position: absolute; z-index: 28; right: 0; bottom: 1.5rem; left: 0; margin-inline: auto; pointer-events: auto; animation: hand-rise 320ms cubic-bezier(.2, .75, .25, 1) both; }
 	.dialogue-surface { min-width: 0; animation: surface-enter 150ms ease-out both; }
+	.bar-hand .dialogue-surface.bar-chat { position: absolute; z-index: 40; bottom: 1rem; left: 50%; display: flex; width: min(700px, 76vw); height: min(19.375rem, 48vh); min-height: min(14rem, calc(100% - 1rem)); max-height: calc(100% - 1rem); flex-direction: column; gap: 0.35rem; overflow-x: hidden; overflow-y: auto; padding: 0.62rem 0.72rem; transform: translateX(-50%); border: 1px solid #e0c783; border-radius: 0.7rem; background: linear-gradient(165deg, rgb(50 38 19 / 0.82), rgb(22 16 9 / 0.82)); box-shadow: 0 9px 25px rgb(0 0 0 / 0.48), inset 0 1px 0 rgb(255 230 170 / 0.06); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); pointer-events: auto; animation: bar-chat-rise 240ms cubic-bezier(.2, .75, .25, 1) both; }
+	.bar-chat .composer-heading { flex: 0 0 auto; gap: 0.5rem; padding-bottom: 0.35rem; }
+	.bar-chat .composer-heading h2 { overflow: hidden; color: #ffe39a; font-size: 0.9rem; text-overflow: ellipsis; white-space: nowrap; }
+	.bar-chat .dialogue-eyebrow { font-size: 0.58rem; }
+	.bar-chat .close-composer { min-width: 2.75rem; min-height: 2.75rem; border: 1px solid #735a2f; border-radius: 0.4rem; text-decoration: none; }
+	.bar-card-context { display: flex; min-height: 2.75rem; align-items: center; justify-content: space-between; gap: 0.5rem; color: #d4c399; font-size: 0.68rem; }
+	.bar-card-context > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.bar-card-context .remove-card { min-height: 2.75rem; }
+	.bar-chat .dialogue-action { min-height: 2.75rem; }
+	.bar-chat .conversation-reading { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: .35rem .1rem; }
+	.bar-chat .conversation-reading:focus-visible { outline: 2px solid #ffe49c; outline-offset: -2px; }
+	.bar-chat .dialogue-form { flex: 0 0 auto; margin-top: auto; }
+	.bar-chat .dialogue-composer-row { gap: 0.45rem; }
+	.bar-chat .dialogue-composer-row textarea { min-height: 3rem; padding: 0.55rem 0.65rem; background: rgb(16 11 7 / 0.9); }
+	.bar-chat .composer-send { min-height: 2.75rem; }
+	.bar-chat .first-conversation { margin: 0.2rem 0; font-size: 0.74rem; }
+	.bar-chat .service-consumption-note { margin: 0; font-size: 0.68rem; }
+	.bar-chat .form-message { margin: 0; font-size: 0.7rem; }
+	.bar-resume-chat { position: absolute; z-index: 36; right: max(4%, calc((100% - 76rem) / 2 + 0.65rem)); bottom: calc(1.5rem + 18rem + 0.3rem); min-height: 2.75rem; padding: 0.4rem 0.75rem; border: 1px solid #b4914c; border-radius: 0.45rem; color: #f5e9c9; background: rgb(19 14 8 / 0.92); font: inherit; font-size: 0.74rem; cursor: pointer; pointer-events: auto; }
+	.bar-resume-chat:hover:not(:disabled) { border-color: #ffe08a; color: #fff0bc; }
+	.bar-resume-chat:focus-visible { outline: 2px solid #ffe49c; outline-offset: 3px; }
+	.bar-resume-chat:disabled { opacity: 0.5; cursor: not-allowed; }
+	.bar-hand-notice { position: absolute; z-index: 35; right: 4%; bottom: calc(1.5rem + 18rem + 3.4rem); width: min(92%, 38rem); margin: 0; padding: 0.45rem 0.65rem; border: 1px solid rgb(145 112 52 / 50%); border-radius: 0.4rem; background: rgb(19 14 8 / 0.92); pointer-events: none; }
 	.composer-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-bottom: 0.6rem; border-bottom: 1px solid rgb(145 112 52 / 35%); }
 	.dialogue-eyebrow { margin: 0 0 0.15rem; color: #d3b46d; font: 600 0.65rem 'Cinzel', Georgia, serif; letter-spacing: 0.08em; text-transform: uppercase; }
 	.composer-heading h2 { margin: 0; font: 600 1rem 'Cinzel', Georgia, serif; }
@@ -577,14 +655,28 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@keyframes surface-enter { from { opacity: 0; transform: translateY(0.3rem); } to { opacity: 1; transform: translateY(0); } }
 	@keyframes card-attach { from { opacity: 0; transform: translateY(0.3rem); } to { opacity: 1; transform: translateY(0); } }
+	@keyframes hand-rise { from { opacity: 0; translate: 0 6rem; } to { opacity: 1; translate: 0 0; } }
+	@keyframes bar-chat-rise { from { opacity: 0; transform: translate(-50%, 3rem); } to { opacity: 1; transform: translate(-50%, 0); } }
+	@media (max-width: 1000px) {
+		.bar-hand :global(.service-card-hand.bar-hand) { bottom: 1.25rem; }
+		.bar-hand .dialogue-surface.bar-chat { bottom: 0.65rem; width: 92%; height: min(18rem, 46vh); min-height: min(13rem, calc(100% - 0.5rem)); max-height: calc(100% - 0.5rem); padding: 0.48rem 0.55rem; }
+		.bar-resume-chat { right: 0.7rem; bottom: calc(1.25rem + 14rem + 0.25rem); }
+		.bar-hand-notice { right: 4%; bottom: calc(1.25rem + 14rem + 3.35rem); }
+	}
 	@media (max-width: 520px) {
 		.dialogue-composer-row { grid-template-columns: minmax(0, 1fr); }
 		.composer-send { justify-self: end; min-width: 5rem; }
 		.selected-card-row { grid-template-columns: minmax(0, 1fr) auto; }
+		.bar-hand .dialogue-surface.bar-chat { bottom: 0.35rem; width: calc(100% - 0.7rem); height: min(18rem, 48vh); padding: 0.42rem; }
+		.bar-chat .dialogue-composer-row { grid-template-columns: minmax(0, 1fr) auto; }
+		.bar-chat .dialogue-composer-row textarea { min-height: 2.6rem; }
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.dialogue-surface { animation: none; }
 		.selected-card-row { animation: none; }
 		.composer-send { transition: none; }
+		.bar-hand :global(.service-card-hand.bar-hand) { animation: entrance-fade 80ms ease-out both; }
+		.bar-hand .dialogue-surface.bar-chat { animation: entrance-fade 80ms ease-out both; }
 	}
+	@keyframes entrance-fade { from { opacity: 0; } to { opacity: 1; } }
 </style>

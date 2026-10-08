@@ -1,3 +1,5 @@
+> This report records the earlier Issue 37 baseline. The accepted right-folio/card-first presentation supersedes its Talk/Deck navigation and compact-card layout; see [the current implementation verification](issue-37-right-folio-verification.md).
+
 # Issue 37 acceptance and evidence
 
 [Issue #37](https://github.com/dutycaws/ByRookAndCrook/issues/37) is implemented on `codex/issue-35-relationship-garden` for [PR #36](https://github.com/dutycaws/ByRookAndCrook/pull/36). This extends the existing relationship/garden work. The PR remains open for review; this work does not merge it or close the issue.

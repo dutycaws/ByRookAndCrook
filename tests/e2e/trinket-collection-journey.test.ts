@@ -138,10 +138,25 @@ test('fixed keepsake displays select collection items and overflow swaps persist
     await expect(page.locator('[data-keepsake-slot="4"] .scene-keepsake-art')).toBeVisible();
     const slotOne = page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${displaced.name}`) });
     await slotOne.click();
-    await expect(page.getByRole('dialog', { name: 'Arrange a keepsake' })).toBeVisible();
-    await page.getByLabel('Choose a keepsake').selectOption(overflow.id);
+    await expect(page.locator('#keepsake-manager')).toBeVisible();
+    await expect(page.getByRole('heading', { name: displaced.name, exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Replace', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Collection', exact: true })).toBeFocused();
+    const commands: string[] = [];
+    await page.route('**/api/trinkets/swap', async (route) => {
+      commands.push(route.request().postData() ?? '');
+      if (commands.length === 1) {
+        await route.fetch(); // Commit, then lose the response: retry must preserve command identity.
+        await route.abort('failed');
+      } else await route.continue();
+    });
     await page.getByRole('button', { name: `Place ${overflow.name} in slot 1` }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('alert')).toContainText('The swap result is unknown.');
+    await expect(page.locator('[aria-label="Close keepsake details"]')).toBeDisabled();
+    await page.getByRole('button', { name: 'Retry the same swap', exact: true }).click();
+    await expect(page.locator('#keepsake-manager')).toHaveCount(0);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe(commands[1]);
     await expect(page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) })).toBeVisible();
 
     const swappedSnapshot = await player.client.rpc('npc_bar_snapshot');
@@ -154,8 +169,8 @@ test('fixed keepsake displays select collection items and overflow swaps persist
     await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
     await expect(page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) })).toBeVisible();
     await page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) }).click();
-    await expect(page.getByLabel('Choose a keepsake')).toHaveValue(overflow.id);
-    await page.getByRole('dialog').press('Escape');
+    await expect(page.getByRole('heading', { name: overflow.name, exact: true })).toBeVisible();
+    await page.locator('[aria-label="Close keepsake details"]').press('Escape');
     await expect(page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) })).toBeFocused();
     const reloadedSnapshot = await player.client.rpc('npc_bar_snapshot');
     expect(reloadedSnapshot.error).toBeNull();
@@ -164,6 +179,13 @@ test('fixed keepsake displays select collection items and overflow swaps persist
         expect.objectContaining({ id: overflow.id, slot: 0 }),
         expect.objectContaining({ id: displaced.id, slot: null })
       ]));
+    await page.getByRole('button', { name: new RegExp(`Keepsake slot 1, ${overflow.name}`) }).click();
+    await page.getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(page.locator('#keepsake-manager')).toContainText('Keepsake returned to the collection.');
+    await expect(page.locator('#keepsake-manager')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Collection', exact: true })).toBeFocused();
+    await expect(page.getByRole('button', { name: /Keepsake slot 1, empty/ })).toBeVisible();
+
   } finally {
     const deleted = await player.admin.auth.admin.deleteUser(player.userId);
     if (deleted.error && !/database error deleting user/i.test(deleted.error.message)) throw deleted.error;

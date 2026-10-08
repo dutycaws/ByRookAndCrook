@@ -1,6 +1,12 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
-  import { TRINKET_ARTWORK, TRINKET_EFFECT_CATALOG, type OwnedTrinket, type TrinketSlot } from '$lib/game/trinkets';
+  import { tick } from 'svelte';
+  import {
+    TRINKET_ARTWORK,
+    TRINKET_EFFECT_CATALOG,
+    type OwnedTrinket,
+    type TrinketSlot
+  } from '$lib/game/trinkets';
 
   type SwapCommand = {
     saveId: string;
@@ -9,44 +15,98 @@
     actionId: string;
     expectedRevision: number;
   };
-  type Props = { collection: OwnedTrinket[]; saveId: string; revision: number; selectedId: string; targetSlot?: TrinketSlot | null; disabled?: boolean; onselect: (id: string) => void; oncomplete?: () => void };
-  let { collection, saveId, revision, selectedId, targetSlot = null, disabled = false, onselect, oncomplete }: Props = $props();
+
+  type Props = {
+    collection: OwnedTrinket[];
+    saveId: string;
+    revision: number;
+    selectedId: string;
+    targetSlot?: TrinketSlot | null;
+    disabled?: boolean;
+    onselect: (id: string) => void;
+    oncomplete?: () => void;
+    onbusychange?: (busy: boolean) => void;
+  };
+
+  let {
+    collection,
+    saveId,
+    revision,
+    selectedId,
+    targetSlot = null,
+    disabled = false,
+    onselect,
+    oncomplete,
+    onbusychange
+  }: Props = $props();
+
   let pendingCommand = $state<SwapCommand | null>(null);
   let pending = $state(false);
   let message = $state('');
   let messageKind = $state<'status' | 'error'>('status');
-  const slots = [0, 1, 2, 3] as const;
-  let selectedItem = $derived(collection.find((item) => item.id === selectedId) ?? null);
-  let overflow = $derived(collection.filter((item) => item.slot === null));
+  let replacementOpen = $state(false);
+  let collectionHeading = $state<HTMLHeadingElement>();
+  let previousTargetSlot: TrinketSlot | null | undefined;
+  const targetItem = $derived(targetSlot === null ? null : collection.find((item) => item.slot === targetSlot) ?? null);
+  const isBusy = $derived(pending || pendingCommand !== null);
+
+  $effect(() => {
+    const nextTargetSlot = targetSlot;
+    if (previousTargetSlot !== undefined && nextTargetSlot !== previousTargetSlot) {
+      replacementOpen = false;
+    }
+    previousTargetSlot = nextTargetSlot;
+  });
+
+  $effect(() => {
+    onbusychange?.(isBusy);
+  });
 
   async function sendSwap(command: SwapCommand) {
     pending = true;
     message = '';
+
     try {
       const response = await fetch('/api/trinkets/swap', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(command)
       });
+
       let body: { receipt?: { status?: string }; message?: string } = {};
-      try { body = await response.json(); } catch { /* Keep the command for a safe retry if the result is unknown. */ }
+      try {
+        body = await response.json();
+      } catch {
+        // Keep the command for a safe retry if the result is unknown.
+      }
+
       if (!response.ok) {
         message = body.message ?? 'The keepsake arrangement could not be changed.';
         messageKind = response.status >= 500 ? 'error' : 'status';
+
         if (response.status < 500) {
           pendingCommand = null;
           if (response.status === 409) await invalidateAll();
         }
+
         return;
       }
 
       pendingCommand = null;
       message = body.receipt?.status === 'unchanged'
         ? 'That keepsake is already in the chosen place.'
-        : command.targetSlot === null ? 'Keepsake returned to the collection.' : `Keepsake moved to slot ${command.targetSlot + 1}.`;
+        : command.targetSlot === null
+          ? 'Keepsake returned to the collection.'
+          : `Keepsake moved to slot ${command.targetSlot + 1}.`;
       messageKind = 'status';
-      try { await invalidateAll(); oncomplete?.(); }
-      catch { message = 'The swap was saved, but the latest collection could not be loaded. Refresh the bar to continue.'; }
+
+      try {
+        await invalidateAll();
+        if (command.targetSlot !== null) oncomplete?.();
+      } catch {
+        message = 'The swap was saved, but the latest collection could not be loaded. Refresh the bar to continue.';
+        messageKind = 'error';
+      }
     } catch {
       message = 'The swap result is unknown. Retry the same arrangement to check whether it was saved.';
       messageKind = 'error';
@@ -55,15 +115,17 @@
     }
   }
 
-  function move(trinketId: string, targetSlot: number | null) {
+  function move(trinketId: string, nextSlot: TrinketSlot | null) {
     if (disabled || pending || pendingCommand) return;
+
     const command: SwapCommand = {
       saveId,
       trinketId,
-      targetSlot,
+      targetSlot: nextSlot,
       actionId: crypto.randomUUID(),
       expectedRevision: revision
     };
+
     pendingCommand = command;
     void sendSwap(command);
   }
@@ -71,132 +133,144 @@
   function retry() {
     if (pendingCommand && !pending && !disabled) void sendSwap(pendingCommand);
   }
+
+  async function openReplacement() {
+    replacementOpen = true;
+    await tick();
+    collectionHeading?.focus({ preventScroll: true });
+  }
+
+  function removeTarget() {
+    if (!targetItem) return;
+    void openReplacement();
+    move(targetItem.id, null);
+  }
+
+  function replaceTargetWith(item: OwnedTrinket) {
+    if (targetSlot === null) return;
+    onselect(item.id);
+    move(item.id, targetSlot);
+  }
 </script>
 
-<section class="trinket-collection" aria-labelledby="trinket-title">
-  <header class="trinket-heading">
-    <div><p class="eyebrow">Keepsakes</p><h2 id="trinket-title">{targetSlot === null ? 'The four active places' : `Place for slot ${targetSlot + 1}`}</h2></div>
-    <p>Displayed keepsakes add their bonuses. Moving them is free.</p>
-  </header>
-
+<section class="trinket-collection" aria-label="Keepsake slot details and collection">
   {#if targetSlot === null}
-  <div class="trinket-slots" aria-label="Four active trinket slots">
-    {#each slots as slot (slot)}
-      {@const equipped = collection.find((item) => item.slot === slot) ?? null}
-      <article class:occupied={equipped} class="trinket-slot">
-        <span class="slot-label">Slot {slot + 1}</span>
-        {#if equipped}
-          <img class="trinket-art" src={TRINKET_ARTWORK[equipped.artworkId].src} alt={TRINKET_ARTWORK[equipped.artworkId].alt} />
-          <strong>{equipped.name}</strong>
-          <small>{TRINKET_EFFECT_CATALOG[equipped.catalogId].label}</small>
-          <button class="trinket-text-button" type="button" disabled={disabled || pending || !!pendingCommand}
-            aria-label={`Unequip ${equipped.name} from slot ${slot + 1}`} onclick={() => move(equipped.id, null)}>Return to collection</button>
-        {:else}
-          <span class="empty-slot-mark" aria-hidden="true">◇</span>
-          <strong>Empty place</strong>
-          <small>New quest keepsakes fill the first open place.</small>
-        {/if}
-      </article>
-    {/each}
-  </div>
-  {:else}
-    {@const equipped = collection.find((item) => item.slot === targetSlot) ?? null}
-    <div class="trinket-target-slot" aria-label={`Keepsake slot ${targetSlot + 1}`}>
-      <span class="slot-label">Slot {targetSlot + 1}</span>
-      {#if equipped}
-        <img class="trinket-art" src={TRINKET_ARTWORK[equipped.artworkId].src} alt={TRINKET_ARTWORK[equipped.artworkId].alt} />
-        <strong>{equipped.name}</strong>
-        <small>{TRINKET_EFFECT_CATALOG[equipped.catalogId].label}</small>
-        <button class="trinket-text-button" type="button" disabled={disabled || pending || !!pendingCommand}
-          onclick={() => move(equipped.id, null)}>Return this keepsake to the collection</button>
-      {:else}
-        <span class="empty-slot-mark" aria-hidden="true">◇</span>
-        <strong>Empty place</strong>
-        <small>Displayed keepsakes add their bonuses. Moving them is free.</small>
-      {/if}
-    </div>
-  {/if}
+    <p class="trinket-empty-copy">Choose a keepsake spot in the room to see its details and collection.</p>
+  {:else if targetItem && !replacementOpen}
+    <article class="trinket-detail" aria-label={`${targetItem.name} details`}>
+      <img
+        class="trinket-detail-art"
+        src={TRINKET_ARTWORK[targetItem.artworkId].src}
+        alt={TRINKET_ARTWORK[targetItem.artworkId].alt}
+      />
+      <div class="trinket-detail-copy">
+        <h2>{targetItem.name}</h2>
+        <p class="trinket-effect">{TRINKET_EFFECT_CATALOG[targetItem.catalogId].label}</p>
+        <p class="trinket-dedication">{targetItem.dedication}</p>
+      </div>
+    </article>
 
-  {#if collection.length > 0}
-    <div class="trinket-move-controls">
-      <label for="keepsake-to-move">Choose a keepsake</label>
-      <select id="keepsake-to-move" value={selectedId} onchange={(event) => onselect((event.currentTarget as HTMLSelectElement).value)} disabled={disabled || pending || !!pendingCommand}>
+    <div class="trinket-actions" aria-label="Keepsake actions">
+      <button
+        class="trinket-action secondary"
+        type="button"
+        disabled={disabled || isBusy}
+        onclick={removeTarget}
+      >
+        Remove
+      </button>
+      <button
+        class="trinket-action"
+        type="button"
+        disabled={disabled || isBusy}
+        onclick={openReplacement}
+      >
+        Replace
+      </button>
+    </div>
+  {:else}
+    {#if targetItem}
+      <p class="trinket-context">
+        Choose a keepsake to replace <strong>{targetItem.name}</strong> in slot {targetSlot + 1}.
+      </p>
+    {:else}
+      <p class="trinket-context">Slot {targetSlot + 1} is empty. Choose a keepsake for this spot.</p>
+    {/if}
+
+    {#if collection.length}
+      <div class="trinket-inventory" aria-label="Keepsake collection">
+        <h2 bind:this={collectionHeading} tabindex="-1">Collection</h2>
         {#each collection as item (item.id)}
-          <option value={item.id}>{item.name}{item.slot === null ? ' · Collection' : ` · Slot ${item.slot + 1}`}</option>
+          <article class="trinket-item" class:selected={selectedId === item.id}>
+            <img class="trinket-art" src={TRINKET_ARTWORK[item.artworkId].src} alt={TRINKET_ARTWORK[item.artworkId].alt} />
+            <div class="trinket-item-copy">
+              <strong>{item.name}</strong>
+              <small>{TRINKET_EFFECT_CATALOG[item.catalogId].label}</small>
+              <p>{item.dedication}</p>
+              <small>{item.slot === null ? 'In collection' : `Active in slot ${item.slot + 1}`}</small>
+            </div>
+            <button
+              class="trinket-action place-action"
+              type="button"
+              disabled={disabled || isBusy || item.slot === targetSlot}
+              aria-label={item.slot === targetSlot
+                ? `${item.name} is already in slot ${targetSlot + 1}`
+                : `Place ${item.name} in slot ${targetSlot + 1}`}
+              onclick={() => replaceTargetWith(item)}
+            >
+              {item.slot === targetSlot ? 'Here' : 'Place here'}
+            </button>
+          </article>
         {/each}
-      </select>
-      {#if targetSlot !== null}
-        <button class="trinket-place" type="button" disabled={disabled || pending || !!pendingCommand || !selectedItem || selectedItem.slot === targetSlot}
-          onclick={() => selectedItem && move(selectedItem.id, targetSlot)}>
-          {selectedItem ? `Place ${selectedItem.name} in slot ${targetSlot + 1}` : `Choose a keepsake for slot ${targetSlot + 1}`}
-        </button>
-      {:else}
-        <div class="trinket-slot-actions" aria-label="Choose active slot">
-          {#each slots as slot (slot)}
-            <button type="button" disabled={disabled || pending || !!pendingCommand || !selectedItem}
-              onclick={() => selectedItem && move(selectedItem.id, slot)}>Move to slot {slot + 1}</button>
-          {/each}
-        </div>
-      {/if}
-    </div>
-
-    <div class="trinket-inventory" aria-label="Keepsake collection">
-      <h3>Collected keepsakes</h3>
-      {#each collection as item (item.id)}
-        <article class="trinket-item">
-          <img class="trinket-art" src={TRINKET_ARTWORK[item.artworkId].src} alt={TRINKET_ARTWORK[item.artworkId].alt} />
-          <div><strong>{item.name}</strong><small>{TRINKET_EFFECT_CATALOG[item.catalogId].label} · {item.slot === null ? 'In collection' : `Active in slot ${item.slot + 1}`}</small><p>{item.dedication}</p></div>
-        </article>
-      {/each}
-    </div>
-    {#if overflow.length > 0}<p class="trinket-overflow-note">{overflow.length} keepsake{overflow.length === 1 ? '' : 's'} wait{overflow.length === 1 ? 's' : ''} in the collection until you choose a place.</p>{/if}
-  {:else}
-    <p class="trinket-empty-copy">Your first keepsake arrives when a connected resident completes their first authored quest.</p>
+      </div>
+    {:else}
+      <p class="trinket-empty-copy">Your first keepsake arrives when a connected resident completes their first authored quest.</p>
+    {/if}
   {/if}
 
-  {#if pendingCommand && !pending}<button class="trinket-retry" type="button" onclick={retry}>Retry the same swap</button>{/if}
-  {#if message}<p class:trinket-error={messageKind === 'error'} class="trinket-message" role={messageKind}>{message}</p>{/if}
+  {#if pendingCommand && !pending}
+    <button class="trinket-retry" type="button" onclick={retry} disabled={disabled}>
+      Retry the same swap
+    </button>
+  {/if}
+  {#if message}
+    <p class="trinket-message" class:trinket-error={messageKind === 'error'} role={messageKind === 'error' ? 'alert' : 'status'}>{message}</p>
+  {/if}
 </section>
 
 <style>
-  .trinket-collection { display: grid; gap: .8rem; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
-  .trinket-heading { display: flex; align-items: end; justify-content: space-between; gap: .8rem; padding-bottom: .55rem; border-bottom: 1px solid rgb(128 96 44 / .5); }
-  .trinket-heading .eyebrow { margin: 0 0 .1rem; font-size: .67rem; }
-  .trinket-heading h2 { margin: 0; color: #e7c871; font-family: 'Cinzel', serif; font-size: 1rem; }
-  .trinket-heading > p { max-width: 20rem; margin: 0; color: #a99363; font-size: .83rem; text-align: right; }
-  .trinket-slots { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; }
-  .trinket-slot { display: grid; align-content: start; justify-items: center; gap: .3rem; min-width: 0; min-height: 8.2rem; padding: .45rem .35rem; border: 1px dashed #51401f; background: rgb(5 4 2 / .38); text-align: center; }
-  .trinket-slot.occupied { border-style: solid; border-color: #80602e; background: linear-gradient(160deg, rgb(77 55 18 / .3), rgb(12 9 5 / .42)); }
-  .trinket-target-slot { display: grid; justify-items: center; gap: .35rem; min-height: 7rem; padding: .55rem; border: 1px solid #80602e; background: linear-gradient(160deg, rgb(77 55 18 / .3), rgb(12 9 5 / .42)); text-align: center; }
-  .slot-label { color: #a98d56; font-family: 'Cinzel', serif; font-size: .64rem; letter-spacing: .08em; text-transform: uppercase; }
-  .trinket-art { display: block; width: 2rem; height: 2rem; object-fit: contain; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .5)); }
-  .trinket-slot strong, .trinket-item strong { color: #e6ca7a; font-family: 'Cinzel', serif; font-size: .78rem; }
-  .trinket-slot small, .trinket-item small { color: #a89468; font-size: .72rem; line-height: 1.25; }
-  .empty-slot-mark { color: #675126; font-size: 1.35rem; line-height: 1.2; }
-  .trinket-text-button, .trinket-slot-actions button, .trinket-place, .trinket-retry { min-height: 2rem; border: 1px solid #705329; padding: .27rem .45rem; color: #e2c373; background: #171108; font-size: .76rem; cursor: pointer; }
-  .trinket-text-button:hover, .trinket-slot-actions button:hover, .trinket-place:hover, .trinket-retry:hover { border-color: #d2aa51; background: #261b0b; }
-  .trinket-text-button:disabled, .trinket-slot-actions button:disabled, .trinket-place:disabled, .trinket-retry:disabled { opacity: .55; cursor: not-allowed; }
-  .trinket-move-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .4rem .55rem; align-items: center; }
-  .trinket-place { justify-self: start; min-height: 2.4rem; padding-inline: .65rem; font-size: .82rem; }
-  .trinket-move-controls > label { color: #b6a073; font-size: .83rem; }
-  .trinket-move-controls select { grid-column: 1 / -1; min-height: 2.4rem; min-width: 0; border: 1px solid #60481f; padding: .35rem .5rem; color: #ead8a6; background: #0e0b06; font: inherit; }
-  .trinket-move-controls select:disabled { color: #8d7c56; cursor: not-allowed; }
-  .trinket-slot-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
-  .trinket-inventory { display: grid; gap: .4rem; }
-  .trinket-inventory h3 { margin: .1rem 0; color: #c2a96d; font-family: 'Cinzel', serif; font-size: .77rem; }
-  .trinket-item { display: grid; grid-template-columns: 2rem minmax(0, 1fr); align-items: center; gap: .5rem; padding: .4rem .5rem; border-left: 2px solid #73552a; background: rgb(6 5 3 / .38); }
-  .trinket-item > div { display: grid; gap: .15rem; min-width: 0; }
-  .trinket-item p { margin: 0; color: #bba880; font-size: .78rem; line-height: 1.25; }
-  .trinket-empty-copy, .trinket-overflow-note, .trinket-message { margin: 0; color: #ad9a6d; font-size: .84rem; }
+  .trinket-collection { display: grid; gap: .8rem; min-width: 0; margin: 0; padding: 0; }
+  .trinket-detail { display: grid; grid-template-columns: 4rem minmax(0, 1fr); align-items: center; gap: .8rem; padding: .25rem 0; }
+  .trinket-detail-art { display: block; inline-size: 4rem; block-size: 4rem; object-fit: contain; filter: drop-shadow(0 2px 4px rgb(0 0 0 / .5)); }
+  .trinket-detail-copy { display: grid; gap: .25rem; min-width: 0; }
+  .trinket-detail h2, .trinket-inventory h2 { margin: 0; color: #e6ca7a; font: 600 .95rem 'Cinzel', Georgia, serif; }
+  .trinket-effect, .trinket-dedication { margin: 0; color: #c9bb9b; font-size: .83rem; line-height: 1.4; }
+  .trinket-dedication { color: #bba880; }
+  .trinket-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .trinket-action, .trinket-retry { min-height: 2.75rem; padding: .4rem .7rem; border: 1px solid #80602e; border-radius: .25rem; color: #f0d27a; background: #171108; font: 600 .78rem 'Cinzel', Georgia, serif; cursor: pointer; }
+  .trinket-action:hover, .trinket-retry:hover { border-color: #d2aa51; background: #261b0b; }
+  .trinket-action.secondary { color: #d8c7a2; background: transparent; }
+  .trinket-action:disabled, .trinket-retry:disabled { opacity: .55; cursor: not-allowed; }
+  .trinket-context, .trinket-empty-copy, .trinket-message { margin: 0; color: #c9bb9b; font-size: .84rem; line-height: 1.45; }
+  .trinket-context strong { color: #e6ca7a; }
+  .trinket-inventory { display: grid; gap: .45rem; }
+  .trinket-inventory h2 { margin: .1rem 0; }
+  .trinket-item { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) auto; align-items: center; gap: .55rem; padding: .5rem; border-left: 2px solid #73552a; background: rgb(6 5 3 / .32); }
+  .trinket-item.selected { border-left-color: #e3c36f; }
+  .trinket-art { display: block; inline-size: 2.2rem; block-size: 2.2rem; object-fit: contain; filter: drop-shadow(0 2px 3px rgb(0 0 0 / .5)); }
+  .trinket-item-copy { display: grid; gap: .15rem; min-width: 0; }
+  .trinket-item-copy strong { color: #e6ca7a; font: 600 .78rem 'Cinzel', Georgia, serif; }
+  .trinket-item-copy small { color: #a89468; font-size: .72rem; line-height: 1.25; }
+  .trinket-item-copy p { margin: 0; color: #bba880; font-size: .78rem; line-height: 1.3; }
+  .place-action { min-width: 5rem; font-size: .72rem; }
+  .trinket-retry { justify-self: start; }
   .trinket-message { color: #a9c981; }
   .trinket-message.trinket-error { color: #ffc0af; }
-  .trinket-retry { justify-self: start; }
+  .trinket-action:focus-visible, .trinket-retry:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
+
   @media (max-width: 520px) {
-    .trinket-heading { align-items: start; flex-direction: column; }
-    .trinket-heading > p { text-align: left; }
-    .trinket-slot { min-height: 7.8rem; padding-inline: .22rem; }
-    .trinket-slot strong { overflow-wrap: anywhere; font-size: .69rem; }
-    .trinket-slot small { font-size: .65rem; }
-    .trinket-slot-actions button { flex: 1 1 calc(50% - .35rem); }
+    .trinket-item { grid-template-columns: 2rem minmax(0, 1fr); }
+    .trinket-art { inline-size: 2rem; block-size: 2rem; }
+    .place-action { grid-column: 2; justify-self: start; }
   }
 </style>
