@@ -12,7 +12,7 @@ Reloading clears the experiment. No gameplay command or purchase is submitted.
 
 From the repository, run `npm run prototype:hand` and open
 `http://127.0.0.1:3000/shop?prototype=hand&variant=A`.
-Use the prototype area links to move between all five routes. Remove
+Use the real top navigation to move between all five routes. Remove
 `prototype=hand` to see the current live interface. The prototype and its switcher
 are development-only.
 
@@ -23,7 +23,7 @@ are development-only.
 - C — Inspection spotlight: a centered inspection surface over a subdued hand.
 
 The URL's `variant=A|B|C` preserves the chosen presentation across reloads and
-prototype area links. The bottom switcher changes only presentation, not workflow
+top navigation. The bottom switcher changes only presentation, not workflow
 choices. Left/right arrows change variants when focus is outside a card hand or
 input; inside the hand they move card focus. Escape returns one menu level.
 
@@ -68,10 +68,14 @@ The prototype uses sample inventory, recipes, outcomes, and canned dialogue. Sce
 
 ## Crafting interaction decision
 
-For Brewery and Bakery, the shared card hand is the ingredient picker. After choosing an ingredient and beginning a batch, the original scene controls take over: guided wort stirring in Brewery, and dough folding, loaf scoring, and oven timing in Bakery. Those physical steps are not card-menu choices. The prototype runs the existing minigame mechanics in local memory and returns to the ingredient hand for another batch.
+For Brewery and Bakery, the shared card hand is the ingredient picker. Nothing is selected initially. Click an ingredient once to select it and show its shimmer; click that same card again to confirm and burn the hand. Clicking another card changes the selection. There is no separate Begin button. After confirmation, the original scene controls take over: guided wort stirring in Brewery, and dough folding, loaf scoring, and oven timing in Bakery. Those physical steps are not card-menu choices. The prototype runs the existing minigame mechanics in local memory and returns to an unselected ingredient hand for another batch.
+
+The real top navigation is the only area navigation. In development it preserves the hand prototype and selected A/B/C layout across the five experimental routes. The disposable bottom switcher retains the layout comparison and Exit prototype link. Burn-effect controls are omitted from gameplay surfaces; the card transitions still use the supplied burn preference. Native Enter and Space activate cards with the same select-then-confirm behavior. The shimmer becomes a steady highlight with reduced motion.
 
 `CraftingWorkflowPrototype` adapts the shared hand to the existing `BreweryScene` and `BakeryScene`. Available pantry ingredients come from the route snapshot; an explicitly labelled sample ingredient keeps an empty pantry experiment usable. The Brewery scene has an optional memory-only session mode for this prototype. Live sessions retain their existing saved-state behavior.
 
 The browser correction pass exercised actual dough-fold and loaf-score drags, Enter/Space alternatives, all six folds and three scores, and timed oven completion. Guided stirring registered both pointer input and keyboard beats, then completed its timer. The hand disappears during both minigames. Keyboard focus moves to the next oven action and returns to the ingredient hand on reset. Switching layout variants preserves an active session. Mobile progress and action controls sit immediately below the scene.
 
 Local correction captures: `bakery-fold-after.jpg`, `bakery-score-after.jpg`, `bakery-oven-after.jpg`, `bakery-result-after.jpg`, `brewery-ingredients-after.jpg`, `brewery-stir-after.jpg`, `brewery-pointer-after.jpg`, `bakery-mobile-minigame.jpg`, and `brewery-mobile-minigame.jpg`. Both mobile routes have no document horizontal overflow; the native stirring button is repositioned within the cropped scene so its focus outline is visible.
+
+The confirmation refinement passed `npm run check` with zero errors and warnings and `npm run build`. Desktop Bakery confirmed first-click selection and second-click minigame entry; its original keyboard fold registered. Mobile Brewery confirmed Enter selection and Space confirmation into the original stirring controls, with no document horizontal overflow. Start over cleared selection and restored ingredient-card focus. The real top navigation retained prototype B across Bakery, Brewery, and Shop. The rendered selected card had the shimmer animation; its reduced-motion suppression was reviewed in source because browser media emulation is unavailable. Local captures: `bakery-before-confirmation-refinement.jpg`, `bakery-selected-refinement.jpg`, `brewery-mobile-selected-refinement.jpg`, and `brewery-mobile-confirmed-refinement.jpg`.

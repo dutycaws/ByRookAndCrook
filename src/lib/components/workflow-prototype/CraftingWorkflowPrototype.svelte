@@ -45,7 +45,6 @@
   let mode = $state<'selection' | 'mini-game'>('selection');
   let burning = $state(false);
   let reducedMotion = $state(false);
-  let selectedBurnStyle = $state<BurnStyle>(untrack(() => burnStyle));
   let brewTelemetry = $state<GuidedStirTelemetry | null>(null);
   let brewVisual = $state<BrewVisualState>({
     area: 'brewery', designSize: SCENE_DESIGN_SIZE, phase: 'setup', session: null, pending: false, error: null
@@ -86,7 +85,7 @@
       sample: true
     } satisfies IngredientChoice];
   });
-  const ingredient = $derived(pantry.find((item) => item.id === selectedIngredientId) ?? pantry[0] ?? null);
+  const ingredient = $derived(selectedIngredientId ? pantry.find((item) => item.id === selectedIngredientId) ?? null : null);
   const ovenBand = $derived(classifyOven(elapsedMs));
   const bakeVisual = $derived.by(() => {
     const base = deriveBakeVisualState(snapshot, {
@@ -106,10 +105,7 @@
   });
 
   $effect(() => {
-    const first = pantry[0];
-    if (!selectedIngredientId || !pantry.some((item) => item.id === selectedIngredientId)) {
-      selectedIngredientId = first?.id ?? null;
-    }
+    if (selectedIngredientId && !pantry.some((item) => item.id === selectedIngredientId)) selectedIngredientId = null;
   });
 
   $effect(() => {
@@ -143,10 +139,18 @@
     return 'red';
   }
 
+  function selectIngredient(id: string) {
+    if (burning || mode !== 'selection') return;
+    if (selectedIngredientId !== id) {
+      selectedIngredientId = id;
+      return;
+    }
+    beginBurn();
+  }
+
   function beginBurn() {
     if (!ingredient || burning || mode !== 'selection') return;
-    selectedIngredientId = ingredient.id;
-    burn = resolveBurnAction(selectedBurnStyle);
+    burn = resolveBurnAction(burnStyle);
     burning = true;
   }
 
@@ -234,6 +238,7 @@
 
   function resetCraft() {
     mode = 'selection';
+    selectedIngredientId = null;
     burning = false;
     brewTelemetry = null;
     brewVisual = {
@@ -249,7 +254,7 @@
     scoreCount = 0;
     bakeStartedAt = null;
     elapsedMs = 0;
-    focusControl('[data-card-hand] button[aria-pressed="true"], [data-card-hand] button');
+    focusControl('[data-card-hand] button');
   }
 </script>
 
@@ -268,15 +273,11 @@
       <header class="setup-heading">
         <p class="eyebrow">{area === 'brewery' ? 'Brewery' : 'Bakery'}</p>
         <h1>{area === 'brewery' ? 'Choose an ingredient to brew' : 'Choose an ingredient to bake'}</h1>
-        <p>Select an ingredient card to continue.</p>
+        <p>Select an ingredient card, then click it again to confirm.</p>
       </header>
       <div class="ingredient-panel">
         <div class="panel-copy">
           <p class="eyebrow">Ingredient hand</p>
-          <h2>Choose one card</h2>
-          {#if ingredient}
-            {#if ingredient.sample}<p class="sample-note">A sample Pepper ingredient is ready to use.</p>{/if}
-          {/if}
         </div>
         <div class="hand-dock" aria-busy={burning ? 'true' : 'false'}>
           <CardHand items={pantry} getKey={(item) => item.id} label={`${area} ingredient cards`} selectedId={selectedIngredientId}>
@@ -284,8 +285,8 @@
               <CardBurnSurface active={burning}
                 treatment={burn.treatment} durationMs={reducedMotion ? 0 : burn.durationMs}
                 oncomplete={item.id === selectedIngredientId ? enterMiniGame : undefined}>
-                <CardHandCard label={`${item.plantName}, ${qualityLabel(item.qualityIndex)}, ${item.quantity} available`}
-                  selected={item.id === selectedIngredientId} disabled={burning} onclick={() => (selectedIngredientId = item.id)}>
+                <CardHandCard label={`${item.plantName}, ${qualityLabel(item.qualityIndex)}, ${item.quantity} available. ${item.id === selectedIngredientId ? 'Selected. Click again to confirm.' : 'Select ingredient.'}`}
+                  selected={item.id === selectedIngredientId} disabled={burning} onclick={() => selectIngredient(item.id)}>
                   <div class="ingredient-art" aria-hidden="true"><span>{item.icon || '✧'}</span></div>
                   <div class="ingredient-copy">
                     <p class="eyebrow">{item.sample ? 'Sample ingredient' : `Pantry card ${index + 1}`}</p>
@@ -293,26 +294,13 @@
                     <p>{qualityLabel(item.qualityIndex)} · {item.quantity} unit{item.quantity === 1 ? '' : 's'}</p>
                     <p>{area === 'brewery' ? `Brew +${item.brewBonus}` : `Bake +${item.bakeBonus}`}</p>
                   </div>
-                  <span class="card-action">Select ingredient <span aria-hidden="true">↗</span></span>
+                  <span class="card-action">{item.id === selectedIngredientId ? 'Click again to confirm' : 'Select ingredient'} <span aria-hidden="true">↗</span></span>
                 </CardHandCard>
               </CardBurnSurface>
             {/snippet}
           </CardHand>
         </div>
       </div>
-      <footer class="setup-footer">
-          <span class="local-note">Prototype craft · safe to try</span>
-        <div class="setup-actions">
-          <label class="burn-picker">Card burn
-            <select aria-label="Prototype card burn effect" bind:value={selectedBurnStyle} disabled={burning}>
-              <option value="crawl">Crawl</option><option value="drip">Drip</option><option value="ash">Ash</option><option value="random">Random</option>
-            </select>
-          </label>
-          <button class="primary-action" type="button" onclick={beginBurn} disabled={!ingredient || burning}>
-            {burning ? 'Burning ingredient card…' : `Begin ${area === 'brewery' ? 'brew' : 'loaf'}`}
-          </button>
-        </div>
-      </footer>
     </div>
   {:else}
     <div class="craft-play" data-prototype-minigame={area} bind:this={playElement}>
@@ -328,7 +316,7 @@
           <p class="eyebrow">{area === 'brewery' ? 'Brewery · Step 2 of 2' : 'Bakery · Step 2 of 2'}</p>
           <h1>{area === 'brewery' ? 'Stir the wort' : bakePhase === 'folding' ? 'Fold the dough' : bakePhase === 'scoring' ? 'Score the loaf' : bakePhase === 'ready' ? 'The loaf is ready for the oven' : bakePhase === 'baking' ? 'Watch the oven timing' : 'Loaf complete'}</h1>
         </div>
-        <button type="button" class="reset-action" onclick={resetCraft}>Reset mini game</button>
+        <button type="button" class="reset-action" onclick={resetCraft}>Start over</button>
       </header>
       {#if area === 'brewery'}
         {#if brewVisual.phase === 'active'}
@@ -369,31 +357,32 @@
 
 <style>
   .crafting-workflow { position: relative; min-height: 600px; height: calc(100dvh - 185px); max-height: 1000px; overflow: hidden; border: 1px solid #92723f77; border-radius: .85rem; background: #140e08; color: #f0dfb8; }
-  h1, h2, h3, p { margin: 0; }
+  h1, h3, p { margin: 0; }
   h1 { font-size: clamp(1.35rem, 2.4vw, 2.1rem); }
-  h2 { font-size: 1.05rem; }
   h3 { font-size: 1rem; }
   .eyebrow { color: #d9b772; font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; }
   .selection-scene { position: absolute; inset: 0; }
   .selection-scene :global(.area-scene) { width: 100%; height: 100%; min-height: 0; max-height: none; aspect-ratio: auto; margin: 0; }
   .selection-shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg,#0b0804a8 0%,#0d0906aa 28%,#0b0804a1 68%,#0b0804dd 100%); }
-  .craft-setup { position: absolute; inset: 0; min-height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: clamp(1rem, 3vw, 2.4rem); gap: 1.3rem; }
+  .craft-setup { position: absolute; inset: 0; min-height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); padding: clamp(1rem, 3vw, 2.4rem); gap: 1.3rem; }
   .setup-heading { display: grid; gap: .45rem; justify-items: center; text-align: center; }
   .setup-heading > p:last-child { color: #cbb894; font-size: .84rem; }
   .ingredient-panel { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); align-content: center; gap: .5rem; padding: 0 1rem; border: 1px solid #a17b3a4a; border-radius: .8rem; background: radial-gradient(ellipse at 50% 10%, #563d1b55, #100c08c9 72%); }
   .panel-copy { display: grid; justify-items: center; gap: .35rem; text-align: center; }
-  .sample-note { color: #c5ae7f; font-size: .72rem; }
   .hand-dock { min-width: 0; align-self: center; }
   .ingredient-art { min-height: 4.7rem; display: grid; place-items: center; border-radius: .4rem; background: radial-gradient(ellipse at center,#86602e66,transparent 70%); border-bottom: 1px solid #9d793f55; }
   .ingredient-art span { font-size: 2.9rem; color: #e0bb73; text-shadow: 0 2px 8px #0007; }
   .ingredient-copy { display: grid; align-content: start; gap: .32rem; }
   .ingredient-copy p:not(.eyebrow) { color: #cbb894; font-size: .72rem; }
   .card-action { display: flex; justify-content: space-between; padding-top: .45rem; border-top: 1px solid #92754455; color: #e0c787; font-size: .65rem; }
-  .setup-footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-  .setup-actions { display: flex; align-items: end; gap: .7rem; }
-  .burn-picker { display: grid; gap: .2rem; color: #d8c6a4; font-size: .65rem; }
-  select { min-height: 44px; padding: .45rem .65rem; border: 1px solid #967745; border-radius: .4rem; color: #f5deb0; background: #20190fd9; font: inherit; }
-  .local-note { color: #b9a988; font-size: .7rem; }
+  .crafting-workflow :global(.ingredient-panel .card-hand-card[aria-pressed='true']) { position: relative; }
+  .crafting-workflow :global(.ingredient-panel .card-hand-card[aria-pressed='true']::after) {
+    content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(108deg, transparent 34%, rgb(255 242 204 / 5%) 44%, rgb(255 242 204 / 27%) 50%, rgb(255 242 204 / 5%) 56%, transparent 66%);
+    background-size: 250% 100%; background-position: 100% 0;
+    animation: ingredient-selection-shimmer 820ms ease-out 1;
+  }
+  @keyframes ingredient-selection-shimmer { to { background-position: -100% 0; } }
   .primary-action, .reset-action { min-height: 44px; padding: .65rem 1rem; border: 1px solid #d2a94e; border-radius: .55rem; color: #271b0b; background: linear-gradient(180deg,#f2cf76,#c8953f); font: inherit; font-weight: 700; cursor: pointer; }
   .primary-action:disabled { cursor: not-allowed; opacity: .6; }
   .reset-action { color: #f0dfb8; background: #20170bd9; border-color: #aa8955; }
@@ -422,9 +411,6 @@
     .ingredient-panel, .folio .ingredient-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: .3rem; padding: .5rem; }
     .folio .panel-copy { justify-items: center; text-align: center; padding: .45rem; }
     .setup-heading > p:last-child { max-width: 32rem; }
-    .setup-footer { align-items: stretch; flex-direction: column; }
-    .setup-actions { align-items: stretch; flex-direction: column; }
-    .local-note { text-align: center; }
     .crafting-workflow:has(.craft-play) { min-height: 0; }
     .craft-play { position: relative; min-height: 0; padding-top: 340px; }
     .active-scene { height: 340px; bottom: auto; }
@@ -443,5 +429,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .crafting-workflow :global(*) { scroll-behavior: auto !important; }
+    .crafting-workflow :global(.ingredient-panel .card-hand-card[aria-pressed='true']::after) { display: none; animation: none; }
   }
 </style>

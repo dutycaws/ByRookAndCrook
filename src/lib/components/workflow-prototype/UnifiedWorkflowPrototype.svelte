@@ -16,7 +16,6 @@
   const workflow = $derived(getWorkflow(area));
   let nodeId = $state(untrack(() => workflow.initialNodeId));
   let history = $state<string[]>([]);
-  let effect = $state<BurnStyle>(untrack(() => burnStyle));
   let transition = $state<{ target: string; choice: string | null; result?: WorkflowResult; back?: boolean } | null>(null);
   let burn = $state(untrack(() => resolveBurnAction(burnStyle)));
   let feedback = $state<WorkflowResult | null>(null);
@@ -34,7 +33,7 @@
 
   function navigate(target: string, choice: string | null = null, result?: WorkflowResult, back = false) {
     if (busy || (!workflow.nodes[target] && !result)) return;
-    burn = resolveBurnAction(effect);
+    burn = resolveBurnAction(burnStyle);
     transition = { target, choice, result, back };
     if (directRoot || visibleChoices.length === 0) void completeTransition();
   }
@@ -76,11 +75,6 @@
   {@render scene({ selectedId: node.scene?.id ?? node.id, focused, onselect: (id) => navigate(id) })}
   <header class="scene-heading">
     <div><h1>{workflow.title}</h1></div>
-    <label class="burn-picker">Card burn
-      <select aria-label="Prototype card burn effect" bind:value={effect} disabled={busy}>
-        <option value="crawl">Crawl</option><option value="drip">Drip</option><option value="ash">Ash</option><option value="random">Random</option>
-      </select>
-    </label>
   </header>
   {#if history.length}
     <nav class="path" aria-label="Parent location">
@@ -112,7 +106,6 @@
       {#if node.chat.input}
         <label class="reply-label" for="prototype-reply">Your reply</label>
         <textarea bind:this={input} id="prototype-reply" bind:value={draft} placeholder={node.chat.input.placeholder} disabled={busy} rows="2"></textarea>
-        <small class="input-hint">The Send reply card joins your hand when you write.</small>
       {/if}
     {/if}
     {#if node.result || feedback}
@@ -135,7 +128,6 @@
   </div>
   {/key}
   {/if}
-  {#if !directRoot}<p class="prototype-state" role="status">{busy ? `Burning · ${burn.treatment}` : `${node.kind ?? 'menu'} · ${visibleChoices.length} choices`} · local sample</p>{/if}
 </section>
 
 <style>
@@ -150,8 +142,6 @@
   h3 { font-size: .9rem; margin: .2rem 0; }
   p { margin: 0; }
   .eyebrow { font-size: .62rem; letter-spacing: .12em; color: #d9b772; text-transform: uppercase; margin: 0; }
-  .burn-picker { display: grid; gap: .2rem; font-size: .65rem; pointer-events: auto; }
-  select { min-height: 36px; color: #f5deb0; background: #20190fd9; border: 1px solid #967745; border-radius: .4rem; padding: .3rem .55rem; }
   .path { position: absolute; z-index: 3; top: 5.3rem; left: 1.3rem; display: flex; align-items: center; gap: .5rem; padding: .25rem .55rem; background: #130d08c9; border-radius: .3rem; font-size: .72rem; }
   .path { color: #e5d2ac; }
   .detail { position: absolute; z-index: 4; bottom: 21rem; left: 50%; transform: translateX(-50%); width: min(42rem,calc(100% - 3rem)); max-height: 13rem; overflow: auto; padding: .85rem 1.2rem; border: 1px solid #ac88523d; border-radius: .7rem; background: #20170bd9; backdrop-filter: blur(7px); animation: detail-enter 180ms ease-out; }
@@ -167,7 +157,6 @@
   .card-art span { font-size: 2.7rem; color: #e0bb73; text-shadow: 0 2px 8px #0007; }
   .card-copy p:not(.eyebrow) { font-size: .72rem; line-height: 1.4; color: #cbb894; margin-top: .4rem; }
   .card-action { font-size: .63rem; border-top: 1px solid #92754455; padding-top: .5rem; color: #e0c787; display: flex; justify-content: space-between; }
-  .prototype-state { position: absolute; z-index: 6; left: 1rem; bottom: .4rem; font-size: .62rem; color: #b9a988; }
   .journal-entries article { padding: .6rem 0; border-bottom: 1px solid #9a79364d; }
   .journal-entries small { color: #c8a96b; font-size: .64rem; }
   .journal-entries p, .messages p { font-size: .8rem; line-height: 1.5; }
@@ -176,9 +165,8 @@
   .messages b, .result b { color: #dfbc75; }
   .reply-label { display: block; font-size: .7rem; margin: .4rem 0; }
   textarea { width: 100%; min-height: 60px; padding: .6rem; resize: vertical; color: #f0dfb8; background: #100c08c9; border: 1px solid #957441; border-radius: .4rem; font: inherit; font-size: .8rem; }
-  .input-hint { font-size: .6rem; color: #bbab89; }
   .result { display: grid; gap: .25rem; margin-top: .65rem; padding-top: .6rem; border-top: 1px solid #98753f66; font-size: .8rem; }
-  textarea:focus-visible, select:focus-visible { outline: 2px solid #f9d981; outline-offset: 3px; }
+  textarea:focus-visible { outline: 2px solid #f9d981; outline-offset: 3px; }
   @keyframes detail-enter { from { opacity: 0; } to { opacity: 1; } }
   @keyframes deal-hand { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
   @media (max-width: 700px) {
@@ -191,7 +179,6 @@
     .path { top: 4.6rem; left: .75rem; right: .75rem; width: fit-content; max-width: calc(100% - 1.5rem); }
     .detail, .folio .detail, .spotlight .detail { position: relative; inset: auto; transform: none; width: auto; margin: .5rem .65rem 0; max-height: 230px; padding: .8rem; }
     .hand-dock { position: relative; bottom: auto; margin-top: .2rem; }
-    .prototype-state { position: relative; left: auto; bottom: auto; padding: 0 .75rem .6rem; }
     .workflow-stage::after { background: linear-gradient(#0c080655,transparent 25%,#0c080622 40%); }
     .card-art { min-height: 3.8rem; }
   }
