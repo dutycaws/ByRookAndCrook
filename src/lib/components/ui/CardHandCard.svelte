@@ -141,7 +141,7 @@
 	.card-hand-card--shimmer:focus-visible::after,
 	.card-hand-card--shimmer[aria-pressed='true']::after,
 	.card-hand-card--shimmer[aria-current='true']::after {
-		animation: card-hand-card-shimmer 800ms ease-out 1;
+		animation: card-hand-card-shimmer 800ms ease-out infinite;
 	}
 
 	@keyframes card-hand-card-shimmer {
