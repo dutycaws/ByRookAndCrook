@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { dev } from '$app/environment';
+  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
+  import { page } from '$app/state';
+
   import { enhance } from '$app/forms';
   import { onMount } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
@@ -147,6 +151,9 @@
   <meta name="description" content="Stir garden ingredients into a tavern mead." />
 </svelte:head>
 
+{#if dev && page.url.searchParams.get('prototype') === 'hand'}
+  <WorkflowPrototypeHost area="brewery" snapshot={data.snapshot} />
+{:else}
 <main class="page-shell crafting-page">
   <div class="page-title-row">
     <div>
@@ -346,3 +353,4 @@
     </CraftingSceneLayout>
   {/if}
 </main>
+{/if}

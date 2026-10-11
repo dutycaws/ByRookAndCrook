@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { dev } from '$app/environment';
+  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
+  import { page } from '$app/state';
+
   import { enhance } from '$app/forms';
   import { onMount, untrack } from 'svelte';
   import ContextualActionStrip from '$lib/components/scene/ContextualActionStrip.svelte';
@@ -155,6 +159,9 @@
   <meta name="description" content="Fold, score, and bake a persistent tavern loaf." />
 </svelte:head>
 
+{#if dev && page.url.searchParams.get('prototype') === 'hand'}
+  <WorkflowPrototypeHost area="bakery" snapshot={data.snapshot} />
+{:else}
 <main class="page-shell bakery-page crafting-page">
   <div class="page-title-row">
     <div>
@@ -329,6 +336,8 @@
     </CraftingSceneLayout>
   {/if}
 </main>
+{/if}
+
 
 <style>
   .bakery-workbench { min-height:600px; padding:30px; }

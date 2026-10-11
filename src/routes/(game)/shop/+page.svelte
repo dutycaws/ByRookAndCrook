@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { dev } from '$app/environment';
+  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
+  import { page } from '$app/state';
+
   import ShopMarket from '$lib/components/shop/ShopMarket.svelte';
   import type { PageProps } from './$types';
 
@@ -10,6 +14,9 @@
   <meta name="description" content="Buy garden and apiary supplies from Elara Greenbloom." />
 </svelte:head>
 
+{#if dev && page.url.searchParams.get('prototype') === 'hand'}
+  <WorkflowPrototypeHost area="shop" snapshot={data.snapshot} burnStyle={data.cardBurnStyle} />
+{:else}
 <main class="page-shell shop-page">
   {#if data.snapshot}
     <ShopMarket snapshot={data.snapshot} burnStyle={data.cardBurnStyle} supplies={data.supplies} {form} />
@@ -22,6 +29,8 @@
     </section>
   {/if}
 </main>
+{/if}
+
 
 <style>
   .shop-page { width:min(1600px,calc(100% - 24px)); margin:1rem auto; padding:0; }

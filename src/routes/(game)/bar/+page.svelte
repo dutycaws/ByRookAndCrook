@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { dev } from '$app/environment';
+  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
+
   import { onMount, tick } from 'svelte';
   import { enhance } from '$app/forms';
   import { invalidateAll, replaceState } from '$app/navigation';
@@ -262,6 +265,9 @@
   <meta name="description" content="Welcome the regulars, pour your finest mead, and follow their stories." />
 </svelte:head>
 
+{#if dev && page.url.searchParams.get('prototype') === 'hand'}
+  <WorkflowPrototypeHost area="bar" snapshot={null} barSnapshot={data.snapshot} burnStyle={data.cardBurnStyle} />
+{:else}
 <main class="bar-page">
   {#if data.settlement && isActiveSettlement(data.settlement)}
     <SettlementInterlude settlement={data.settlement} />
@@ -382,6 +388,8 @@
     </div>
   {/if}
 </main>
+{/if}
+
 
 <Dialog id="close-tavern" title="End evening?" bind:open={closeDialogOpen}>
   <p class="dialog-copy">Your regulars will follow their intentions overnight. You can close without crafting today.</p>

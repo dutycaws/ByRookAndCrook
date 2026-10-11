@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { dev } from '$app/environment';
+  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
+  import { page } from '$app/state';
+
   import { enhance } from '$app/forms';
   import { onDestroy, onMount, tick } from 'svelte';
   import CropDetails from '$lib/components/garden/CropDetails.svelte';
@@ -226,6 +230,9 @@
   <meta name="description" content="Tend and harvest the tavern garden." />
 </svelte:head>
 
+{#if dev && page.url.searchParams.get('prototype') === 'hand'}
+  <WorkflowPrototypeHost area="garden" snapshot={data.snapshot} />
+{:else}
 <main class="page-shell crafting-page" data-hydrated={hydrated}>
   {#if !data.snapshot}
     <section class="onboarding panel" aria-labelledby="start-title">
@@ -331,6 +338,8 @@
     </CraftingSceneLayout>
   {/if}
 </main>
+{/if}
+
 
 <style>
   .batch-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .7rem; padding: .65rem; border: 1px solid #80612d; background: #171006; color: #e5cb86; font-family: 'Cinzel', serif; font-size: .75rem; }
