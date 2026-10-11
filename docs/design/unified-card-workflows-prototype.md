@@ -65,3 +65,13 @@ Screenshots are kept under `/tmp/rook-unified-prototype` and are not committed.
 Final local captures include `shop-before-desktop.png`, `shop-A-after.png`, `garden-root-final.png`, `garden-A-selected-final.png`, `bar-B-chat-final.png`, and `bar-B-journal-final.png`.
 
 The prototype uses sample inventory, recipes, outcomes, and canned dialogue. Scenes use existing route data, but gameplay mutations and persistence are deliberately absent. This experiment compares the shared navigation and layout; wiring the chosen design to live gameplay is a separate implementation step.
+
+## Crafting interaction decision
+
+For Brewery and Bakery, the shared card hand is the ingredient picker. After choosing an ingredient and beginning a batch, the original scene controls take over: guided wort stirring in Brewery, and dough folding, loaf scoring, and oven timing in Bakery. Those physical steps are not card-menu choices. The prototype runs the existing minigame mechanics in local memory and returns to the ingredient hand for another batch.
+
+`CraftingWorkflowPrototype` adapts the shared hand to the existing `BreweryScene` and `BakeryScene`. Available pantry ingredients come from the route snapshot; an explicitly labelled sample ingredient keeps an empty pantry experiment usable. The Brewery scene has an optional memory-only session mode for this prototype. Live sessions retain their existing saved-state behavior.
+
+The browser correction pass exercised actual dough-fold and loaf-score drags, Enter/Space alternatives, all six folds and three scores, and timed oven completion. Guided stirring registered both pointer input and keyboard beats, then completed its timer. The hand disappears during both minigames. Keyboard focus moves to the next oven action and returns to the ingredient hand on reset. Switching layout variants preserves an active session. Mobile progress and action controls sit immediately below the scene.
+
+Local correction captures: `bakery-fold-after.jpg`, `bakery-score-after.jpg`, `bakery-oven-after.jpg`, `bakery-result-after.jpg`, `brewery-ingredients-after.jpg`, `brewery-stir-after.jpg`, `brewery-pointer-after.jpg`, `bakery-mobile-minigame.jpg`, and `brewery-mobile-minigame.jpg`. Both mobile routes have no document horizontal overflow; the native stirring button is repositioned within the cropped scene so its focus outline is visible.

@@ -6,6 +6,7 @@
   import type { BarSnapshot } from '$lib/game/serving';
   import type { BurnStyle } from '$lib/card-effects';
   import UnifiedWorkflowPrototype from './UnifiedWorkflowPrototype.svelte';
+  import CraftingWorkflowPrototype from './CraftingWorkflowPrototype.svelte';
   import WorkflowPrototypeScene from './WorkflowPrototypeScene.svelte';
   import type { WorkflowArea, WorkflowVariant } from './types';
 
@@ -19,8 +20,9 @@
     void goto(url, { replaceState: true, noScroll: true, keepFocus: true });
   }
   function switchKey(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
     const target = event.target;
-    if (!(target instanceof HTMLElement) || target.closest('input,textarea,select,[contenteditable], [data-card-hand]')) return;
+    if (!(target instanceof HTMLElement) || target.closest('input,textarea,select,button,[contenteditable],[data-card-hand],[data-prototype-minigame]')) return;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault(); changeVariant(event.key === 'ArrowRight' ? 1 : -1);
     }
@@ -35,11 +37,15 @@
     {/each}
     <a class="live-link" href={`/${area}`}>Exit prototype</a>
   </nav>
-  <UnifiedWorkflowPrototype {area} {variant} {burnStyle}>
-    {#snippet scene(context)}
-      <WorkflowPrototypeScene {area} {snapshot} {barSnapshot} {...context} />
-    {/snippet}
-  </UnifiedWorkflowPrototype>
+  {#if area === 'brewery' || area === 'bakery'}
+    <CraftingWorkflowPrototype {area} {snapshot} {variant} {burnStyle} />
+  {:else}
+    <UnifiedWorkflowPrototype {area} {variant} {burnStyle}>
+      {#snippet scene(context)}
+        <WorkflowPrototypeScene {area} {snapshot} {barSnapshot} {...context} />
+      {/snippet}
+    </UnifiedWorkflowPrototype>
+  {/if}
   {#if dev}
     <nav class="prototype-switcher" aria-label="Prototype variants">
       <button type="button" aria-label="Previous prototype variant" onclick={() => changeVariant(-1)}>←</button>
