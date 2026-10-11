@@ -42,7 +42,7 @@
   } = $props();
 
   let selectedIngredientId = $state<string | null>(null);
-  let mode = $state<'selection' | 'mini-game'>('selection');
+  let mode = $state<'selection' | 'inspection' | 'mini-game'>('selection');
   let burning = $state(false);
   let reducedMotion = $state(false);
   let brewTelemetry = $state<GuidedStirTelemetry | null>(null);
@@ -105,7 +105,10 @@
   });
 
   $effect(() => {
-    if (selectedIngredientId && !pantry.some((item) => item.id === selectedIngredientId)) selectedIngredientId = null;
+    if (selectedIngredientId && !pantry.some((item) => item.id === selectedIngredientId)) {
+      selectedIngredientId = null;
+      if (mode === 'inspection') mode = 'selection';
+    }
   });
 
   $effect(() => {
@@ -141,17 +144,35 @@
 
   function selectIngredient(id: string) {
     if (burning || mode !== 'selection') return;
-    if (selectedIngredientId !== id) {
-      selectedIngredientId = id;
-      return;
-    }
-    beginBurn();
+    selectedIngredientId = id;
+    mode = 'inspection';
+    focusControl('.inspection-card');
   }
 
   function beginBurn() {
-    if (!ingredient || burning || mode !== 'selection') return;
+    if (!ingredient || burning || mode !== 'inspection') return;
     burn = resolveBurnAction(burnStyle);
     burning = true;
+  }
+
+  function returnToHand() {
+    const ingredientId = selectedIngredientId;
+    if (!ingredientId || burning || mode !== 'inspection') return;
+    mode = 'selection';
+    focusIngredientCard(ingredientId);
+  }
+
+  function focusIngredientCard(ingredientId: string) {
+    void tick().then(() => requestAnimationFrame(() => {
+      const cards = surface?.querySelectorAll<HTMLButtonElement>('[data-ingredient-card]');
+      Array.from(cards ?? []).find((card) => card.dataset.ingredientCard === ingredientId)?.focus({ preventScroll: true });
+    }));
+  }
+
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || mode !== 'inspection' || burning) return;
+    event.preventDefault();
+    returnToHand();
   }
 
   function focusControl(selector: string) {
@@ -258,9 +279,10 @@
   }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
 <section bind:this={surface} class="crafting-workflow" class:folio={variant === 'B'} class:spotlight={variant === 'C'}
   data-workflow-area={area} data-workflow-variant={variant} aria-label={`${area} ingredient and minigame prototype`}>
-  {#if mode === 'selection'}
+  {#if mode !== 'mini-game'}
     <div class="selection-scene" aria-hidden="true">
       {#if area === 'brewery'}
         <BreweryScene visual={brewVisual} saveId="prototype-local" persistState={false} ontelemetry={() => {}} />
@@ -272,35 +294,58 @@
     <div class="craft-setup">
       <header class="setup-heading">
         <p class="eyebrow">{area === 'brewery' ? 'Brewery' : 'Bakery'}</p>
-        <h1>{area === 'brewery' ? 'Choose an ingredient to brew' : 'Choose an ingredient to bake'}</h1>
-        <p>Select an ingredient card, then click it again to confirm.</p>
+        <h1>{mode === 'inspection' ? `Inspect ${ingredient?.plantName ?? 'ingredient'}` : area === 'brewery' ? 'Choose an ingredient to brew' : 'Choose an ingredient to bake'}</h1>
+        <p>{mode === 'inspection' ? 'Review the card, then activate it to use this ingredient.' : 'Select an ingredient card to inspect it.'}</p>
       </header>
-      <div class="ingredient-panel">
-        <div class="panel-copy">
-          <p class="eyebrow">Ingredient hand</p>
+      {#if mode === 'selection'}
+        <div class="ingredient-panel">
+          <div class="panel-copy">
+            <p class="eyebrow">Ingredient hand</p>
+          </div>
+          <div class="hand-dock" aria-busy={burning ? 'true' : 'false'}>
+            <CardHand items={pantry} getKey={(item) => item.id} label={`${area} ingredient cards`} selectedId={selectedIngredientId}>
+              {#snippet card(item, index)}
+                <CardBurnSurface active={false} treatment={burn.treatment} durationMs={0}>
+                  <CardHandCard label={`${item.plantName}, ${qualityLabel(item.qualityIndex)}, ${item.quantity} available. Select to inspect this ingredient.`}
+                    selected={item.id === selectedIngredientId} shimmer data-ingredient-card={item.id} onclick={() => selectIngredient(item.id)}>
+                    <div class="ingredient-art" aria-hidden="true"><span>{item.icon || '✧'}</span></div>
+                    <div class="ingredient-copy">
+                      <p class="eyebrow">{item.sample ? 'Sample ingredient' : `Pantry card ${index + 1}`}</p>
+                      <h3>{item.plantName}</h3>
+                      <p>{qualityLabel(item.qualityIndex)} · {item.quantity} unit{item.quantity === 1 ? '' : 's'}</p>
+                      <p>{area === 'brewery' ? `Brew +${item.brewBonus}` : `Bake +${item.bakeBonus}`}</p>
+                    </div>
+                    <span class="card-action">Inspect ingredient <span aria-hidden="true">↗</span></span>
+                  </CardHandCard>
+                </CardBurnSurface>
+              {/snippet}
+            </CardHand>
+          </div>
         </div>
-        <div class="hand-dock" aria-busy={burning ? 'true' : 'false'}>
-          <CardHand items={pantry} getKey={(item) => item.id} label={`${area} ingredient cards`} selectedId={selectedIngredientId}>
-            {#snippet card(item, index)}
+      {:else if ingredient}
+        <div class="ingredient-inspection">
+          <div class="inspection-stack">
+            <div class="inspection-card-enter">
               <CardBurnSurface active={burning}
                 treatment={burn.treatment} durationMs={reducedMotion ? 0 : burn.durationMs}
-                oncomplete={item.id === selectedIngredientId ? enterMiniGame : undefined}>
-                <CardHandCard label={`${item.plantName}, ${qualityLabel(item.qualityIndex)}, ${item.quantity} available. ${item.id === selectedIngredientId ? 'Selected. Click again to confirm.' : 'Select ingredient.'}`}
-                  selected={item.id === selectedIngredientId} disabled={burning} onclick={() => selectIngredient(item.id)}>
-                  <div class="ingredient-art" aria-hidden="true"><span>{item.icon || '✧'}</span></div>
+                oncomplete={enterMiniGame}>
+                <CardHandCard class="inspection-card" label={`${ingredient.plantName}, ${qualityLabel(ingredient.qualityIndex)}, ${ingredient.quantity} available. ${area === 'brewery' ? `Brew +${ingredient.brewBonus}` : `Bake +${ingredient.bakeBonus}`}. Activating uses one ${ingredient.plantName}. Press Enter or Space to use it.`}
+                  selected shimmer disabled={burning} data-ingredient-card={ingredient.id} aria-describedby="ingredient-use-consequence" onclick={beginBurn}>
+                  <div class="ingredient-art" aria-hidden="true"><span>{ingredient.icon || '✧'}</span></div>
                   <div class="ingredient-copy">
-                    <p class="eyebrow">{item.sample ? 'Sample ingredient' : `Pantry card ${index + 1}`}</p>
-                    <h3>{item.plantName}</h3>
-                    <p>{qualityLabel(item.qualityIndex)} · {item.quantity} unit{item.quantity === 1 ? '' : 's'}</p>
-                    <p>{area === 'brewery' ? `Brew +${item.brewBonus}` : `Bake +${item.bakeBonus}`}</p>
+                    <p class="eyebrow">{ingredient.sample ? 'Sample ingredient' : 'Ingredient inspection'}</p>
+                    <h3>{ingredient.plantName}</h3>
+                    <p>{qualityLabel(ingredient.qualityIndex)} · {ingredient.quantity} unit{ingredient.quantity === 1 ? '' : 's'}</p>
+                    <p>{area === 'brewery' ? `Brew +${ingredient.brewBonus}` : `Bake +${ingredient.bakeBonus}`}</p>
                   </div>
-                  <span class="card-action">{item.id === selectedIngredientId ? 'Click again to confirm' : 'Select ingredient'} <span aria-hidden="true">↗</span></span>
+                  <span class="card-action" id="ingredient-use-consequence">Use 1 {ingredient.plantName} <span aria-hidden="true">↗</span></span>
                 </CardHandCard>
               </CardBurnSurface>
-            {/snippet}
-          </CardHand>
+            </div>
+            <button type="button" class="return-to-hand" onclick={returnToHand} disabled={burning}>Choose another ingredient <span>· Escape</span></button>
+          </div>
         </div>
-      </div>
+      {/if}
     </div>
   {:else}
     <div class="craft-play" data-prototype-minigame={area} bind:this={playElement}>
@@ -375,14 +420,19 @@
   .ingredient-copy { display: grid; align-content: start; gap: .32rem; }
   .ingredient-copy p:not(.eyebrow) { color: #cbb894; font-size: .72rem; }
   .card-action { display: flex; justify-content: space-between; padding-top: .45rem; border-top: 1px solid #92754455; color: #e0c787; font-size: .65rem; }
-  .crafting-workflow :global(.ingredient-panel .card-hand-card[aria-pressed='true']) { position: relative; }
-  .crafting-workflow :global(.ingredient-panel .card-hand-card[aria-pressed='true']::after) {
-    content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
-    background: linear-gradient(108deg, transparent 34%, rgb(255 242 204 / 5%) 44%, rgb(255 242 204 / 27%) 50%, rgb(255 242 204 / 5%) 56%, transparent 66%);
-    background-size: 250% 100%; background-position: 100% 0;
-    animation: ingredient-selection-shimmer 820ms ease-out 1;
-  }
-  @keyframes ingredient-selection-shimmer { to { background-position: -100% 0; } }
+  .ingredient-inspection { position: absolute; z-index: 4; inset: 0; display: grid; place-items: center; padding: clamp(4.5rem, 9vh, 7rem) 1rem clamp(7rem, 14vh, 9rem); }
+  .inspection-stack { display: grid; justify-items: center; gap: .8rem; width: min(21rem, 100%); }
+  .inspection-card-enter { width: 100%; transform-origin: center; animation: inspection-card-enter 200ms ease-out both; }
+  .crafting-workflow :global(.inspection-card) { min-height: 22rem; cursor: pointer; }
+  .crafting-workflow :global(.inspection-card .ingredient-art) { min-height: 7rem; }
+  .crafting-workflow :global(.inspection-card .ingredient-art span) { font-size: 4rem; }
+  .crafting-workflow :global(.inspection-card .ingredient-copy) { gap: .45rem; }
+  .crafting-workflow :global(.inspection-card .ingredient-copy h3) { font-size: 1.4rem; }
+  .crafting-workflow :global(.inspection-card .ingredient-copy p:not(.eyebrow)) { font-size: .9rem; }
+  .return-to-hand { min-height: 44px; padding: .55rem .8rem; border: 1px solid #aa8955; border-radius: .55rem; color: #f0dfb8; background: #20170bd9; font: inherit; font-size: .78rem; cursor: pointer; }
+  .return-to-hand span { color: #cbb894; font-size: .68rem; }
+  .return-to-hand:disabled { cursor: wait; opacity: .6; }
+  @keyframes inspection-card-enter { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
   .primary-action, .reset-action { min-height: 44px; padding: .65rem 1rem; border: 1px solid #d2a94e; border-radius: .55rem; color: #271b0b; background: linear-gradient(180deg,#f2cf76,#c8953f); font: inherit; font-weight: 700; cursor: pointer; }
   .primary-action:disabled { cursor: not-allowed; opacity: .6; }
   .reset-action { color: #f0dfb8; background: #20170bd9; border-color: #aa8955; }
@@ -409,6 +459,11 @@
     .crafting-workflow { height: auto; min-height: 760px; max-height: none; }
     .craft-setup { padding: .8rem; gap: .8rem; }
     .ingredient-panel, .folio .ingredient-panel { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: .3rem; padding: .5rem; }
+    .crafting-workflow :global(.inspection-card) { min-height: 19rem; }
+    .crafting-workflow :global(.inspection-card .ingredient-art) { min-height: 6rem; }
+    .crafting-workflow :global(.inspection-card .ingredient-art span) { font-size: 3.5rem; }
+    .crafting-workflow :global(.inspection-card .ingredient-copy h3) { font-size: 1.2rem; }
+    .crafting-workflow :global(.inspection-card .ingredient-copy p:not(.eyebrow)) { font-size: .85rem; }
     .folio .panel-copy { justify-items: center; text-align: center; padding: .45rem; }
     .setup-heading > p:last-child { max-width: 32rem; }
     .crafting-workflow:has(.craft-play) { min-height: 0; }
@@ -429,6 +484,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .crafting-workflow :global(*) { scroll-behavior: auto !important; }
-    .crafting-workflow :global(.ingredient-panel .card-hand-card[aria-pressed='true']::after) { display: none; animation: none; }
+    .inspection-card-enter { animation: none; }
   }
 </style>

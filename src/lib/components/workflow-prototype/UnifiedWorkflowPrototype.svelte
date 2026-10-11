@@ -117,7 +117,7 @@
     <CardHand items={visibleChoices} getKey={(choice) => choice.id} label={`${node.title} choices`} selectedId={transition?.choice}>
       {#snippet card(choice, index)}
         <CardBurnSurface active={busy} treatment={burn.treatment} durationMs={burn.durationMs} oncomplete={index === 0 ? completeTransition : undefined}>
-          <CardHandCard label={choice.title} disabled={busy} onclick={() => choose(choice)}>
+          <CardHandCard label={choice.title} shimmer disabled={busy} onclick={() => choose(choice)}>
             <div class="card-art" aria-hidden="true"><span>{choice.icon ?? '✧'}</span></div>
             <div class="card-copy"><p class="eyebrow">{choice.eyebrow ?? 'Choice'}</p><h3>{choice.title}</h3><p>{choice.detail}</p></div>
             <span class="card-action">{choice.result ? 'Make it so' : 'Choose'} <span aria-hidden="true">↗</span></span>

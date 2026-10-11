@@ -6,6 +6,7 @@
 		label: string;
 		selected?: boolean;
 		disabled?: boolean;
+		shimmer?: boolean;
 		interactive?: boolean;
 		children: Snippet;
 		onclick?: MouseEventHandler<HTMLButtonElement>;
@@ -17,6 +18,7 @@
 		label,
 		selected = false,
 		disabled = false,
+		shimmer = false,
 		interactive = true,
 		children,
 		onclick,
@@ -44,7 +46,7 @@
 {#if interactive}
 	<button
 		{...attributes}
-		class={`card-hand-card ${className ?? ''}`}
+		class={`card-hand-card ${shimmer ? 'card-hand-card--shimmer' : ''} ${className ?? ''}`}
 		type={type}
 		disabled={disabled}
 		aria-label={accessibleLabel}
@@ -57,7 +59,7 @@
 {:else}
 	<div
 		{...ghostAttributes}
-		class={`card-hand-card card-hand-card--static ${className ?? ''}`}
+		class={`card-hand-card card-hand-card--static ${shimmer ? 'card-hand-card--shimmer' : ''} ${className ?? ''}`}
 		role="group"
 		aria-label={accessibleLabel}
 		aria-current={selected ? 'true' : undefined}
@@ -122,11 +124,38 @@
 		cursor: default;
 	}
 
+	.card-hand-card--shimmer::after {
+		position: absolute;
+		inset: 0;
+		z-index: 2;
+		border-radius: inherit;
+		background: linear-gradient(108deg, transparent 34%, rgb(255 242 204 / 4%) 44%, rgb(255 242 204 / 17%) 50%, rgb(255 242 204 / 4%) 56%, transparent 66%);
+		background-size: 250% 100%;
+		background-position: 100% 0;
+		content: '';
+		opacity: 0;
+		pointer-events: none;
+	}
+
+	.card-hand-card--shimmer:hover:not(:disabled)::after,
+	.card-hand-card--shimmer:focus-visible::after,
+	.card-hand-card--shimmer[aria-pressed='true']::after,
+	.card-hand-card--shimmer[aria-current='true']::after {
+		animation: card-hand-card-shimmer 800ms ease-out 1;
+	}
+
+	@keyframes card-hand-card-shimmer {
+		from { background-position: 100% 0; opacity: 0; }
+		18% { opacity: .9; }
+		to { background-position: -100% 0; opacity: 0; }
+	}
+
 	@media (max-width: 700px) {
 		.card-hand-card { min-height: 13rem; padding: .58rem; }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.card-hand-card { transition: none; }
+		.card-hand-card--shimmer::after { display: none; animation: none; }
 	}
 </style>
