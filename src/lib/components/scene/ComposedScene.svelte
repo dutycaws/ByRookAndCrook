@@ -20,6 +20,7 @@
 
   type Props = {
     composition: SceneComposition;
+    fit?: 'responsive' | 'cover';
     /** Routes may add validated community actors without changing the scene plane. */
     actors?: readonly SceneActorDefinition[];
     assets?: Record<string, SceneRuntimeAsset | undefined>;
@@ -37,6 +38,7 @@
 
   let {
     composition,
+    fit = 'responsive',
     actors,
     assets = {},
     actorNames = {},
@@ -195,6 +197,7 @@
   area={composition.id}
   label={`${composition.id} illustrated scene`}
   designSize={composition.plane}
+  {fit}
   class={`composed-scene ${className}`}
   onpointerenter={() => (hovering = true)}
   onpointerleave={settleParallax}

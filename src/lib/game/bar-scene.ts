@@ -43,6 +43,7 @@ export interface BarSceneCameraInput {
   designWidth: number;
   designHeight: number;
   mobile: boolean;
+  fit?: 'responsive' | 'cover';
   target: BarSceneCameraTarget | null;
 }
 
@@ -109,13 +110,16 @@ export function barSceneCameraForFocus(input: BarSceneCameraInput): BarSceneCame
     return { scale: 1, x: 0, y: 0 };
   }
 
-  const fitScale = mobile ? viewportHeight / designHeight : viewportWidth / designWidth;
+  const cover = input.fit === 'cover';
+  const fitScale = cover ? Math.max(viewportWidth / designWidth, viewportHeight / designHeight)
+    : mobile ? viewportHeight / designHeight : viewportWidth / designWidth;
   if (!Number.isFinite(fitScale) || fitScale <= 0) return { scale: 1, x: 0, y: 0 };
 
   const zoom = mobile ? 1.42 : 1.3;
-  const areaOffsetX = mobile ? (viewportWidth - designWidth * fitScale) / 2 : 0;
+  const areaOffsetX = cover || mobile ? (viewportWidth - designWidth * fitScale) / 2 : 0;
+  const areaOffsetY = cover ? (viewportHeight - designHeight * fitScale) / 2 : 0;
   const visibleLeft = Math.max(0, -areaOffsetX / fitScale);
-  const visibleTop = 0;
+  const visibleTop = Math.max(0, -areaOffsetY / fitScale);
   const visibleWidth = viewportWidth / fitScale;
   const visibleHeight = viewportHeight / fitScale;
   const focusX = target.x + target.width / 2;

@@ -16,7 +16,7 @@
 
 	let {
 		label,
-		selected = false,
+		selected,
 		disabled = false,
 		shimmer = false,
 		interactive = true,

@@ -1,16 +1,9 @@
 <script lang="ts">
-  import { dev } from '$app/environment';
-  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
-  import { page } from '$app/state';
-
   import { enhance } from '$app/forms';
   import { onDestroy, onMount, tick } from 'svelte';
-  import CropDetails from '$lib/components/garden/CropDetails.svelte';
   import GardenActionMenu from '$lib/components/garden/GardenActionMenu.svelte';
-  import GardenOverview from '$lib/components/garden/GardenOverview.svelte';
-  import CraftingSceneLayout from '$lib/components/scene/CraftingSceneLayout.svelte';
-  import IllustratedActionButton from '$lib/components/scene/IllustratedActionButton.svelte';
   import GardenScene from '$lib/components/scenes/GardenScene.svelte';
+  import { resolveBurnAction, waitForBurn, type ResolvedBurnAction } from '$lib/card-effects';
   import type { HarvestCommand } from '$lib/game/contracts';
   import { deriveGardenVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
@@ -19,6 +12,9 @@
   let selectedId = $state<string | null>(null);
   let pending = $state(false);
   let pendingCommand = $state<HarvestCommand | null>(null);
+  let harvestForm = $state<HTMLFormElement>();
+  let harvestBurnAction = $state<ResolvedBurnAction | null>(null);
+  let harvestBurnController: AbortController | null = null;
   let pendingHarvestVisual = $state<{ cellId: string; plantKey: string; stage: number } | null>(null);
   let harvestEffect = $state<{ token: number; cellId: string; plantKey: string; stage: number } | null>(null);
   let harvestEffectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -31,57 +27,13 @@
   let previousBatchTargetIds = $state<Set<string>>(new Set());
   let moveSourceId = $state<string | null>(null);
   let moveTargetId = $state<string | null>(null);
-  let menuOpen = $state(false);
-
-  type ReceiptContext = { cellId: string | null; openRequest: string | null };
-
-  function record(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : null;
-  }
-
-  function receiptContext(value: unknown): ReceiptContext {
-    const formRecord = record(value);
-    const receipt = record(formRecord?.receipt);
-    const payload = record(receipt?.normalizedPayload);
-    if (!receipt || typeof receipt.commandKind !== 'string' || !data.snapshot) {
-      return { cellId: null, openRequest: null };
-    }
-    const openRequest = typeof receipt.actionId === 'string' ? receipt.actionId : null;
-
-    const directIds = [payload?.cellId, payload?.sourceCellId, ...(Array.isArray(payload?.cellIds) ? payload.cellIds : [])];
-    const directCell = directIds.find((id) => typeof id === 'string' && data.snapshot?.cells.some((cell) => cell.id === id));
-    if (typeof directCell === 'string') return { cellId: directCell, openRequest };
-
-    const hiveIds = [payload?.hiveId, payload?.targetHiveId];
-    const hiveCell = data.snapshot.cells.find((cell) => cell.hive && hiveIds.includes(cell.hive.id));
-    if (hiveCell) return { cellId: hiveCell.id, openRequest };
-
-    const colonyIds = [payload?.colonyId, payload?.sourceColonyId];
-    const colonyCell = data.snapshot.cells.find((cell) => cell.hive?.colony && colonyIds.includes(cell.hive.colony.id));
-    return { cellId: colonyCell?.id ?? null, openRequest: colonyCell ? openRequest : null };
-  }
 
   onMount(() => {
     hydrated = true;
   });
 
-  let selected = $derived(
-    data.snapshot?.cells.find((cell) => cell.id === selectedId)
-      ?? data.snapshot?.cells.find((cell) => cell.unlocked !== false)
-      ?? null
-  );
-  let completedAction = $derived(receiptContext(form));
+  let selected = $derived(data.snapshot?.cells.find((cell) => cell.id === selectedId) ?? null);
   let visual = $derived(deriveGardenVisualState(data.snapshot ?? null, selectedId, pending, transportError));
-
-  $effect(() => {
-    if (!selectedId && data.snapshot) {
-      selectedId = completedAction.cellId
-        ?? data.snapshot.cells.find((cell) => cell.unlocked !== false)?.id
-        ?? null;
-    }
-  });
 
   function selectPlot(cellId: string) {
     if (moveSourceId) {
@@ -95,39 +47,24 @@
       return;
     }
     selectedId = cellId;
-    menuOpen = true;
   }
 
-  function navigatePlot(cellId: string) {
-    // In target-selection modes, arrow keys only move focus. Enter/Space then
-    // confirms the focused plot without replacing the action's source or menu.
-    if (selectingBatchPlots || moveSourceId) return;
-    selectedId = cellId;
-    menuOpen = false;
-    cancelMove();
+  function navigatePlot(_cellId: string) {
+    // Arrow keys move focus only. The plot becomes the active workflow after
+    // its button receives Enter, Space, or a pointer click.
+    if (moveSourceId) moveTargetId = null;
   }
 
   async function focusPlot(cellId: string | null) {
     await tick();
-    if (cellId) document.querySelector<HTMLElement>(`[data-cell-id="${cellId}"]`)?.focus();
+    if (cellId) document.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)?.focus({ preventScroll: true });
   }
 
   async function closePlotMenu() {
-    menuOpen = false;
+    const previousId = selectedId;
+    selectedId = null;
     cancelMove();
-    // The parent owns the rendered plot. Wait for the floating menu to leave
-    // the DOM before returning focus, so responsive unmounting cannot steal it.
-    await focusPlot(selectedId);
-  }
-
-  async function returnToActions(selector: string) {
-    await tick();
-    if (window.matchMedia('(max-width: 620px)').matches) {
-      const openActions = document.querySelector<HTMLDialogElement>('dialog.actions-dialog[open]');
-      if (!openActions) document.querySelector<HTMLButtonElement>('[data-garden-actions-trigger]')?.click();
-      await tick();
-    }
-    document.querySelector<HTMLElement>(selector)?.focus();
+    await focusPlot(previousId);
   }
 
   async function startBatch(kind: 'water' | 'amend') {
@@ -145,7 +82,15 @@
     batchMode = null;
     selectingBatchPlots = false;
     batchTargetIds = new Set(previousBatchTargetIds);
-    await returnToActions(`[data-batch-start="${kind}"]`);
+    await tick();
+    document.querySelector<HTMLElement>('[data-workflow-choice="select-plots"]')?.focus({ preventScroll: true });
+  }
+
+  async function finishBatch() {
+    const kind = batchMode;
+    selectingBatchPlots = false;
+    await tick();
+    if (kind) document.querySelector<HTMLElement>(`[data-garden-command="${kind}"]`)?.focus({ preventScroll: true });
   }
 
   async function startMove() {
@@ -157,12 +102,6 @@
   function cancelMove() {
     moveSourceId = null;
     moveTargetId = null;
-  }
-
-  async function finishBatch() {
-    const kind = batchMode;
-    selectingBatchPlots = false;
-    await returnToActions(`[data-garden-command="${kind}"]`);
   }
 
   function handleBatchKeydown(event: KeyboardEvent) {
@@ -199,13 +138,20 @@
     transportError = null;
 
     return async ({ result, update }) => {
-      pending = false;
       if (result.type === 'error') {
+        pending = false;
         transportError = 'The harvest outcome is unknown. Retry the same harvest to check its result.';
         return;
       }
 
       if (result.type === 'success') {
+        harvestBurnController?.abort();
+        harvestBurnController = new AbortController();
+        harvestBurnAction = resolveBurnAction(data.cardBurnStyle);
+        await tick();
+        const completed = await waitForBurn(harvestBurnAction.durationMs, harvestBurnController.signal);
+        harvestBurnAction = null;
+        if (!completed) return;
         if (pendingHarvestVisual) {
           harvestEffect = { ...pendingHarvestVisual, token: Date.now() };
           if (harvestEffectTimer) clearTimeout(harvestEffectTimer);
@@ -214,11 +160,13 @@
         pendingCommand = null;
         pendingHarvestVisual = null;
       }
+      pending = false;
       await update({ reset: false, invalidateAll: true });
     };
   };
 
   onDestroy(() => {
+    harvestBurnController?.abort();
     if (harvestEffectTimer) clearTimeout(harvestEffectTimer);
   });
 </script>
@@ -230,10 +178,7 @@
   <meta name="description" content="Tend and harvest the tavern garden." />
 </svelte:head>
 
-{#if dev && page.url.searchParams.get('prototype') === 'hand'}
-  <WorkflowPrototypeHost area="garden" snapshot={data.snapshot} />
-{:else}
-<main class="page-shell crafting-page" data-hydrated={hydrated}>
+<main class="page-shell garden-page" data-hydrated={hydrated}>
   {#if !data.snapshot}
     <section class="onboarding panel" aria-labelledby="start-title">
       <span class="large-icon" aria-hidden="true">🌿</span>
@@ -248,103 +193,57 @@
       {/if}
     </section>
   {:else}
-    <div class="page-title-row">
-      <div>
-        <p class="eyebrow">Courtyard · Tavern day {data.snapshot.save.currentDay}</p>
-        <h1>Garden</h1>
-      </div>
-      <div class="revision-badge">{data.snapshot.cells.filter((cell) => cell.kind === 'plant' && cell.harvestable).length} ready</div>
-    </div>
-
-    <CraftingSceneLayout area="garden" statusTitle="Garden ledger" inspectorTitle="Selected plot">
-      {#snippet status()}
-        <GardenOverview snapshot={data.snapshot!} />
-      {/snippet}
+    <GardenActionMenu
+      snapshot={data.snapshot}
+      {selected}
+      {batchMode}
+      {batchTargetIds}
+      {selectingBatchPlots}
+      {moveTargetId}
+      {moveSourceId}
+      onstartbatch={startBatch}
+      oncancelbatch={cancelBatch}
+      onfinishbatch={finishBatch}
+      onstartmove={startMove}
+      oncancelmove={cancelMove}
+      onclose={closePlotMenu}
+      burnStyle={data.cardBurnStyle}
+      {transportError}
+      harvestPending={pending}
+      {harvestBurnAction}
+      onharvest={() => { if (hydrated && !pending) harvestForm?.requestSubmit(); }}
+      harvestActionId={pendingCommand?.actionId ?? null}
+      harvestRetryAvailable={!!pendingCommand && (!!transportError || !!form?.pendingAction)}
+      formMessage={form?.message ?? null}
+      formError={form?.success === false}
+      formConflict={!!form?.conflict}
+    >
       {#snippet scene()}
-        <section class="garden-panel panel" aria-labelledby="garden-grid-title" data-visual-status={visual.status}>
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Tavern grounds</p>
-              <h2 id="garden-grid-title">Hex garden</h2>
-            </div>
-            <span class="legend"><i></i> Ready</span>
-          </div>
-          <GardenScene {visual} {harvestEffect} batchMode={selectingBatchPlots ? batchMode : null} {batchTargetIds} onselect={selectPlot} onnavigate={navigatePlot} />
-          {#snippet harvestAction()}
-            {#if selected?.kind === 'plant' && selected.harvestable}
-              <form method="POST" action="?/harvest" use:enhance={enhanceHarvest}>
-                <IllustratedActionButton
-                  type="submit"
-                  icon="✦"
-                  loading={pending}
-                  disabled={!hydrated || !selected.harvestable}
-                >
-                  {pending
-                    ? 'Gathering…'
-                    : pendingCommand && (transportError || form?.pendingAction)
-                      ? 'Retry harvest'
-                      : 'Harvest crop'}
-                </IllustratedActionButton>
-              </form>
-            {/if}
-          {/snippet}
-          {#if menuOpen}
-            <GardenActionMenu
-              snapshot={data.snapshot!}
-              {selected}
-              batchMode={batchMode}
-              {batchTargetIds}
-              {moveTargetId}
-              onstartbatch={startBatch}
-              oncancelbatch={cancelBatch}
-              onstartmove={startMove}
-              oncancelmove={cancelMove}
-              onclose={closePlotMenu}
-              harvest={harvestAction}
-            />
-          {/if}
-          {#if selectingBatchPlots}
-            <section class="batch-toolbar" data-garden-batch-toolbar aria-label="Batch care selection">
-              <strong>{batchTargetIds.size} plot{batchTargetIds.size === 1 ? '' : 's'} selected for {batchMode}</strong>
-              <div><button type="button" class="secondary-button" onclick={finishBatch}>Done</button><button type="button" class="text-button" onclick={cancelBatch}>Cancel</button></div>
-            </section>
-          {/if}
-        </section>
+        <GardenScene
+          {visual}
+          {harvestEffect}
+          batchMode={selectingBatchPlots ? batchMode : null}
+          {batchTargetIds}
+          {moveTargetId}
+          onselect={selectPlot}
+          onnavigate={navigatePlot}
+        />
       {/snippet}
-      {#snippet inspector()}
-        <div class="garden-sidebar">
-          <CropDetails cell={selected} />
-          {#if transportError}
-            <div class="form-message error" role="alert" aria-live="assertive">{transportError}</div>
-          {/if}
-
-          {#if form?.message}
-            <div
-              class="form-message"
-              class:error={!form?.success}
-              role={form?.success ? 'status' : 'alert'}
-              aria-live="polite"
-            >
-              {form.message}
-              {#if form?.conflict}<span>The latest garden state has been loaded.</span>{/if}
-            </div>
-          {/if}
-
-          {#if pendingCommand && !pending && (transportError || form?.pendingAction)}
-            <p class="retry-note">Retrying will reuse action {pendingCommand.actionId.slice(0, 8)}…</p>
-          {/if}
-        </div>
+      {#snippet harvest()}
+        {#if selected?.kind === 'plant' && selected.harvestable}
+          <form bind:this={harvestForm} method="POST" action="?/harvest" use:enhance={enhanceHarvest}></form>
+        {/if}
       {/snippet}
-    </CraftingSceneLayout>
+    </GardenActionMenu>
   {/if}
 </main>
-{/if}
-
 
 <style>
-  .batch-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .7rem; padding: .65rem; border: 1px solid #80612d; background: #171006; color: #e5cb86; font-family: 'Cinzel', serif; font-size: .75rem; }
-  .batch-toolbar div { display: flex; gap: .45rem; }
-  .secondary-button, .text-button { min-height: 36px; padding: .35rem .6rem; border: 1px solid #70552c; color: #d8bc78; background: #1a1309; font-family: 'Cinzel',serif; font-size: .67rem; }
-  .text-button { border-color: #5c4727; background: transparent; }
-  @media (max-width: 620px) { .garden-panel { min-height: 0; padding: .85rem; } .panel-heading { padding-bottom: .75rem; } .batch-toolbar { align-items: start; flex-direction: column; } }
+  .garden-page { width: min(100% - 2rem, 1640px); margin: 1rem auto 2rem; }
+  .onboarding { max-width: 34rem; margin: 12vh auto 0; padding: 2.2rem; text-align: center; }
+  .onboarding .large-icon { display: block; margin-bottom: .65rem; font-size: 3rem; }
+  .onboarding h1 { margin: .25rem 0 .5rem; }
+  .onboarding > p:not(.eyebrow) { color: #b4a17b; line-height: 1.5; }
+  .onboarding form { margin-top: 1rem; }
+  @media (max-width: 700px) { .garden-page { width: 100%; margin: 0; } .onboarding { margin: 10vh 1rem 0; padding: 1.25rem; } }
 </style>

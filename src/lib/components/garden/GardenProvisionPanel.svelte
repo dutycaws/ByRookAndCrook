@@ -1,6 +1,8 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
+  import { onDestroy, tick, untrack } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
+  import { resolveBurnAction, waitForBurn, type BurnStyle, type ResolvedBurnAction } from '$lib/card-effects';
   import type {
     ApiaryCommandKind,
     ApiaryCommandPayload,
@@ -14,8 +16,10 @@
     GardenCommandReceipt
   } from '$lib/game/contracts';
   import { apiarySuccessFeedback, gardenSuccessFeedback } from '$lib/game/garden-feedback';
+  import type { WorkflowChoice } from '$lib/components/ui/workflow';
+  import WorkflowInspection from '$lib/components/ui/WorkflowInspection.svelte';
 
-  let { snapshot, selected, includeShop = false }: { snapshot: GameSnapshot; selected: GardenCell | null; includeShop?: boolean } = $props();
+  let { snapshot, selected, includeShop = false, burnStyle = 'drip' }: { snapshot: GameSnapshot; selected: GardenCell | null; includeShop?: boolean; burnStyle?: BurnStyle } = $props();
 
   type Scope = 'garden' | 'apiary';
   type Kind = GardenCommandKind | ApiaryCommandKind;
@@ -32,10 +36,15 @@
   let previewScope = $state<Scope>('garden');
   let previewPayload = $state<Payload | null>(null);
   let previewSignature = $state('');
-  let pendingAction = $state<{ signature: string; actionId: string; revision: number } | null>(null);
+  let previewRevision = $state<number | null>(null);
+  let pendingAction = $state<{ signature: string; actionId: string; revision: number; burnAction: ResolvedBurnAction } | null>(null);
   let pending = $state(false);
   let message = $state<string | null>(null);
   let messageError = $state(false);
+  let burnAction = $state(untrack(() => resolveBurnAction(burnStyle)));
+  let burning = $state(false);
+  let burnController: AbortController | null = null;
+  let commitForm = $state<HTMLFormElement>();
 
   let garden = $derived(snapshot.garden);
   let inventory = $derived(garden?.inventory ?? []);
@@ -44,7 +53,10 @@
   let colony = $derived(selected?.hive?.colony ?? null);
   let emptyHives = $derived(snapshot.cells.filter((cell) => cell.unlocked !== false && cell.kind === 'beehive' && cell.hive && !cell.hive.hasColony));
   let treatments = $derived(inventory.filter((item) => item.kind === 'treatment' && item.quantity > 0));
-  let hasCurrentPreview = $derived(!!preview && previewSignature === makeSignature(previewScope, preview.commandKind, previewPayload));
+  let hasCurrentPreview = $derived(!!preview && previewRevision === snapshot.save.revision
+    && previewSignature === makeSignature(previewScope, preview.commandKind, previewPayload));
+
+  onDestroy(() => burnController?.abort());
 
   function makeSignature(scope: Scope, kind: Kind, payload: Payload | null) {
     return `${scope}:${kind}:${JSON.stringify(payload)}`;
@@ -75,6 +87,7 @@
       formData.set('commandKind', kind);
       formData.set('payload', JSON.stringify(nextPayload));
       pending = true;
+      pendingAction = null;
       message = null;
       return async ({ result }) => {
         pending = false;
@@ -84,6 +97,7 @@
           previewScope = scope;
           previewPayload = nextPayload;
           previewSignature = makeSignature(scope, kind, nextPayload);
+          previewRevision = data.preview.basedOnRevision;
           messageError = false;
         } else {
           message = data?.message ?? 'The authoritative preview is unavailable.';
@@ -101,14 +115,25 @@
       return;
     }
     const currentSignature = makeSignature(previewScope, preview.commandKind, previewPayload);
-    if (!pendingAction || pendingAction.signature !== currentSignature || pendingAction.revision !== snapshot.save.revision) {
-      pendingAction = { signature: currentSignature, actionId: crypto.randomUUID(), revision: snapshot.save.revision };
+    if (!pendingAction || pendingAction.signature !== currentSignature) {
+      const commandBurnAction = resolveBurnAction(burnStyle);
+      burnAction = commandBurnAction;
+      pendingAction = {
+        signature: currentSignature,
+        actionId: crypto.randomUUID(),
+        revision: previewRevision ?? snapshot.save.revision,
+        burnAction: commandBurnAction
+      };
     }
+    const action = pendingAction;
+    const command = preview;
+    const commandScope = previewScope;
+    const payload = previewPayload;
     formData.set('saveId', snapshot.save.id);
-    formData.set('actionId', pendingAction.actionId);
-    formData.set('expectedRevision', String(pendingAction.revision));
-    formData.set('commandKind', preview.commandKind);
-    formData.set('payload', JSON.stringify(previewPayload));
+    formData.set('actionId', action.actionId);
+    formData.set('expectedRevision', String(action.revision));
+    formData.set('commandKind', command.commandKind);
+    formData.set('payload', JSON.stringify(payload));
     pending = true;
     message = null;
     return async ({ result, update }) => {
@@ -119,22 +144,32 @@
         pendingAction?: object;
         receipt?: GardenCommandReceipt | ApiaryCommandReceipt;
       } | undefined : undefined;
-      if (result.type === 'error') {
-        message = 'The outcome is unknown. Retry to recover the same action.';
+      if (result.type === 'error' || data?.pendingAction) {
+        message = data?.message ?? 'The outcome is unknown. Retry to recover the same action.';
         messageError = true;
         return;
       }
       if (result.type === 'success') {
         const cellLabel = (id: string) => snapshot.cells.find((cell) => cell.id === id)?.layoutKey;
         message = data?.receipt
-          ? previewScope === 'garden'
+          ? commandScope === 'garden'
             ? gardenSuccessFeedback(data.receipt.commandKind as GardenCommandKind, data.receipt, { cellLabel })
             : apiarySuccessFeedback(data.receipt.commandKind as ApiaryCommandKind, data.receipt, { cellLabel })
           : data?.message ?? 'Action complete';
         messageError = false;
+        await animateAcceptedCommand(action.burnAction);
         preview = null;
         previewPayload = null;
         previewSignature = '';
+        previewRevision = null;
+        pendingAction = null;
+      } else if (data?.conflict) {
+        message = data.message ?? 'The garden changed before this action was accepted. Review the latest state and preview again.';
+        messageError = true;
+        preview = null;
+        previewPayload = null;
+        previewSignature = '';
+        previewRevision = null;
         pendingAction = null;
       } else if (data?.pendingAction) {
         message = data.message ?? 'The outcome is unknown. Retry to recover the same action.';
@@ -147,6 +182,33 @@
       await update({ reset: false, invalidateAll: result.type === 'success' || !!data?.conflict });
     };
   };
+
+  function confirmPreview() {
+    if (!pending && hasCurrentPreview && preview?.canCommit !== false) commitForm?.requestSubmit();
+  }
+
+  function cancelPreview() {
+    preview = null;
+    previewPayload = null;
+    previewSignature = '';
+    previewRevision = null;
+    pendingAction = null;
+    message = null;
+    messageError = false;
+  }
+
+  async function animateAcceptedCommand(action: ResolvedBurnAction) {
+    burnController?.abort();
+    const controller = new AbortController();
+    burnController = controller;
+    burnAction = action;
+    burning = true;
+    await tick();
+    if (!await waitForBurn(action.durationMs, controller.signal)) return;
+    if (controller.signal.aborted) return;
+    burning = false;
+    if (burnController === controller) burnController = null;
+  }
 
   function fieldValue(key: string, item: unknown) {
     if ((key === 'itemKey' || key === 'treatmentItemKey') && typeof item === 'string') {
@@ -166,6 +228,15 @@
     return Object.entries(value).filter(([key]) => ![
       'commandKind', 'basedOnRevision', 'rulesVersion', 'normalizedPayload'
     ].includes(key) && !privateConditionFields.has(key));
+  }
+
+  function previewWarnings(value: Preview): string[] {
+    const warningValues = [value.warning, value.warnings];
+    return warningValues.flatMap((entry) => {
+      if (typeof entry === 'string' && entry.trim()) return [entry];
+      if (Array.isArray(entry)) return entry.filter((warning): warning is string => typeof warning === 'string' && !!warning.trim());
+      return [];
+    });
   }
 </script>
 
@@ -248,24 +319,54 @@
   {/if}
 
   {#if preview && hasCurrentPreview}
-    <section class="preview-card" aria-live="polite" data-provision-preview data-preview-scope={previewScope}>
-      <p class="eyebrow">Preview</p>
-      <h3>{actionLabel(preview.commandKind)}</h3>
-      <dl>
-        {#each visiblePreviewEntries(preview) as [key, item]}
-          <div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{fieldValue(key, item)}</dd></div>
-        {/each}
-      </dl>
-      {#if preview.canCommit === false}
-        <p class="form-message error" role="alert">This action cannot be completed with the current state or resources.</p>
-      {:else}
-        <form method="POST" action={previewScope === 'apiary' ? '?/apiaryCommand' : '?/command'} use:enhance={commitPreview} data-command-scope={previewScope}>
-          <button type="submit" class="primary-button" disabled={pending} data-apiary-command={previewScope === 'apiary' ? preview.commandKind : undefined} data-garden-command={previewScope === 'garden' ? preview.commandKind : undefined}>
-            {pending ? 'Applying…' : pendingAction && messageError ? `Retry ${actionLabel(preview.commandKind)}` : `Apply ${actionLabel(preview.commandKind)}`}
-          </button>
-        </form>
-      {/if}
-    </section>
+    {@const currentPreview = preview}
+    {@const confirmLabel = pending ? 'Applying…' : pendingAction && messageError ? `Retry ${actionLabel(currentPreview.commandKind)}` : `Apply ${actionLabel(currentPreview.commandKind)}`}
+    {@const inspectionItem: WorkflowChoice = {
+      id: 'provision-preview',
+      title: actionLabel(currentPreview.commandKind),
+      description: 'Review supplies, costs, and effects before applying this action.',
+      eyebrow: previewScope === 'apiary' ? 'Apiary preview' : 'Garden supplies',
+      icon: previewScope === 'apiary' ? '🐝' : '🌿',
+      actionLabel: confirmLabel,
+      disabled: currentPreview.canCommit === false
+    }}
+    <WorkflowInspection
+      item={inspectionItem}
+      onconfirm={confirmPreview}
+      oncancel={cancelPreview}
+      {confirmLabel}
+      consequence={currentPreview.canCommit === false ? 'This action cannot be completed with the current state or resources.' : undefined}
+      {pending}
+      {burning}
+      {burnAction}
+      error={messageError ? message : null}
+    >
+      {#snippet options()}
+        <section class="preview-card" aria-live="polite" data-provision-preview data-preview-scope={previewScope}>
+          <p class="eyebrow">Preview · revision {currentPreview.basedOnRevision}</p>
+          <h3>{actionLabel(currentPreview.commandKind)}</h3>
+          <dl>
+            {#each visiblePreviewEntries(currentPreview) as [key, item]}
+              <div><dt>{key.replaceAll(/([A-Z])/g, ' $1')}</dt><dd>{fieldValue(key, item)}</dd></div>
+            {/each}
+          </dl>
+          {#each previewWarnings(currentPreview) as warning}
+            <p class="preview-warning" role="status">{warning}</p>
+          {/each}
+          {#if currentPreview.canCommit === false}
+            <p class="form-message error" role="alert">This action cannot be completed with the current state or resources.</p>
+          {/if}
+        </section>
+      {/snippet}
+    </WorkflowInspection>
+    <form
+      bind:this={commitForm}
+      class="hidden-submit-form"
+      method="POST"
+      action={previewScope === 'apiary' ? '?/apiaryCommand' : '?/command'}
+      use:enhance={commitPreview}
+      data-command-scope={previewScope}
+    ></form>
   {/if}
 
   {#if message}<div class="form-message" class:error={messageError} role={messageError ? 'alert' : 'status'} aria-live="polite">{message}</div>{/if}
@@ -288,4 +389,6 @@
   .preview-card dl div { display: flex; justify-content: space-between; gap: .5rem; }
   .preview-card dt { color: #9f8960; font-size: .65rem; text-transform: capitalize; }
   .preview-card dd { max-width: 58%; margin: 0; overflow-wrap: anywhere; color: #dfc789; font-size: .68rem; text-align: right; }
+  .preview-warning { margin: 0; padding: .4rem .5rem; border-left: 2px solid #b17832; color: #f0cb84; font-size: .74rem; line-height: 1.4; }
+  .hidden-submit-form { display: none; }
 </style>

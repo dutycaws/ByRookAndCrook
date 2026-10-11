@@ -4,12 +4,10 @@
   let { cell }: { cell: GardenCell | null } = $props();
 </script>
 
-<section class="detail-card" data-garden-inspector>
+<section class="crop-detail-content" data-garden-inspector>
   {#if !cell}
     <p class="muted">Select a garden plot to inspect it.</p>
   {:else}
-    <p class="eyebrow">Plot {cell.layoutKey}</p>
-
     {#if cell.kind === 'empty'}
       <h2>Open soil</h2>
       <p class="muted">Ready for a seed or hive. Soil stays with this hex when occupants move.</p>
@@ -59,8 +57,8 @@
       {/if}
     </section>
 
-    <section class="history" aria-label="Recent plot history" data-garden-history>
-      <p class="eyebrow">Recent plot history</p>
+    <details class="history" aria-label="Recent plot history" data-garden-history>
+      <summary>Recent plot history · {cell.careHistory?.length ?? 0}</summary>
       {#if cell.careHistory?.length}
         <ol>
           {#each cell.careHistory as entry}
@@ -76,16 +74,17 @@
       {:else}
         <p class="muted">Planting and care notes will appear here as days pass.</p>
       {/if}
-    </section>
+    </details>
   {/if}
 </section>
 
 <style>
-  .detail-card { display: grid; gap: .8rem; }
+  .crop-detail-content { display: grid; gap: .8rem; }
   .detail-heading { display: flex; align-items: center; gap: .65rem; }
   .detail-heading span { font-size: 1.7rem; }
-  .detail-heading h2, .detail-card h2 { margin: 0; }
+  .detail-heading h2, .crop-detail-content h2 { margin: 0; }
   .observations, .harvest-preview, .history { display: grid; gap: .55rem; padding-top: .75rem; border-top: 1px solid #3d2e19; }
+  .history summary { color: #d6b768; cursor: pointer; font-family: 'Cinzel',serif; font-size: .72rem; }
   .observations ul { display: grid; gap: .45rem; margin: 0; padding-left: 1.1rem; color: #d4c29a; }
   .observations li { font-size: .8rem; line-height: 1.45; }
   .history ol { display: grid; gap: .45rem; max-height: 14rem; overflow-y: auto; margin: 0; padding-left: 1.2rem; color: #d4c29a; }

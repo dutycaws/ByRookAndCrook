@@ -154,4 +154,24 @@ describe('Bar scene selection', () => {
       mobile: false, target: null
     })).toEqual({ scale: 1, x: 0, y: 0 });
   });
+
+  it('covers a tall desktop frame while focusing the resident', () => {
+    const viewportWidth = 1558;
+    const viewportHeight = 1086;
+    const designWidth = 1672;
+    const designHeight = 941;
+    const fitScale = Math.max(viewportWidth / designWidth, viewportHeight / designHeight);
+    const visibleLeft = (designWidth - viewportWidth / fitScale) / 2;
+    const camera = barSceneCameraForFocus({
+      viewportWidth, viewportHeight, designWidth, designHeight,
+      mobile: false, fit: 'cover', target: { x: 408, y: 42, width: 690, height: 825 }
+    });
+    expect(camera.x).toBeLessThanOrEqual(visibleLeft);
+    expect(camera.x + designWidth * camera.scale).toBeGreaterThanOrEqual(visibleLeft + viewportWidth / fitScale);
+    expect(camera.y).toBeLessThanOrEqual(0);
+    expect(camera.y + designHeight * camera.scale).toBeGreaterThanOrEqual(viewportHeight / fitScale);
+    const faceY = (camera.y + (42 + 825 * .32) * camera.scale) * fitScale;
+    expect(faceY).toBeGreaterThan(0);
+    expect(faceY).toBeLessThan(viewportHeight);
+  });
 });

@@ -8,9 +8,10 @@
 	import type { TavernCardChoice, TavernCardKind } from '$lib/components/tavern/card-types';
 	import { serviceCardStacks } from '$lib/game/service-cards';
 	import { qualityLabel, type IntentCardKey } from '$lib/game/contracts';
-	import { resolveBurnAction, type BurnStyle, type BurnTreatment } from '$lib/card-effects';
+	import { resolveBurnAction, type BurnStyle, type BurnTreatment, type ResolvedBurnAction } from '$lib/card-effects';
 	import type { DialogueInput, Journal, Offering } from '$lib/game/dialogue';
 	import type { BarSnapshot, ServeReceipt } from '$lib/game/serving';
+	import type { WorkflowChoice } from '$lib/components/ui/workflow';
 
 	type BurningCard = {
 		turnId: string;
@@ -19,6 +20,16 @@
 		index: number;
 		treatment: BurnTreatment;
 		durationMs: number;
+	};
+
+	type DialogueWorkflowHandState = {
+		items: WorkflowChoice[];
+		selectedId: string | null;
+		choose: (id: string) => void | Promise<void>;
+		burningId: string | null;
+	burnTurnId: string | null;
+		burnAction?: ResolvedBurnAction;
+	completeBurn: () => void;
 	};
 
 	let {
@@ -37,6 +48,8 @@
 		blocked = false,
 		focusActive = true,
 		barHand = false,
+		externalHand = false,
+		frameMode = false,
 		cardBurnStyle = 'drip',
 		suspended = false,
 		composerOpen = false,
@@ -44,7 +57,8 @@
 		onbusychange,
 		oncomposerchange,
 		ondeckchange,
-		onselectionchange
+		onselectionchange,
+		onworkflowhandchange
 	}: {
 		npcId: string;
 		instanceId?: string;
@@ -61,6 +75,8 @@
 		blocked?: boolean;
 		focusActive?: boolean;
 		barHand?: boolean;
+		externalHand?: boolean;
+		frameMode?: boolean;
 		cardBurnStyle?: BurnStyle;
 		suspended?: boolean;
 		composerOpen?: boolean;
@@ -69,6 +85,7 @@
 		oncomposerchange?: (open: boolean) => void;
 		ondeckchange?: (open: boolean) => void;
 		onselectionchange?: (selected: boolean) => void;
+		onworkflowhandchange?: (hand: DialogueWorkflowHandState) => void;
 	} = $props();
 
 	const residentKey = $derived(instanceId ?? journal.instanceId);
@@ -118,6 +135,19 @@
 	});
 	$effect(() => { onbusychange?.(busy || frozen !== null); });
 	$effect(() => { onselectionchange?.(!!intentCardId || !!offeringSelection); });
+	$effect(() => {
+		if (!barHand || !externalHand || !onworkflowhandchange) return;
+		const burnTurnId = burningCard?.turnId ?? null;
+		onworkflowhandchange({
+			items: workflowChoices,
+			selectedId: workflowSelectedId,
+			choose: chooseWorkflowChoice,
+			burningId: burningCard ? `dialogue:${burningCard.choice.key}` : null,
+			burnTurnId,
+			burnAction: burningCard ? { treatment: burningCard.treatment, durationMs: burningCard.durationMs } : undefined,
+			completeBurn: () => { if (burnTurnId) finishBurn(burnTurnId); }
+		});
+	});
 	$effect(() => {
 		if (!focusActive) {
 			setDeckOpen(false);
@@ -209,6 +239,43 @@
 		: undefined);
 	let selectedItemId = $derived(intentCardId || (offeringSelection ? offeringSelection.slice(offeringSelection.indexOf(':') + 1) : ''));
 	let selectedChoice = $derived(cardChoices.find((choice) => choice.itemIds.includes(selectedItemId)));
+	let workflowChoices = $derived.by(() => {
+		const items: WorkflowChoice[] = [
+			{
+				id: 'dialogue:start',
+				title: `Talk with ${name}`,
+				description: 'Start a conversation without attaching an item.',
+				eyebrow: 'A quiet word',
+				icon: '“',
+				actionLabel: 'Compose'
+			},
+			...cardChoices.map((choice) => ({
+				id: `dialogue:${choice.key}`,
+				title: choice.title,
+				description: choice.detail,
+				eyebrow: choice.eyebrow,
+				icon: choice.kind === 'food' ? '✦' : choice.kind === 'beverage' ? '♨' : '✧',
+				meta: choice.quantity > 1 ? `${choice.quantity} in hand` : undefined,
+				actionLabel: choice.kind === 'food' || choice.kind === 'beverage' ? 'Offer' : 'Use'
+			}))
+		];
+		const burning = burningCard;
+		const burningChoice = burning?.choice;
+		if (burning && burningChoice && !items.some((item) => item.id === `dialogue:${burningChoice.key}`)) {
+			const choice = burningChoice;
+			items.splice(Math.max(0, Math.min(burning.index, items.length)), 0, {
+				id: `dialogue:${choice.key}`,
+				title: choice.title,
+				description: choice.detail,
+				eyebrow: choice.eyebrow,
+				icon: choice.kind === 'food' ? '✦' : choice.kind === 'beverage' ? '♨' : '✧',
+				meta: choice.quantity > 1 ? `${choice.quantity} in hand` : undefined,
+				actionLabel: choice.kind === 'food' || choice.kind === 'beverage' ? 'Offer' : 'Use'
+			});
+		}
+		return items;
+	});
+	let workflowSelectedId = $derived(selectedChoice ? `dialogue:${selectedChoice.key}` : null);
 	let staleSelection = $derived(!!selectedItemId && !selectedChoice && !frozen);
 	let submitLabel = $derived(
 		busy ? 'Thinking…'
@@ -243,6 +310,18 @@
 	function finishBurn(turnId: string) {
 		if (burningCard?.turnId !== turnId) return;
 		burningCard = null;
+	}
+
+	async function chooseWorkflowChoice(id: string) {
+		if (blocked || busy || frozen) return;
+		if (id === 'dialogue:start') {
+			setDeckOpen(false);
+			setComposerOpen(true);
+			await focusComposer();
+			return;
+		}
+		const choice = cardChoices.find((candidate) => id === `dialogue:${candidate.key}`);
+		if (choice) await chooseCard(choice);
 	}
 
 	function cancelBurn() {
@@ -298,6 +377,13 @@
 		await tick();
 		if (typeof document !== 'undefined') {
 			if (barHand) {
+				if (externalHand) {
+					const choiceId = workflowSelectedId ?? 'dialogue:start';
+					const workflowCards = [...document.querySelectorAll<HTMLElement>('[data-workflow-choice]')];
+					(workflowCards.find((card) => card.dataset.workflowChoice === choiceId)
+						?? workflowCards.find((card) => !card.hasAttribute('disabled')))?.focus({ preventScroll: true });
+					return;
+				}
 				const handCard = document.querySelector<HTMLElement>(
 					'.service-card-hand.bar-hand [data-card-index][aria-pressed="true"]'
 				) ?? (nextCardFocusIndex !== null
@@ -533,6 +619,7 @@
 	class:embedded
 	class:journal-only={journalOnly}
 	class:bar-hand={barHand}
+	class:frame-mode={frameMode}
 	class:suspended
 	data-next-card-focus-index={nextCardFocusIndex}
 	aria-labelledby={dialogueHeadingId}
@@ -557,17 +644,19 @@
 					</div>
 				</div>
 			{/if}
-			<ServiceCardHand
-				choices={cardChoices}
-				{selectedItemId}
-				{barHand}
-				conversationOpen={conversationVisible}
-				burningCard={burningCard}
-				disabled={blocked || busy || !!frozen}
-				onselect={chooseCard}
-				onclose={returnToTalk}
-				onburncomplete={finishBurn}
-			/>
+			{#if !externalHand}
+				<ServiceCardHand
+					choices={cardChoices}
+					{selectedItemId}
+					{barHand}
+					conversationOpen={conversationVisible}
+					burningCard={burningCard}
+					disabled={blocked || busy || !!frozen}
+					onselect={chooseCard}
+					onclose={returnToTalk}
+					onburncomplete={finishBurn}
+				/>
+			{/if}
 			{#if barHand && !conversationVisible && !suspended && (busy || frozen)}
 				<button type="button" class="bar-resume-chat" disabled={blocked} onclick={resumeConversation}>Return to unfinished reply</button>
 			{/if}
@@ -758,4 +847,10 @@
 		.bar-hand .dialogue-surface.bar-chat { animation: entrance-fade 80ms ease-out both; }
 	}
 	@keyframes entrance-fade { from { opacity: 0; } to { opacity: 1; } }
+	.patron-dialogue.frame-mode { position: static; z-index: auto; inset: auto; width: auto; max-width: none; overflow: visible; pointer-events: auto; }
+	.patron-dialogue.frame-mode.suspended { display: none; }
+  .patron-dialogue.frame-mode .dialogue-surface.bar-chat { position: static; inset: auto; bottom: auto; left: auto; display: flex; width: auto; height: auto; min-height: 0; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; overflow: visible; transform: none; translate: none; animation: none; }
+	.patron-dialogue.frame-mode .bar-hand-notice,
+	.patron-dialogue.frame-mode .bar-resume-chat { position: static; inset: auto; margin: 0.6rem 0 0; }
+	.patron-dialogue.frame-mode .dialogue-form { margin-top: 0.6rem; }
 </style>

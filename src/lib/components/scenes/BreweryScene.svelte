@@ -24,13 +24,11 @@
     visual,
     saveId,
     disabled = false,
-    persistState = true,
     ontelemetry
   }: {
     visual: BrewVisualState;
     saveId: string;
     disabled?: boolean;
-    persistState?: boolean;
     ontelemetry: (telemetry: GuidedStirTelemetry) => void;
   } = $props();
 
@@ -165,7 +163,7 @@
     }
     if (trackedSessionId === session.id) return;
     trackedSessionId = session.id;
-    trackedStorageKey = persistState ? storageKey(session.id) : null;
+    trackedStorageKey = storageKey(session.id);
     lastStored = '';
     lastPublished = '';
     const config = {
@@ -237,7 +235,6 @@
   $effect(() => {
     visual.session?.id;
     saveId;
-    persistState;
     mounted;
     untrack(initialiseController);
   });

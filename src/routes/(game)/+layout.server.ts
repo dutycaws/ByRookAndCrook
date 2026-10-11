@@ -2,6 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import { communityContext } from '$lib/server/community-npc-workspace';
 import { getTavernReports } from '$lib/server/tavern-reports';
 import type { LayoutServerLoad } from './$types';
+import { profileBurnStyle } from '$lib/card-effects';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
   const user = await locals.getVerifiedUser();
@@ -9,5 +10,5 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 
   const community = await communityContext(locals.supabase);
   const tavernReports = await getTavernReports(locals.supabase).catch(() => []);
-  return { userId: user.id, userEmail: user.email ?? 'Tavern keeper', community, tavernReports, unreadCount:tavernReports.filter(report=>report.unread).length };
+  return { userId: user.id, userEmail: user.email ?? 'Tavern keeper', cardBurnStyle: profileBurnStyle(user.user_metadata), community, tavernReports, unreadCount:tavernReports.filter(report=>report.unread).length };
 };

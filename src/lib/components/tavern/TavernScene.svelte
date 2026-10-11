@@ -24,11 +24,13 @@
     disabled?: boolean;
     closeDisabled?: boolean;
     presentation?: ScenePresentation;
+  renderInteraction?: boolean;
+  renderStatus?: boolean;
     // Kept in the public contract for callers migrating away from the old action buttons.
     cardSelected?: boolean;
     composerOpen?: boolean;
     deckOpen?: boolean;
-    interaction: Snippet;
+  interaction?: Snippet;
     onselect: (instanceId: string) => void;
     onfocus: (instanceId: string) => void;
     onback: () => void;
@@ -49,6 +51,8 @@
     disabled = false,
     closeDisabled = disabled,
     presentation = 'default',
+  renderInteraction = true,
+  renderStatus = true,
     composerOpen = false,
     deckOpen = false,
     interaction,
@@ -131,6 +135,7 @@
     designWidth: composition.plane.width,
     designHeight: composition.plane.height,
     mobile: frameSize.width <= 620,
+    fit: 'cover',
     target: cameraTarget
   }));
 
@@ -142,6 +147,7 @@
 <div class="tavern-scene-stack" class:focused={selected} class:player-hand={presentation === 'player-hand'}>
   <figure bind:this={frame} class="tavern-scene" aria-label="The tavern common room" style={`--bar-camera-scale:${camera.scale};--bar-camera-x:${camera.x}px;--bar-camera-y:${camera.y}px`}>
     <ComposedScene
+      fit="cover"
       {composition}
       actors={sceneActors}
       assets={sceneAssets}
@@ -155,9 +161,9 @@
     />
     <div class="scene-vignette" aria-hidden="true"></div>
 
-    <BarStatusRail day={day} gold={gold} disabled={closeDisabled} presentation={selected ? 'player-hand' : 'default'} onclose={onclose} />
+    {#if renderStatus}<BarStatusRail day={day} gold={gold} disabled={closeDisabled} presentation={selected ? 'player-hand' : 'default'} onclose={onclose} />{/if}
 
-    {#if selected}
+    {#if selected && renderInteraction}
       <button
         class="back-to-room"
         type="button"
@@ -208,16 +214,18 @@
     <a class="archive-link" href={archiveHref}>Past residents</a>
   {/if}
 
-  <FloatingSurface
-    as="section"
-    class={presentation === 'player-hand' ? 'scene-interaction player-hand' : 'scene-interaction'}
-    id="resident-conversation"
-    aria-label={selected ? `Interaction with ${selected.name}` : 'Resident interaction'}
-    hidden={!selected || (presentation !== 'player-hand' && !composerOpen && !deckOpen)}
-    inert={!selected || (presentation !== 'player-hand' && !composerOpen && !deckOpen)}
-  >
-    {@render interaction()}
-  </FloatingSurface>
+  {#if renderInteraction && interaction}
+    <FloatingSurface
+      as="section"
+      class={presentation === 'player-hand' ? 'scene-interaction player-hand' : 'scene-interaction'}
+      id="resident-conversation"
+      aria-label={selected ? `Interaction with ${selected.name}` : 'Resident interaction'}
+      hidden={!selected || (presentation !== 'player-hand' && !composerOpen && !deckOpen)}
+      inert={!selected || (presentation !== 'player-hand' && !composerOpen && !deckOpen)}
+    >
+      {@render interaction()}
+    </FloatingSurface>
+  {/if}
 </div>
 
 <style>

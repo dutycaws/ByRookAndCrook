@@ -1,5 +1,11 @@
 # Unified card workflows — disposable prototype
 
+Historical experiment on `codex/prototype-unified-card-workflows`. Variant B was
+approved and promoted into live route adapters on
+`codex/unified-hand-implementation`; the disposable sources and switcher are
+removed there. See `unified-card-workflows-implementation.md` for the shared live
+components. The instructions below describe the archived prototype branch.
+
 Question: can the Shop's burn-to-navigate card hand become the common interaction
 language for Garden, Bar, Brewery, Bakery, and Shop?
 

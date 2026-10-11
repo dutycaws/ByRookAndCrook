@@ -21,6 +21,7 @@
     onnavigate = onselect,
     batchMode = null,
     batchTargetIds = new Set<string>(),
+    moveTargetId = null,
     harvestEffect = null
   }: {
     visual: GardenVisualState;
@@ -28,6 +29,7 @@
     onnavigate?: (cellId: string) => void;
     batchMode?: 'water' | 'amend' | null;
     batchTargetIds?: Set<string>;
+    moveTargetId?: string | null;
     harvestEffect?: { token: number; cellId: string; plantKey: string; stage: number } | null;
   } = $props();
 
@@ -241,6 +243,7 @@
           onplotfocus={bringPlotIntoView}
           {batchMode}
           {batchTargetIds}
+          {moveTargetId}
         />
       </div>
       <SceneLayer src="/assets/scenes/garden/garden-atmosphere.webp" name="garden bees and leaves" x={922} y={180} width={620} height={330} z={4} class="garden-atmosphere" />
@@ -261,7 +264,8 @@
 </AreaScene>
 
 <style>
-  :global(.garden-scene-frame) { margin-top: 1rem; border: 1px solid #725426; box-shadow: inset 0 0 0 1px #120b04; }
+  :global(.garden-scene-frame) { margin: 0; border: 1px solid #725426; box-shadow: inset 0 0 0 1px #120b04; }
+  :global(.card-workflow-frame .garden-scene-frame) { width: 100%; height: 100%; min-height: 0; max-height: none; aspect-ratio: auto; }
   .garden-light { position: absolute; inset: 0; z-index: 1; background: linear-gradient(120deg,#fff1a714,transparent 35%),radial-gradient(ellipse at 51% 49%,transparent 20%,#06100640 86%); pointer-events: none; }
   .garden-plane-viewport { position: absolute; inset: 0; z-index: 2; overflow: hidden; touch-action: none; cursor: grab; }
   .garden-plane-viewport:active { cursor: grabbing; }

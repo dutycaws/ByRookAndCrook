@@ -2,7 +2,6 @@
   import type { Journal } from '$lib/game/dialogue';
   import { relationshipStageFor } from '$lib/game/relationships';
   import type { Patron, ServeReceipt } from '$lib/game/serving';
-  import FloatingSurface from '$lib/components/ui/FloatingSurface.svelte';
   import NpcHistory from '$lib/components/tavern/NpcHistory.svelte';
 
   type Props = {
@@ -31,11 +30,7 @@
 </script>
 
 {#if journalOpen}
-  <FloatingSurface
-    as="aside"
-    class="patron-folio"
-    aria-labelledby="resident-folio-title"
-  >
+  <aside class="patron-folio" aria-labelledby="resident-folio-title">
     <header class="folio-heading">
       <div class="folio-identity">
         <p class="folio-eyebrow">Resident journal</p>
@@ -84,17 +79,29 @@
     <footer class="folio-footer">
       <a href={codexHref}>Open full Codex archive <span aria-hidden="true">→</span></a>
     </footer>
-  </FloatingSurface>
+  </aside>
 {:else}
-  <button
-    class="journal-toggle"
-    data-bar-control="journal"
-    type="button"
-    aria-label={interactionOpen ? 'Open the journal and pause the conversation' : 'Open resident journal'}
-    onclick={() => onjournalchange(true)}
-  >
-    Journal
-  </button>
+  <aside class="resident-profile" aria-labelledby="resident-profile-title">
+    <header class="folio-heading">
+      <div class="folio-identity">
+        <p class="folio-eyebrow">{interactionOpen ? 'A moment at the bar' : 'Resident'}</p>
+        <h2 id="resident-profile-title">{patron.name}</h2>
+        <div class="folio-meta">
+          <span>{patron.title}</span>
+          {#if relationshipStage}<span class="relationship-stage">{relationshipStage}</span>{/if}
+        </div>
+      </div>
+    </header>
+    <div class="profile-body">
+      <p>{patron.description}</p>
+      {#if journal?.turns.length}
+        <p class="profile-note">The house has kept {journal.turns.length} conversation{journal.turns.length === 1 ? '' : 's'} with {patron.name}.</p>
+      {:else}
+        <p class="profile-note">The house is still learning {patron.name}’s story.</p>
+      {/if}
+      <a class="profile-archive-link" href={codexHref}>Open full Codex archive <span aria-hidden="true">→</span></a>
+    </div>
+  </aside>
 {/if}
 
 <style>
@@ -193,30 +200,15 @@
     text-underline-offset: .2em;
   }
 
-  .journal-toggle {
-    position: absolute;
-    z-index: 20;
-    inset-block-start: 8.75rem;
-    inset-inline-end: 1rem;
-    min-block-size: 2.75rem;
-    padding: .4rem .7rem;
-    border: 1px solid rgb(193 159 94 / 48%);
-    border-radius: .4rem;
-    color: #f0d27a;
-    background: rgb(18 12 8 / .76);
-    font: 600 .8rem 'Cinzel', Georgia, serif;
-    cursor: pointer;
-  }
+  .folio-close:hover { background: rgb(61 43 17 / .82); }
 
-  .journal-toggle:hover, .folio-close:hover { background: rgb(61 43 17 / .82); }
-
-  .journal-toggle:focus-visible, .folio-close:focus-visible, .folio-footer a:focus-visible {
+  .folio-close:focus-visible, .folio-footer a:focus-visible {
     outline: 2px solid #f0d27a;
     outline-offset: 3px;
   }
 
   @media (max-width: 1000px) {
-    :global(.patron-folio), .journal-toggle {
+    :global(.patron-folio) {
       inset-block-start: calc(var(--bar-scene-height, 55svh) + 1rem);
       inset-inline-end: 1rem;
     }
@@ -226,4 +218,13 @@
       max-block-size: min(48vh, 30rem);
     }
   }
+  :global(.patron-folio) { position: relative; z-index: auto; inset: auto; width: auto; max-height: none; overflow: visible; padding: 0; background: transparent; }
+  .resident-profile { display: grid; gap: .8rem; color: #eee2c3; }
+  .resident-profile .folio-heading { padding: 0 0 .7rem; }
+  .resident-profile .folio-heading h2 { color: #f0d27a; font: 600 clamp(1.15rem, 1.5vw, 1.45rem) 'Cinzel', Georgia, serif; }
+  .profile-body { display: grid; gap: .65rem; }
+  .profile-body p { margin: 0; color: #e2d4b7; line-height: 1.55; }
+  .profile-note { color: #c9bb9b !important; font-size: .86rem; }
+  .profile-archive-link { justify-self: start; color: #f0d27a; font-size: .83rem; text-underline-offset: .18em; }
+  .profile-archive-link:focus-visible, .folio-close:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
 </style>

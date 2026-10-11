@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { dev } from '$app/environment';
   import { page } from '$app/state';
   import CapabilityMenu from '$lib/components/community/CapabilityMenu.svelte';
 
@@ -19,11 +18,6 @@
   ] as const;
 
   function hrefFor(item: typeof primary[number]): string {
-    if (dev && page.url.searchParams.get('prototype') === 'hand' && item.icon !== 'codex') {
-      const variant = page.url.searchParams.get('variant');
-      const params = new URLSearchParams({ prototype: 'hand', variant: variant && ['A', 'B', 'C'].includes(variant) ? variant : 'A' });
-      return `${item.href}?${params}`;
-    }
     return item.icon === 'codex' && codexUnreadCount > 0 ? '/codex?section=chronicle' : item.href;
   }
 </script>

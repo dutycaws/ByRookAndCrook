@@ -1,19 +1,21 @@
 <script lang="ts">
-  import { dev } from '$app/environment';
-  import WorkflowPrototypeHost from '$lib/components/workflow-prototype/WorkflowPrototypeHost.svelte';
-
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { enhance } from '$app/forms';
   import { invalidateAll, replaceState } from '$app/navigation';
   import { page } from '$app/state';
   import { isActiveSettlement } from '$lib/game/evolving-world';
   import type { TrinketSlot } from '$lib/game/trinkets';
+  import type { WorkflowChoice } from '$lib/components/ui/workflow';
+  import { waitForBurn, type ResolvedBurnAction } from '$lib/card-effects';
   import NpcDialogue from '$lib/components/NpcDialogue.svelte';
+  import WorkflowHand from '$lib/components/ui/WorkflowHand.svelte';
+  import CardWorkflowFrame from '$lib/components/ui/CardWorkflowFrame.svelte';
   import Dialog from '$lib/components/ui/Dialog.svelte';
   import FloatingSurface from '$lib/components/ui/FloatingSurface.svelte';
   import ResidentInspector from '$lib/components/tavern/ResidentInspector.svelte';
   import SettlementInterlude from '$lib/components/tavern/SettlementInterlude.svelte';
   import TavernScene from '$lib/components/tavern/TavernScene.svelte';
+  import BarStatusRail from '$lib/components/tavern/BarStatusRail.svelte';
   import TrinketCollection from '$lib/components/tavern/TrinketCollection.svelte';
   import type { PageProps, SubmitFunction } from './$types';
 
@@ -32,6 +34,19 @@
   let talkOpen = $state(false);
   let deckOpen = $state(Boolean(validInitialSelection()));
   let cardSelected = $state(false);
+  let workflowMode = $state<'actions' | 'talk' | 'serve' | 'inspect' | 'journal'>('actions');
+  let workflowFocusId = $state<string | null>(validInitialSelection() ? 'bar:talk' : null);
+  let dialogueHand = $state<{
+    items: WorkflowChoice[];
+    selectedId: string | null;
+    choose: (id: string) => void | Promise<void>;
+    burningId: string | null;
+    burnTurnId: string | null;
+    burnAction?: ResolvedBurnAction;
+    completeBurn: () => void;
+  } | null>(null);
+  let burningDialogueId: string | null = null;
+  let dialogueBurnController: AbortController | null = null;
   let dialogueBusy = $state(false);
   let hydrated = $state(false);
   let pending = $state(false);
@@ -55,6 +70,123 @@
     ? `/codex?section=residents&resident=${encodeURIComponent(patron.instanceId)}&questCursor=${encodeURIComponent(journal.questArchive.nextCursor)}`
     : codexHref);
 
+  const residentActions: WorkflowChoice[] = [
+    { id: 'bar:talk', title: 'Talk', description: 'Share a thought or ask what has been on their mind.', eyebrow: 'A quiet word', icon: '“', actionLabel: 'Choose', burn: true },
+    { id: 'bar:serve', title: 'Offer food or drink', description: 'Choose a finished item from the house.', eyebrow: 'From the kitchen or cellar', icon: '♨', actionLabel: 'Browse', burn: true },
+    { id: 'bar:inspect', title: 'Notice the details', description: 'Take a closer look at the person across from you.', eyebrow: 'Resident', icon: '⌕', actionLabel: 'Inspect', burn: true },
+    { id: 'bar:journal', title: 'Read the journal', description: 'See what the house remembers about this resident.', eyebrow: 'History', icon: '▤', actionLabel: 'Open', burn: true },
+    { id: 'bar:back-room', title: 'Back to the room', description: 'Return to the common room scene.', eyebrow: 'The tavern', icon: '←', actionLabel: 'Return', burn: true }
+  ];
+  const workflowItems = $derived.by((): WorkflowChoice[] => {
+    if (!patron) return [];
+    if (workflowMode === 'talk') {
+      return [
+        ...(dialogueHand?.items.filter((item) => item.id === 'dialogue:start' || item.id.startsWith('dialogue:intent:')) ?? []),
+        { id: 'bar:open-serving', title: 'Offer from house stock', description: 'Choose a finished food or drink to include in a conversation.', eyebrow: 'Serving', icon: '♨', actionLabel: 'Choose', burn: true },
+        { id: 'bar:back-actions', title: 'Resident actions', description: 'Return to the resident’s action cards.', eyebrow: patron.name, icon: '←', actionLabel: 'Back', burn: true }
+      ];
+    }
+    if (workflowMode === 'serve') {
+      const stockChoices = dialogueHand?.items.filter((item) => item.id.startsWith('dialogue:service:')) ?? [];
+      return [
+        ...(stockChoices.length ? stockChoices : [{ id: 'bar:no-stock', title: 'No finished offerings', description: 'Prepare food or drink before offering something to this resident.', eyebrow: 'The house is out', icon: '◇', disabled: true }]),
+        { id: 'bar:back-actions', title: 'Resident actions', description: 'Return to the resident’s action cards.', eyebrow: patron.name, icon: '←', actionLabel: 'Back', burn: true }
+      ];
+    }
+    return residentActions;
+  });
+  const selectedWorkflowId = $derived(workflowMode === 'talk' || workflowMode === 'serve'
+    ? dialogueHand?.selectedId ?? null
+    : workflowMode === 'inspect' ? 'bar:inspect' : workflowMode === 'journal' ? 'bar:journal' : null);
+
+  function updateDialogueHand(hand: NonNullable<typeof dialogueHand>) {
+    const nextBurnTurnId = hand.burnTurnId;
+    const nextBurnDuration = hand.burnAction?.durationMs;
+    dialogueHand = hand;
+    if (nextBurnTurnId === burningDialogueId) return;
+
+    dialogueBurnController?.abort();
+    dialogueBurnController = null;
+    burningDialogueId = nextBurnTurnId;
+    if (!nextBurnTurnId || !nextBurnDuration) return;
+
+    const controller = new AbortController();
+    dialogueBurnController = controller;
+    void waitForBurn(nextBurnDuration, controller.signal).then((completed) => {
+      if (!completed || dialogueBurnController !== controller) return;
+      if (dialogueHand?.burnTurnId === nextBurnTurnId) dialogueHand.completeBurn();
+      dialogueBurnController = null;
+      burningDialogueId = null;
+    });
+  }
+
+  function clearDialogueHand() {
+    dialogueBurnController?.abort();
+    dialogueBurnController = null;
+    burningDialogueId = null;
+    dialogueHand = null;
+  }
+
+  onDestroy(() => dialogueBurnController?.abort());
+
+  async function focusWorkflowChoice(id: string | null) {
+    if (!id) return;
+    await tick();
+    [...document.querySelectorAll<HTMLElement>('[data-workflow-choice]')]
+      .find((choice) => choice.dataset.workflowChoice === id)
+      ?.focus({ preventScroll: true });
+  }
+
+  async function backToActions() {
+    if (interactionBlocked) return;
+    const previousMode = workflowMode;
+    workflowMode = 'actions';
+    journalOpen = false;
+    talkOpen = false;
+    deckOpen = true;
+    workflowFocusId = previousMode === 'serve' ? 'bar:serve'
+      : previousMode === 'inspect' ? 'bar:inspect'
+        : previousMode === 'journal' ? 'bar:journal' : 'bar:talk';
+    await focusWorkflowChoice(workflowFocusId);
+  }
+
+  async function chooseWorkflowChoice(id: string) {
+    if (interactionBlocked || !patron) return;
+    workflowFocusId = id;
+
+    if (id === 'bar:talk') {
+      workflowMode = 'talk';
+      journalOpen = false;
+      talkOpen = false;
+      deckOpen = true;
+      workflowFocusId = 'dialogue:start';
+      await focusWorkflowChoice(workflowFocusId);
+    } else if (id === 'bar:serve') {
+      workflowMode = 'serve';
+      journalOpen = false;
+      talkOpen = false;
+      deckOpen = true;
+      workflowFocusId = dialogueHand?.items.find((item) => item.id.startsWith('dialogue:service:'))?.id ?? 'bar:back-actions';
+      await focusWorkflowChoice(workflowFocusId);
+    } else if (id === 'bar:inspect') {
+      workflowMode = 'inspect';
+      journalOpen = false;
+      await focusWorkflowChoice(null);
+    } else if (id === 'bar:journal') {
+      await setJournalOpen(true);
+    } else if (id === 'bar:back-room') {
+      await returnToBar();
+    } else if (id === 'bar:open-serving') {
+      workflowMode = 'serve';
+      workflowFocusId = dialogueHand?.items.find((item) => item.id.startsWith('dialogue:service:'))?.id ?? 'bar:back-actions';
+      await focusWorkflowChoice(workflowFocusId);
+    } else if (id === 'bar:back-actions') {
+      await backToActions();
+    } else if (id.startsWith('dialogue:')) {
+      await dialogueHand?.choose(id);
+    }
+  }
+
   $effect(() => {
     if (selectedInstanceId && !patrons.some((resident) => resident.instanceId === selectedInstanceId)) {
       selectedInstanceId = null;
@@ -62,6 +194,9 @@
       talkOpen = false;
       deckOpen = false;
       cardSelected = false;
+      workflowMode = 'actions';
+      workflowFocusId = null;
+      clearDialogueHand();
     }
     if (focusedInstanceId && !patrons.some((resident) => resident.instanceId === focusedInstanceId)) {
       focusedInstanceId = selectedInstanceId ?? patrons[0]?.instanceId ?? null;
@@ -82,6 +217,9 @@
       deckOpen = Boolean(nextSelection);
       cardSelected = false;
       journalOpen = false;
+      workflowMode = 'actions';
+      workflowFocusId = nextSelection ? 'bar:talk' : null;
+      clearDialogueHand();
     };
     window.addEventListener('popstate', syncBrowserSelection);
     return () => window.removeEventListener('popstate', syncBrowserSelection);
@@ -105,8 +243,11 @@
     talkOpen = false;
     deckOpen = true;
     cardSelected = false;
+    workflowMode = 'actions';
+    workflowFocusId = 'bar:talk';
+    clearDialogueHand();
     await tick();
-    document.querySelector<HTMLButtonElement>('[data-card-index="0"]')?.focus({ preventScroll: true });
+    await focusWorkflowChoice(workflowFocusId);
   }
 
   async function returnToBar() {
@@ -117,6 +258,9 @@
     talkOpen = false;
     deckOpen = false;
     cardSelected = false;
+    workflowMode = 'actions';
+    workflowFocusId = null;
+    clearDialogueHand();
     clearPatronUrl();
     await tick();
     if (!returningInstanceId) return;
@@ -128,8 +272,11 @@
 
   async function setJournalOpen(open: boolean) {
     journalOpen = open;
+    workflowMode = open ? 'journal' : 'actions';
+    workflowFocusId = open ? 'bar:journal' : 'bar:journal';
+    deckOpen = true;
     await tick();
-    document.querySelector<HTMLElement>(open ? '[data-bar-control="journal-close"]' : '[data-bar-control="journal"]')?.focus({ preventScroll: true });
+    if (!open) await focusWorkflowChoice(workflowFocusId);
   }
 
   async function handleEscape(event: KeyboardEvent) {
@@ -154,16 +301,11 @@
       event.preventDefault();
       event.stopPropagation();
       talkOpen = false;
-      await tick();
-      const hand = document.querySelector<HTMLElement>('.patron-dialogue.bar-hand');
-      const preferredIndex = Number(hand?.dataset.nextCardFocusIndex);
-      const preferredCard = Number.isSafeInteger(preferredIndex) && preferredIndex >= 0
-        ? document.querySelector<HTMLElement>(`.service-card-hand.bar-hand [data-card-index="${preferredIndex}"]:not([data-card-burn-active="true"])`)
-        : null;
-      (document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index][aria-pressed="true"]')
-        ?? preferredCard
-        ?? document.querySelector<HTMLElement>('.service-card-hand.bar-hand [data-card-index]:not([data-card-burn-active="true"])'))
-        ?.focus({ preventScroll: true });
+      deckOpen = true;
+      workflowFocusId = dialogueHand?.selectedId ?? (workflowMode === 'serve'
+        ? dialogueHand?.items.find((item) => item.id.startsWith('dialogue:service:'))?.id ?? 'bar:back-actions'
+        : 'dialogue:start');
+      await focusWorkflowChoice(workflowFocusId);
       return;
     }
 
@@ -171,7 +313,8 @@
 
     if (patron && !interactionBlocked) {
       event.preventDefault();
-      await returnToBar();
+      if (workflowMode !== 'actions') await backToActions();
+      else await returnToBar();
     }
   }
 
@@ -265,9 +408,6 @@
   <meta name="description" content="Welcome the regulars, pour your finest mead, and follow their stories." />
 </svelte:head>
 
-{#if dev && page.url.searchParams.get('prototype') === 'hand'}
-  <WorkflowPrototypeHost area="bar" snapshot={null} barSnapshot={data.snapshot} burnStyle={data.cardBurnStyle} />
-{:else}
 <main class="bar-page">
   {#if data.settlement && isActiveSettlement(data.settlement)}
     <SettlementInterlude settlement={data.settlement} />
@@ -289,74 +429,127 @@
     </section>
   {:else}
     <div class="bar-shell">
-      <TavernScene
-        presentation="player-hand"
-        {patrons}
-        selected={patron}
-        focusedKey={focusedInstanceId}
-        trinkets={collection}
-        day={data.snapshot.save.currentDay}
-        gold={data.snapshot.save.gold}
-        archiveHref={codexHref}
-        disabled={!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand}
-        closeDisabled={!hydrated || pending || dialogueBusy || keepsakeBusy}
-        {cardSelected}
-        composerOpen={talkOpen}
-        {deckOpen}
-        onselect={selectPatron}
-        onfocus={(instanceId) => (focusedInstanceId = instanceId)}
-        onback={returnToBar}
-        onclose={() => { closeError = null; closeDialogOpen = true; }}
-        onkeepsake={openKeepsake}
+      <CardWorkflowFrame
+        title={patron?.name ?? 'The Bar'}
+        eyebrow={patron ? 'A resident at the bar' : 'The common room'}
+        location={patron ? 'The tavern · Bar' : 'The tavern · Common room'}
+        onback={patron ? (workflowMode === 'actions' ? returnToBar : backToActions) : undefined}
+        backLabel={workflowMode === 'actions' ? 'Return to room' : 'Resident actions'}
+        focusKey={workflowMode === 'inspect' || workflowMode === 'journal' ? workflowMode : null}
+        showFolio={patron ? workflowMode === 'inspect' || workflowMode === 'journal' || talkOpen || dialogueBusy || Boolean(data.dialogueUnavailable) : patrons.length === 0}
+        showHand={!!patron && (deckOpen || talkOpen)}
+        inspectionMode={talkOpen ? 'dialogue' : 'folio'}
       >
-        {#snippet interaction()}
-          {#if patron && data.snapshot && journal}
-            <NpcDialogue
-              npcId={patron.npcId}
-              instanceId={patron.instanceId}
-              saveId={data.snapshot.save.id}
-              name={patron.name}
-              {journal}
-              stock={data.snapshot}
-              unavailable={data.dialogueUnavailable}
-              archiveHref={null}
-              embedded={true}
-              barHand={true}
-              cardBurnStyle={data.cardBurnStyle}
-              suspended={journalOpen}
-              blocked={pending || !!closeCommand}
-              focusActive={true}
-              composerOpen={talkOpen}
-              deckOpen={deckOpen}
-              onbusychange={(busy) => (dialogueBusy = busy)}
-              oncomposerchange={(open) => (talkOpen = open)}
-              ondeckchange={() => (deckOpen = Boolean(patron))}
-              onselectionchange={(selected) => {
-                cardSelected = selected;
-                if (selected) journalOpen = false;
-              }}
-            />
-          {:else if patron}
-            <p class="quiet-line" role="status">This resident’s journal is unavailable right now.</p>
+        {#snippet scene()}
+          <TavernScene
+            presentation="player-hand"
+            renderInteraction={false}
+            renderStatus={false}
+            {patrons}
+            selected={patron}
+            focusedKey={focusedInstanceId}
+            trinkets={collection}
+            day={data.snapshot?.save.currentDay ?? 1}
+            gold={data.snapshot?.save.gold ?? 0}
+            archiveHref={codexHref}
+            disabled={!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand}
+            closeDisabled={!hydrated || pending || dialogueBusy || keepsakeBusy}
+            onselect={selectPatron}
+            onfocus={(instanceId) => (focusedInstanceId = instanceId)}
+            onback={returnToBar}
+            onclose={() => { closeError = null; closeDialogOpen = true; }}
+            onkeepsake={openKeepsake}
+          />
+        {/snippet}
+        {#snippet status()}
+          <BarStatusRail embedded day={data.snapshot?.save.currentDay ?? 1} gold={data.snapshot?.save.gold ?? 0} disabled={interactionBlocked} presentation={patron ? 'player-hand' : 'default'} onclose={() => { closeError = null; closeDialogOpen = true; }} />
+        {/snippet}
+        {#snippet folio()}
+          {#if patron}
+            {#if data.snapshot && journal}
+              <NpcDialogue
+                npcId={patron.npcId}
+                instanceId={patron.instanceId}
+                saveId={data.snapshot.save.id}
+                name={patron.name}
+                {journal}
+                stock={data.snapshot}
+                unavailable={data.dialogueUnavailable}
+                archiveHref={null}
+                embedded={true}
+                barHand={true}
+                externalHand={true}
+                frameMode={true}
+                cardBurnStyle={data.cardBurnStyle}
+                suspended={workflowMode !== 'talk' && workflowMode !== 'serve'}
+                blocked={pending || !!closeCommand}
+                focusActive={true}
+                composerOpen={talkOpen}
+                {deckOpen}
+                onbusychange={(busy) => {
+                  dialogueBusy = busy;
+                  if (busy && workflowMode !== 'talk' && workflowMode !== 'serve') {
+                    workflowMode = 'talk';
+                    talkOpen = true;
+                    deckOpen = false;
+                    workflowFocusId = 'dialogue:start';
+                  }
+                }}
+                oncomposerchange={(open) => {
+                  talkOpen = open;
+                  if (!open) {
+                    deckOpen = true;
+                    workflowFocusId = dialogueHand?.selectedId ?? (workflowMode === 'serve'
+                      ? dialogueHand?.items.find((item) => item.id.startsWith('dialogue:service:'))?.id ?? 'bar:back-actions'
+                      : 'dialogue:start');
+                  }
+                }}
+                ondeckchange={(open) => (deckOpen = open)}
+                onselectionchange={(selected) => {
+                  cardSelected = selected;
+                  if (selected) journalOpen = false;
+                }}
+                onworkflowhandchange={updateDialogueHand}
+              />
+            {:else if workflowMode === 'talk' || workflowMode === 'serve'}
+              <p class="quiet-room" role="status">This resident’s journal is unavailable right now.</p>
+            {/if}
+
+            {#if workflowMode === 'inspect' || workflowMode === 'journal'}
+              {@const snapshot = data.snapshot}
+              <ResidentInspector
+                {patron}
+                {journal}
+                history={snapshot?.history ?? []}
+                archiveHref={codexCursorHref}
+                {codexHref}
+                journalOpen={workflowMode === 'journal'}
+                interactionOpen={talkOpen}
+                onjournalchange={setJournalOpen}
+              />
+            {/if}
+          {:else if patrons.length === 0}
+            <p class="quiet-room" role="status">The common room is quiet. The scene’s keepsake slots still open their manager; past residents are in the Codex.</p>
           {/if}
         {/snippet}
-      </TavernScene>
+        {#snippet hand()}
+          {#if patron && (deckOpen || talkOpen)}
+            <WorkflowHand
+              items={workflowItems}
+              label={workflowMode === 'talk' ? `Conversation choices for ${patron.name}` : workflowMode === 'serve' ? `Offerings for ${patron.name}` : `Actions for ${patron.name}`}
+              selectedId={selectedWorkflowId}
+              focusId={workflowFocusId}
+              burnStyle={data.cardBurnStyle}
+              burningId={dialogueHand?.burningId}
+              burnAction={dialogueHand?.burnAction}
+              pending={interactionBlocked || talkOpen}
+              muted={talkOpen}
+              onchoose={chooseWorkflowChoice}
+            />
+          {/if}
+        {/snippet}
+      </CardWorkflowFrame>
 
-      {#if patron}
-        {@const snapshot = data.snapshot}
-        <ResidentInspector
-          {patron}
-          {journal}
-          history={snapshot.history}
-          archiveHref={codexCursorHref}
-          {codexHref}
-          {journalOpen}
-          interactionOpen={talkOpen}
-          onjournalchange={setJournalOpen}
-        />
-      {:else if patrons.length === 0}
-        <p class="quiet-room" role="status">The common room is quiet. The scene’s keepsake slots still open their manager; past residents are in the Codex.</p>
-      {/if}
       {#if keepsakeDialogOpen && selectedTrinketSlot !== null && data.snapshot && !patron}
         <FloatingSurface
           as="section"
@@ -388,7 +581,6 @@
     </div>
   {/if}
 </main>
-{/if}
 
 
 <Dialog id="close-tavern" title="End evening?" bind:open={closeDialogOpen}>

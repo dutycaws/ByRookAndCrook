@@ -9,7 +9,6 @@
   },
   "scripts": {
     "dev": "vite dev",
-    "prototype:hand": "vite dev --host 127.0.0.1",
     "brac-app:dev": "node --import tsx scripts/brac-app-dev.ts",
     "build": "vite build",
     "preview": "node build",

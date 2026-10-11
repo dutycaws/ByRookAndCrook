@@ -12,6 +12,7 @@
     selectedId,
     batchMode = null,
     batchTargetIds = new Set<string>(),
+    moveTargetId = null,
     scale = 1,
     onselect,
     onnavigate = onselect,
@@ -22,6 +23,7 @@
     selectedId: string | null;
     batchMode?: 'water' | 'amend' | null;
     batchTargetIds?: Set<string>;
+    moveTargetId?: string | null;
     scale?: number;
     onselect: (cellId: string) => void;
     /** Keyboard roving selection can update the inspector without opening a menu. */
@@ -49,7 +51,8 @@
         : `${cell.layoutKey}, ${cell.plantName}${cell.harvestable ? ', ready to harvest' : ''}`;
     const attention = cell.attention ? ', needs a closer look' : '';
     const batch = batchMode && batchTargetIds.has(cell.id) ? `, selected for batch ${batchMode}` : '';
-    return `${base}${attention}${batch}`;
+    const moveTarget = moveTargetId === cell.id ? ', selected move destination' : '';
+    return `${base}${attention}${batch}${moveTarget}`;
   }
 
   function cropAsset(plantKey: string | null, stage: number | null): string | null {
@@ -134,6 +137,7 @@
           class:selected={cell.id === selectedId}
           class:mature={cell.harvestable}
           class:batch-selected={batchMode && batchTargetIds.has(cell.id)}
+          class:move-target={cell.id === moveTargetId}
           data-layout-key={cell.layoutKey}
           data-garden-cell
           data-cell-id={cell.id}
@@ -175,9 +179,11 @@
   .hex-cell::after { position: absolute; inset: 3px; padding: 4px; background: #f2c75a; clip-path: inherit; content: ''; opacity: 0; -webkit-mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask: linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; }
   .hex-cell:hover::after, .hex-cell.selected::after { opacity: 1; }
   .hex-cell.batch-selected::after { opacity: 1; background: #e0b644; }
+  .hex-cell.move-target::after { opacity: 1; background: #a7df7e; }
   .hex-cell:hover + *, .plot-node:has(.hex-cell:hover) .plot-base, .plot-node.selected .plot-base { filter: drop-shadow(0 0 8px #efc75b) drop-shadow(0 7px 7px #0008); }
   .hex-cell:focus-visible { outline: none; filter: drop-shadow(0 0 6px #fff3bd) drop-shadow(0 0 2px #241402); }
   .hex-cell:focus-visible::after { opacity: 1; background: #fff2ad; }
+  .plot-node:has(.hex-cell.move-target) .plot-base { filter: drop-shadow(0 0 10px #a7df7e) drop-shadow(0 7px 7px #0008); }
   .ready-dot { position: absolute; top: 15%; right: 19%; width: 9px; height: 9px; border: 1px solid #e9f6b9; border-radius: 50%; background: #9bd265; box-shadow: 0 0 10px #91cf58; }
   .attention-marker { position: absolute; top: 5%; left: 12%; z-index: 7; display: grid; width: 22px; height: 22px; place-items: center; border: 2px solid #ffe2a0; border-radius: 50%; color: #fff0c4; background: #9f3c29; box-shadow: 0 2px 8px #000c; font-family: 'Cinzel', serif; font-size: 14px; font-weight: 900; pointer-events: none; }
   .attention-marker[data-garden-attention='warning'] { background: #95651e; }

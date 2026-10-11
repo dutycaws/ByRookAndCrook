@@ -9,6 +9,7 @@
     label: string;
     children: Snippet;
     designSize?: { width: number; height: number };
+    fit?: 'responsive' | 'cover';
     element?: HTMLDivElement;
     transform?: SceneTransform;
     fallback?: string | null;
@@ -20,6 +21,7 @@
     label,
     children,
     designSize = SCENE_DESIGN_SIZE,
+    fit = 'responsive',
     element = $bindable(),
     transform = $bindable({ scale: 1, offsetX: 0, offsetY: 0 }),
     fallback = null,
@@ -38,13 +40,13 @@
     const resize = new ResizeObserver(([entry]) => {
       const bounds = entry.contentRect;
       const sceneFirstPhone = bounds.width <= 620;
-      const scale = sceneFirstPhone
+      const scale = fit === 'cover' ? Math.max(bounds.width / designSize.width, bounds.height / designSize.height) : sceneFirstPhone
         ? bounds.height / designSize.height
         : bounds.width / designSize.width;
       transform = {
         scale,
-        offsetX: sceneFirstPhone ? (bounds.width - designSize.width * scale) / 2 : 0,
-        offsetY: 0
+        offsetX: fit === 'cover' || sceneFirstPhone ? (bounds.width - designSize.width * scale) / 2 : 0,
+        offsetY: fit === 'cover' ? (bounds.height - designSize.height * scale) / 2 : 0
       };
       // Keep the initial scene inert until its first measured transform has settled.
       // Later resizes update the transform immediately, so temporarily inerting the
