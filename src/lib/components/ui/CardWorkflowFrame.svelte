@@ -52,7 +52,7 @@
   .workflow-folio :global(h2) { margin: 0 0 .6rem; font-size: 1.2rem; }
   .workflow-folio :global(p) { line-height: 1.5; }
   .workflow-dock { position: absolute; z-index: 5; left: 0; right: 0; bottom: .3rem; min-width: 0; animation: hand-arrive 200ms ease-out; }
-  .card-workflow-frame.centered .workflow-folio { left: 50%; right: auto; top: 50%; bottom: auto; translate: -50% -50%; width: min(24rem,calc(100% - 3rem)); max-height: calc(100% - 10rem); border: 0; padding: .25rem; background: transparent; backdrop-filter: none; overflow: auto; }
+  .card-workflow-frame.centered .workflow-folio { z-index: 6; left: 50%; right: auto; top: 6rem; bottom: auto; translate: -50% 0; width: min(24rem,calc(100% - 3rem)); max-height: calc(100% - 10rem); border: 0; padding: .25rem; background: transparent; backdrop-filter: none; overflow: auto; }
   .card-workflow-frame.dialogue .workflow-folio { z-index: 6; left: 50%; right: auto; top: auto; bottom: 2rem; translate: -50% 0; width: min(42rem,calc(100% - 3rem)); max-height: calc(100% - 9rem); }
   .workflow-folio[hidden], .workflow-dock[hidden] { display: none; }
   .workflow-folio:focus-visible, .workflow-heading button:focus-visible { outline: 2px solid #ffe49c; outline-offset: 3px; }

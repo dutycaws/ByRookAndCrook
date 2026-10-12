@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(19);
+select plan(27);
 
 insert into auth.users(id,email,role,aud,created_at,updated_at) values
   ('16600000-0000-4000-8000-000000000001','compost-brew@example.test','authenticated','authenticated',now(),now()),
@@ -18,6 +18,10 @@ select lives_ok($$ select public.harvest_crop(
 select lives_ok($$ select public.start_brew(
   (select id from public.tavern_saves),(select id from public.ingredient_batches),
   '16600000-0000-4000-8000-000000000011',1) $$,'ingredient enters an active brew');
+select ok(not (public.preview_garden_command('compost_ingredient',jsonb_build_object(
+  'cellId',(select id from public.garden_cells where layout_key='c3'),
+  'ingredientBatchId',(select id from public.ingredient_batches),'quantity',1))->>'canCommit')::boolean,
+  'compost preview blocks an ingredient reserved by an active brew');
 select throws_ok($$ select public.garden_command(
   (select id from public.tavern_saves),'16600000-0000-4000-8000-000000000012',2,'compost_ingredient',
   jsonb_build_object('cellId',(select id from public.garden_cells where layout_key='c3'),
@@ -31,6 +35,19 @@ select lives_ok($$ select public.create_tavern() $$,'available compost garden pr
 select lives_ok($$ select public.harvest_crop(
   (select id from public.tavern_saves),(select id from public.garden_cells where layout_key='c0'),
   '16600000-0000-4000-8000-000000000020',0) $$,'available ingredient harvests');
+select ok((public.preview_garden_command('compost_ingredient',jsonb_build_object(
+  'cellId',(select id from public.garden_cells where layout_key='c3'),
+  'ingredientBatchId',(select id from public.ingredient_batches),'quantity',1))->>'canCommit')::boolean,
+  'available one-item compost is previewable');
+select throws_ok($$ select public.preview_garden_command('compost_ingredient',jsonb_build_object(
+  'cellId',(select id from public.garden_cells where layout_key='c3'),
+  'ingredientBatchId',(select id from public.ingredient_batches),'quantity',2)) $$,
+  'PT400','Compost quantity must be exactly one','compost preview rejects quantities above one');
+select throws_ok($$ select public.garden_command(
+  (select id from public.tavern_saves),'16600000-0000-4000-8000-000000000041',1,'compost_ingredient',
+  jsonb_build_object('cellId',(select id from public.garden_cells where layout_key='c3'),
+    'ingredientBatchId',(select id from public.ingredient_batches),'quantity',2)) $$,
+  'PT400','Compost quantity must be exactly one','compost commit rejects quantities above one');
 select lives_ok($$ select public.garden_command(
   (select id from public.tavern_saves),'16600000-0000-4000-8000-000000000021',1,'compost_ingredient',
   jsonb_build_object('cellId',(select id from public.garden_cells where layout_key='c3'),
@@ -38,8 +55,20 @@ select lives_ok($$ select public.garden_command(
   'unreserved ingredient becomes delayed compost');
 select is((select composted_quantity from public.ingredient_batches),1,'compost has separate allocation accounting');
 select is((select consumed_quantity from public.ingredient_batches),0,'compost does not impersonate craft consumption');
+select is((select count(*) from public.garden_compost_jobs
+  where save_id=(select id from public.tavern_saves) and source_kind='ingredient'),1::bigint,
+  'one compost item creates one delayed compost job');
 select is(jsonb_array_length(public.get_tavern_snapshot()->'ingredients'),0,
   'fully composted ingredients disappear from available crafting stock');
+select ok(not (public.preview_garden_command('compost_ingredient',jsonb_build_object(
+  'cellId',(select id from public.garden_cells where layout_key='c3'),
+  'ingredientBatchId',(select id from public.ingredient_batches),'quantity',1))->>'canCommit')::boolean,
+  'compost preview blocks an exhausted ingredient');
+select throws_ok($$ select public.garden_command(
+  (select id from public.tavern_saves),'16600000-0000-4000-8000-000000000042',2,'compost_ingredient',
+  jsonb_build_object('cellId',(select id from public.garden_cells where layout_key='c3'),
+    'ingredientBatchId',(select id from public.ingredient_batches),'quantity',1)) $$,
+  'PT422','Not enough unconsumed ingredient to compost','compost commit rejects an exhausted ingredient');
 select throws_ok($$ select public.start_brew(
   (select id from public.tavern_saves),(select id from public.ingredient_batches),
   '16600000-0000-4000-8000-000000000022',2) $$,
@@ -54,6 +83,10 @@ select lives_ok($$ select public.harvest_crop(
 select lives_ok($$ select public.start_bake(
   (select id from public.tavern_saves),(select id from public.ingredient_batches),
   '16600000-0000-4000-8000-000000000031',1) $$,'ingredient enters an active bake');
+select ok(not (public.preview_garden_command('compost_ingredient',jsonb_build_object(
+  'cellId',(select id from public.garden_cells where layout_key='c3'),
+  'ingredientBatchId',(select id from public.ingredient_batches),'quantity',1))->>'canCommit')::boolean,
+  'compost preview blocks an ingredient reserved by an active bake');
 select throws_ok($$ select public.garden_command(
   (select id from public.tavern_saves),'16600000-0000-4000-8000-000000000032',2,'compost_ingredient',
   jsonb_build_object('cellId',(select id from public.garden_cells where layout_key='c3'),

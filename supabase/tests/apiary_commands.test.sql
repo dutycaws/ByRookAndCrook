@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(54);
+select plan(64);
 
 insert into auth.users(id,email,role,aud,created_at,updated_at)
 values
@@ -22,7 +22,7 @@ grant select on apiary_test_context to authenticated;
 insert into public.garden_inventory(save_id,item_key,quantity) values
   ((select save_id from apiary_test_context),'hive_equipment',2),
   ((select save_id from apiary_test_context),'replacement_colony',1),
-  ((select save_id from apiary_test_context),'bee_feed',2),
+  ((select save_id from apiary_test_context),'bee_feed',1),
   ((select save_id from apiary_test_context),'treatment_varroa',1);
 create temporary table apiary_receipts(label text,receipt jsonb);
 grant select,insert on apiary_receipts to authenticated;
@@ -64,20 +64,29 @@ select is((select quantity from public.garden_inventory where save_id=(select sa
 
 select is((public.preview_apiary_command('feed',jsonb_build_object(
   'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),'quantity',2))->>'canCommit')::boolean,
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),'quantity',1))->>'canCommit')::boolean,
   true,'feeding preview validates current supply');
 select lives_ok($$ select public.apiary_command(
   (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000012',2,'feed',
   jsonb_build_object('colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),'quantity',2)) $$,
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),'quantity',1)) $$,
   'feeding commits through the authoritative command');
 select is((select food_stores from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-  join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),60,'feed increases survival stores');
+  join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),42,'one feed adds eighteen survival stores');
 select is((select feed_stores from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-  join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),36,'feed origin remains separately accounted');
+  join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),18,'feed origin remains separately accounted');
 select is((select floral_honey from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
   join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),4,'feed never becomes floral honey');
 select is((select quantity from public.garden_inventory where save_id=(select save_id from apiary_test_context) and item_key='bee_feed'),0,'feeding consumes the selected quantity');
+select ok(not (public.preview_apiary_command('feed',jsonb_build_object(
+  'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),'quantity',1))->>'canCommit')::boolean,
+  'feed preview blocks use after stock reaches zero');
+select throws_ok($$ select public.apiary_command(
+  (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000026',3,'feed',
+  jsonb_build_object('colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c2'),'quantity',1)) $$,
+  'PT422','Not enough colony feed','one feed cannot be taken from an empty inventory');
 
 select is(public.preview_apiary_command('treat',jsonb_build_object(
   'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
@@ -123,10 +132,38 @@ from split_baseline b where ac.id=b.id and ac.save_id=(select save_id from apiar
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='16700000-0000-4000-8000-000000000001';
+reset role;
+update public.garden_cells set unlocked=false
+where save_id=(select save_id from apiary_test_context) and layout_key='c5';
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='16700000-0000-4000-8000-000000000001';
+select ok(not (public.preview_apiary_command('split',jsonb_build_object(
+  'sourceColonyId',(select id from split_baseline),
+  'targetHiveId',(select h.id from public.apiary_hives h join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where h.save_id=(select save_id from apiary_test_context) and c.layout_key='c5')))->>'canCommit')::boolean,
+  'split preview rejects a locked target hive');
+select throws_ok($$ select public.apiary_command(
+  (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000027',5,'split',
+  jsonb_build_object('sourceColonyId',(select id from split_baseline),
+    'targetHiveId',(select h.id from public.apiary_hives h join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where h.save_id=(select save_id from apiary_test_context) and c.layout_key='c5'))) $$,
+  'PT404','Target hive not found or unavailable','split commit rejects a locked target hive');
+select is((select revision from public.tavern_saves where id=(select save_id from apiary_test_context)),5::bigint,
+  'locked split leaves the revision unchanged');
+reset role;
+update public.garden_cells set unlocked=true
+where save_id=(select save_id from apiary_test_context) and layout_key='c5';
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='16700000-0000-4000-8000-000000000001';
 select is((public.preview_apiary_command('split',jsonb_build_object(
   'sourceColonyId',(select id from split_baseline),
   'targetHiveId',(select h.id from public.apiary_hives h join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where h.save_id=(select save_id from apiary_test_context) and c.layout_key='c5')))->>'canCommit')::boolean,
   true,'strong-colony split preview exposes satisfied requirements');
+select is((public.preview_apiary_command('split',jsonb_build_object(
+  'sourceColonyId',(select id from split_baseline),
+  'targetHiveId',(select h.id from public.apiary_hives h join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where h.save_id=(select save_id from apiary_test_context) and c.layout_key='c5')))->'transferred'),
+  jsonb_build_object('adults',6000,'brood',1200,'foodStores',25,'floralHoney',6,'feedStores',5),
+  'split preview reports each resource that the commit will transfer');
 insert into apiary_receipts select 'split',public.apiary_command(
   (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000016',5,'split',
   jsonb_build_object('sourceColonyId',(select id from split_baseline),
@@ -155,7 +192,7 @@ select is((select jsonb_build_object('key',treatment_key,'days',treatment_days_r
   jsonb_build_object('key','varroa','days',3),'split carries active treatment state instead of cleansing the colony');
 
 reset role;
-update public.apiary_colonies set floral_honey=14,health=90,varroa_pressure=5,
+update public.apiary_colonies set floral_honey=30,health=90,varroa_pressure=5,
   chalkbrood_pressure=2,nosema_pressure=2,treatment_key=null,treatment_days_remaining=0,treatment_tradeoff=null
 where save_id=(select save_id from apiary_test_context) and hive_id=(select h.id from public.apiary_hives h join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where h.save_id=(select save_id from apiary_test_context) and c.layout_key='c3');
 set local role authenticated;
@@ -163,29 +200,47 @@ set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='16700000-0000-4000-8000-000000000001';
 select is((public.preview_apiary_command('extract_honey',jsonb_build_object(
   'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',5))->>'extractableSurplus')::integer,
-  10,'honey preview exposes only safe floral surplus');
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',26))->>'extractableSurplus')::integer,
+  26,'honey preview exposes the full safe floral surplus');
+select is((public.preview_apiary_command('extract_honey',jsonb_build_object(
+  'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',26))->>'canCommit')::boolean,
+  true,'preview allows extraction above the former twenty unit cap');
+select ok(not (public.preview_apiary_command('extract_honey',jsonb_build_object(
+  'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',27))->>'canCommit')::boolean,
+  'preview blocks extraction beyond the safe surplus');
 select throws_ok($$ select public.apiary_command(
   (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000017',6,'extract_honey',
   jsonb_build_object('colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',11)) $$,
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',27)) $$,
   'PT422','Only safe floral-honey surplus can be extracted','essential honey reserve cannot be extracted');
 select is((select revision from public.tavern_saves where id=(select save_id from apiary_test_context)),6::bigint,'unsafe extraction changes no revision');
+select throws_ok($$ select public.apiary_command(
+  (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000028',6,'extract_honey',
+  jsonb_build_object('colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',0)) $$,
+  'PT400','Honey quantity must be positive','zero honey extraction is rejected');
+select throws_ok($$ select public.apiary_command(
+  (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000029',6,'extract_honey',
+  jsonb_build_object('colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',-1)) $$,
+  'PT400','Honey quantity must be positive','negative honey extraction is rejected');
 insert into apiary_receipts select 'honey',public.apiary_command(
   (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000018',6,'extract_honey',
   jsonb_build_object('colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',5));
+    join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),'quantity',26));
 select is((select floral_honey from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
-  join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),9,'extraction removes only the selected floral honey');
+  join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3'),4,'extraction preserves the full four unit reserve');
 select is((select jsonb_build_object('kind',source_kind,'plant',plant_key,'quantity',quantity,
   'apiaryAction',source_apiary_action_id,'cropAction',source_action_id,'provenanceKind',provenance->>'kind')
   from public.ingredient_batches where save_id=(select save_id from apiary_test_context) and id=(select (receipt#>>'{result,ingredientBatchId}')::uuid from apiary_receipts where label='honey')),
-  jsonb_build_object('kind','honey','plant','honey','quantity',5,'apiaryAction','16700000-0000-4000-8000-000000000018'::uuid,
+  jsonb_build_object('kind','honey','plant','honey','quantity',26,'apiaryAction','16700000-0000-4000-8000-000000000018'::uuid,
     'cropAction',null,'provenanceKind','honey'),'honey batch records immutable apiary provenance');
 select is(((public.get_tavern_snapshot()->'ingredients'->0)->>'sourceKind'),'honey','snapshot exposes honey as a normal available ingredient');
 insert into apiary_receipts select 'honey-replay',public.apiary_command(
   (select save_id from apiary_test_context),'16700000-0000-4000-8000-000000000018',6,'extract_honey',
-  jsonb_build_object('quantity',5,'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
+  jsonb_build_object('quantity',26,'colonyId',(select ac.id from public.apiary_colonies ac join public.apiary_hives h on h.id=ac.hive_id
     join public.garden_cells c on c.id=h.cell_id and c.save_id=h.save_id where ac.save_id=(select save_id from apiary_test_context) and c.layout_key='c3')));
 select is((select receipt from apiary_receipts where label='honey'),
   (select receipt from apiary_receipts where label='honey-replay'),'honey extraction retry returns its exact receipt');

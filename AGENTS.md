@@ -1,15 +1,21 @@
 # Repository working model
 
-By Rook and Crook is in rapid prototyping. There is no production system. Treat every existing implementation, schema, migration, interface, test, asset, and document as disposable or mutable when changing it better serves the current prototype.
+By Rook and Crook is a prototype with no production system. Existing code, schemas, migrations, interfaces, tests, assets, and docs may be replaced when that better serves the prototype.
 
-Always prefer using locally-defined agent definitions
+Prefer locally defined agents.
 
 ## Codebase navigation
 
-For codebase navigation, activate the current repository with Serena and read its initial instructions. Prefer Serena’s symbol and reference tools for cross-file investigation. Continue using repository-standard editing and verification tools for changes.
+Activate this repository with Serena and read its initial instructions before codebase navigation. Prefer its symbol/reference tools for cross-file investigation; use repository-standard tools to edit and verify changes.
 
 ## Ticket workflow
 
-For every ticket, start with the agent-organizer to break down a ticket and delegate work to a team of sub-agents with bounded, non-overlapping responsibilities. Give each sub-agent enough ticket and repository context to complete its assignment, and use their findings to prevent long-running implementation context from becoming stale or incomplete.
+Scale coordination to the ticket's complexity:
 
-Dedicate one sub-agent as the ticket's workflow overseer. The overseer does not own implementation files. It periodically reviews the active work for inefficient sequencing, redundant investigation, excessive test scope, stalled agents, integration risk, and context rot, then reports concrete corrections to the primary agent. Keep this role active until the ticket is complete.
+- Small, localized changes: use one agent and focused verification.
+- Bounded work with independent subtasks: delegate where useful; the primary agent handles coordination and efficiency checks.
+- Complex, cross-module, or long-running work: start with the agent-organizer, assign bounded, non-overlapping responsibilities, and keep a dedicated workflow overseer active until completion.
+
+Give sub-agents sufficient ticket/repository context and incorporate their findings. Reassess coordination if scope grows.
+
+The overseer owns no implementation files. It checks workflow efficiency at kickoff, after each work batch or handoff, before integration and final verification, and at least every 10 minutes during sustained work. It reports concrete corrections for redundant investigation, stalled agents, inefficient sequencing, excessive test scope, overlapping writes, integration risk, or stale context. The primary agent applies useful corrections promptly.

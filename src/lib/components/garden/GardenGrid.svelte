@@ -13,6 +13,8 @@
     batchMode = null,
     batchTargetIds = new Set<string>(),
     moveTargetId = null,
+    splitTargetId = null,
+    splitDestinationIds = null,
     scale = 1,
     onselect,
     onnavigate = onselect,
@@ -24,6 +26,8 @@
     batchMode?: 'water' | 'amend' | null;
     batchTargetIds?: Set<string>;
     moveTargetId?: string | null;
+    splitTargetId?: string | null;
+    splitDestinationIds?: Set<string> | null;
     scale?: number;
     onselect: (cellId: string) => void;
     /** Keyboard roving selection can update the inspector without opening a menu. */
@@ -52,7 +56,8 @@
     const attention = cell.attention ? ', needs a closer look' : '';
     const batch = batchMode && batchTargetIds.has(cell.id) ? `, selected for batch ${batchMode}` : '';
     const moveTarget = moveTargetId === cell.id ? ', selected move destination' : '';
-    return `${base}${attention}${batch}${moveTarget}`;
+    const splitTarget = splitTargetId === cell.id ? ', selected colony destination' : splitDestinationIds?.has(cell.id) ? ', available colony destination' : '';
+    return `${base}${attention}${batch}${moveTarget}${splitTarget}`;
   }
 
   function cropAsset(plantKey: string | null, stage: number | null): string | null {
@@ -138,6 +143,9 @@
           class:mature={cell.harvestable}
           class:batch-selected={batchMode && batchTargetIds.has(cell.id)}
           class:move-target={cell.id === moveTargetId}
+          class:split-destination={splitDestinationIds?.has(cell.id)}
+          class:split-target={cell.id === splitTargetId}
+          class:split-unavailable={splitDestinationIds && !splitDestinationIds.has(cell.id)}
           data-layout-key={cell.layoutKey}
           data-garden-cell
           data-cell-id={cell.id}
@@ -145,7 +153,8 @@
           data-col={cell.col}
           data-row={cell.row}
           aria-label={cellLabel(cell)}
-          aria-pressed={batchMode ? batchTargetIds.has(cell.id) : cell.id === selectedId}
+          aria-pressed={batchMode ? batchTargetIds.has(cell.id) : splitDestinationIds ? cell.id === splitTargetId : cell.id === selectedId}
+          aria-disabled={splitDestinationIds && !splitDestinationIds.has(cell.id) ? 'true' : undefined}
           onclick={() => onselect(cell.id)}
           onkeydown={(event) => moveFocus(event, cell)}
           onfocus={() => onplotfocus?.(cell.id)}
@@ -180,6 +189,11 @@
   .hex-cell:hover::after, .hex-cell.selected::after { opacity: 1; }
   .hex-cell.batch-selected::after { opacity: 1; background: #e0b644; }
   .hex-cell.move-target::after { opacity: 1; background: #a7df7e; }
+  .hex-cell.split-destination::after { opacity: .65; background: #a7df7e; }
+  .hex-cell.split-target::after { opacity: 1; background: #e0b644; }
+  .hex-cell.split-unavailable { cursor: default; }
+  .hex-cell.split-unavailable:hover::after { opacity: 0; }
+  .hex-cell.split-unavailable.selected::after { opacity: 1; }
   .hex-cell:hover + *, .plot-node:has(.hex-cell:hover) .plot-base, .plot-node.selected .plot-base { filter: drop-shadow(0 0 8px #efc75b) drop-shadow(0 7px 7px #0008); }
   .hex-cell:focus-visible { outline: none; filter: drop-shadow(0 0 6px #fff3bd) drop-shadow(0 0 2px #241402); }
   .hex-cell:focus-visible::after { opacity: 1; background: #fff2ad; }

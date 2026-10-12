@@ -22,6 +22,8 @@
     batchMode = null,
     batchTargetIds = new Set<string>(),
     moveTargetId = null,
+    splitTargetId = null,
+    splitDestinationIds = null,
     harvestEffect = null
   }: {
     visual: GardenVisualState;
@@ -30,6 +32,8 @@
     batchMode?: 'water' | 'amend' | null;
     batchTargetIds?: Set<string>;
     moveTargetId?: string | null;
+    splitTargetId?: string | null;
+    splitDestinationIds?: Set<string> | null;
     harvestEffect?: { token: number; cellId: string; plantKey: string; stage: number } | null;
   } = $props();
 
@@ -244,6 +248,8 @@
           {batchMode}
           {batchTargetIds}
           {moveTargetId}
+          {splitTargetId}
+          {splitDestinationIds}
         />
       </div>
       <SceneLayer src="/assets/scenes/garden/garden-atmosphere.webp" name="garden bees and leaves" x={922} y={180} width={620} height={330} z={4} class="garden-atmosphere" />

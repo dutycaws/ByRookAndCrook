@@ -22,7 +22,9 @@
   const handId = $props.id();
   onDestroy(() => controller?.abort());
   $effect(() => {
-    const id = focusId;
+    // Selection changes should restore focus even if the requested target stays the same.
+    const selection = selectedId;
+    const id = focusId ?? selection;
     if (!id) return;
     void tick().then(() => Array.from(handRoot?.querySelectorAll<HTMLButtonElement>('[data-workflow-choice]') ?? []).find((button) => button.dataset.workflowChoice === id)?.focus({ preventScroll: true }));
   });

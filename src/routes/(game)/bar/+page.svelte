@@ -34,7 +34,7 @@
   let talkOpen = $state(false);
   let deckOpen = $state(Boolean(validInitialSelection()));
   let cardSelected = $state(false);
-  let workflowMode = $state<'actions' | 'talk' | 'serve' | 'inspect' | 'journal'>('actions');
+  let workflowMode = $state<'actions' | 'talk' | 'serve'>('actions');
   let workflowFocusId = $state<string | null>(validInitialSelection() ? 'bar:talk' : null);
   let dialogueHand = $state<{
     items: WorkflowChoice[];
@@ -73,8 +73,6 @@
   const residentActions: WorkflowChoice[] = [
     { id: 'bar:talk', title: 'Talk', description: 'Share a thought or ask what has been on their mind.', eyebrow: 'A quiet word', icon: '“', actionLabel: 'Choose', burn: true },
     { id: 'bar:serve', title: 'Offer food or drink', description: 'Choose a finished item from the house.', eyebrow: 'From the kitchen or cellar', icon: '♨', actionLabel: 'Browse', burn: true },
-    { id: 'bar:inspect', title: 'Notice the details', description: 'Take a closer look at the person across from you.', eyebrow: 'Resident', icon: '⌕', actionLabel: 'Inspect', burn: true },
-    { id: 'bar:journal', title: 'Read the journal', description: 'See what the house remembers about this resident.', eyebrow: 'History', icon: '▤', actionLabel: 'Open', burn: true },
     { id: 'bar:back-room', title: 'Back to the room', description: 'Return to the common room scene.', eyebrow: 'The tavern', icon: '←', actionLabel: 'Return', burn: true }
   ];
   const workflowItems = $derived.by((): WorkflowChoice[] => {
@@ -97,7 +95,7 @@
   });
   const selectedWorkflowId = $derived(workflowMode === 'talk' || workflowMode === 'serve'
     ? dialogueHand?.selectedId ?? null
-    : workflowMode === 'inspect' ? 'bar:inspect' : workflowMode === 'journal' ? 'bar:journal' : null);
+    : null);
 
   function updateDialogueHand(hand: NonNullable<typeof dialogueHand>) {
     const nextBurnTurnId = hand.burnTurnId;
@@ -144,9 +142,7 @@
     journalOpen = false;
     talkOpen = false;
     deckOpen = true;
-    workflowFocusId = previousMode === 'serve' ? 'bar:serve'
-      : previousMode === 'inspect' ? 'bar:inspect'
-        : previousMode === 'journal' ? 'bar:journal' : 'bar:talk';
+    workflowFocusId = previousMode === 'serve' ? 'bar:serve' : 'bar:talk';
     await focusWorkflowChoice(workflowFocusId);
   }
 
@@ -168,12 +164,6 @@
       deckOpen = true;
       workflowFocusId = dialogueHand?.items.find((item) => item.id.startsWith('dialogue:service:'))?.id ?? 'bar:back-actions';
       await focusWorkflowChoice(workflowFocusId);
-    } else if (id === 'bar:inspect') {
-      workflowMode = 'inspect';
-      journalOpen = false;
-      await focusWorkflowChoice(null);
-    } else if (id === 'bar:journal') {
-      await setJournalOpen(true);
     } else if (id === 'bar:back-room') {
       await returnToBar();
     } else if (id === 'bar:open-serving') {
@@ -272,11 +262,19 @@
 
   async function setJournalOpen(open: boolean) {
     journalOpen = open;
-    workflowMode = open ? 'journal' : 'actions';
-    workflowFocusId = open ? 'bar:journal' : 'bar:journal';
-    deckOpen = true;
     await tick();
-    if (!open) await focusWorkflowChoice(workflowFocusId);
+    document.querySelector<HTMLElement>(open
+      ? '[data-bar-control="journal-close"]'
+      : '[data-bar-control="journal"]')?.focus({ preventScroll: true });
+  }
+
+  async function handleFrameBack() {
+    if (journalOpen) {
+      await setJournalOpen(false);
+      return;
+    }
+    if (workflowMode === 'actions') await returnToBar();
+    else await backToActions();
   }
 
   async function handleEscape(event: KeyboardEvent) {
@@ -313,8 +311,8 @@
 
     if (patron && !interactionBlocked) {
       event.preventDefault();
-      if (workflowMode !== 'actions') await backToActions();
-      else await returnToBar();
+      event.stopPropagation();
+      await handleFrameBack();
     }
   }
 
@@ -433,12 +431,13 @@
         title={patron?.name ?? 'The Bar'}
         eyebrow={patron ? 'A resident at the bar' : 'The common room'}
         location={patron ? 'The tavern · Bar' : 'The tavern · Common room'}
-        onback={patron ? (workflowMode === 'actions' ? returnToBar : backToActions) : undefined}
-        backLabel={workflowMode === 'actions' ? 'Return to room' : 'Resident actions'}
-        focusKey={workflowMode === 'inspect' || workflowMode === 'journal' ? workflowMode : null}
-        showFolio={patron ? workflowMode === 'inspect' || workflowMode === 'journal' || talkOpen || dialogueBusy || Boolean(data.dialogueUnavailable) : patrons.length === 0}
+        onback={patron ? handleFrameBack : undefined}
+        backLabel={journalOpen ? 'Close journal' : workflowMode === 'actions' ? 'Return to room' : 'Resident actions'}
+        showFolio={patron
+          ? workflowMode === 'actions' || journalOpen || talkOpen || dialogueBusy || Boolean(data.dialogueUnavailable)
+          : patrons.length === 0}
         showHand={!!patron && (deckOpen || talkOpen)}
-        inspectionMode={talkOpen ? 'dialogue' : 'folio'}
+        inspectionMode={!journalOpen && talkOpen ? 'dialogue' : 'folio'}
       >
         {#snippet scene()}
           <TavernScene
@@ -464,6 +463,20 @@
         {#snippet status()}
           <BarStatusRail embedded day={data.snapshot?.save.currentDay ?? 1} gold={data.snapshot?.save.gold ?? 0} disabled={interactionBlocked} presentation={patron ? 'player-hand' : 'default'} onclose={() => { closeError = null; closeDialogOpen = true; }} />
         {/snippet}
+        {#snippet controls()}
+          {#if patron}
+            <button
+              class="journal-control"
+              type="button"
+              data-bar-control="journal"
+              aria-controls="resident-journal"
+              aria-expanded={journalOpen}
+              onclick={() => setJournalOpen(!journalOpen)}
+            >
+              {journalOpen ? 'Close journal' : 'Journal'}
+            </button>
+          {/if}
+        {/snippet}
         {#snippet folio()}
           {#if patron}
             {#if data.snapshot && journal}
@@ -481,7 +494,7 @@
                 externalHand={true}
                 frameMode={true}
                 cardBurnStyle={data.cardBurnStyle}
-                suspended={workflowMode !== 'talk' && workflowMode !== 'serve'}
+                suspended={journalOpen || (workflowMode !== 'talk' && workflowMode !== 'serve')}
                 blocked={pending || !!closeCommand}
                 focusActive={true}
                 composerOpen={talkOpen}
@@ -511,11 +524,11 @@
                 }}
                 onworkflowhandchange={updateDialogueHand}
               />
-            {:else if workflowMode === 'talk' || workflowMode === 'serve'}
+            {:else if !journalOpen && (workflowMode === 'talk' || workflowMode === 'serve')}
               <p class="quiet-room" role="status">This resident’s journal is unavailable right now.</p>
             {/if}
 
-            {#if workflowMode === 'inspect' || workflowMode === 'journal'}
+            {#if journalOpen || (workflowMode !== 'talk' && workflowMode !== 'serve')}
               {@const snapshot = data.snapshot}
               <ResidentInspector
                 {patron}
@@ -523,7 +536,7 @@
                 history={snapshot?.history ?? []}
                 archiveHref={codexCursorHref}
                 {codexHref}
-                journalOpen={workflowMode === 'journal'}
+                {journalOpen}
                 interactionOpen={talkOpen}
                 onjournalchange={setJournalOpen}
               />
@@ -542,8 +555,8 @@
               burnStyle={data.cardBurnStyle}
               burningId={dialogueHand?.burningId}
               burnAction={dialogueHand?.burnAction}
-              pending={interactionBlocked || talkOpen}
-              muted={talkOpen}
+              pending={interactionBlocked || talkOpen || journalOpen}
+              muted={talkOpen || journalOpen}
               onchoose={chooseWorkflowChoice}
             />
           {/if}
@@ -612,6 +625,9 @@
   .return-link { color: #ddc998; text-underline-offset: .2em; }
   .bar-empty-state { max-width: 36rem; margin: 8vh auto; text-align: center; }
   .bar-empty-state .text-button { display: block; margin: .6rem auto; }
+  .journal-control { display: inline-flex; min-height: 2.75rem; align-items: center; justify-content: center; padding: .4rem .75rem; border: 1px solid #806631; color: #ebd9ad; background: rgb(17 12 6 / .92); font: inherit; font-size: .84rem; font-weight: 650; white-space: nowrap; cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease; }
+  .journal-control:hover { border-color: #c49b4e; background: #392910; }
+  .journal-control:focus-visible { outline: 2px solid #f0d27a; outline-offset: 2px; }
   .bar-shell :global(.keepsake-surface) { position: absolute; z-index: 60; top: calc(var(--bar-scene-height) * var(--slot-row) + 3.5rem); display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(24rem, calc(100% - 2rem)); max-height: min(65dvh, 32rem); padding: 1rem; overflow: hidden; background: rgb(32 24 19 / .76); }
   .bar-shell :global(.slot-left) { left: calc(3.5% + 3.5rem); }
   .bar-shell :global(.slot-right) { right: calc(15% + 3.5rem); }

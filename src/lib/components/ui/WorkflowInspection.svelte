@@ -45,6 +45,8 @@
 <style>
   .workflow-inspection { display: grid; gap: .7rem; width: 100%; padding: .25rem; animation: inspect-arrive 200ms ease-out; }
   .workflow-inspection :global(.workflow-inspection-card) { min-height: 22rem; }
+  .workflow-inspection :global(.workflow-inspection-card:disabled) { opacity: 1; }
+  .inspection-options { padding: .8rem; border-radius: .5rem; background: #1b140ee8; }
   .inspection-art { display: grid; place-items: center; min-height: 7rem; font-size: 4rem; border-bottom: 1px solid #9d793f55; background: radial-gradient(ellipse at center,#86602e44,transparent 70%); }
   .inspection-copy { display: grid; align-content: start; gap: .5rem; }
   .inspection-copy h2, .inspection-copy p { margin: 0; }

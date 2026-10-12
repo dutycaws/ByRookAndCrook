@@ -27,6 +27,9 @@
   let previousBatchTargetIds = $state<Set<string>>(new Set());
   let moveSourceId = $state<string | null>(null);
   let moveTargetId = $state<string | null>(null);
+  let splitSourceId = $state<string | null>(null);
+  let splitTargetId = $state<string | null>(null);
+  let interactionLocked = $state(false);
 
   onMount(() => {
     hydrated = true;
@@ -34,8 +37,14 @@
 
   let selected = $derived(data.snapshot?.cells.find((cell) => cell.id === selectedId) ?? null);
   let visual = $derived(deriveGardenVisualState(data.snapshot ?? null, selectedId, pending, transportError));
+  let splitDestinationIds = $derived(new Set(data.snapshot?.cells.filter((cell) => cell.unlocked !== false && cell.kind === 'beehive' && cell.hive && !cell.hive.hasColony).map((cell) => cell.id) ?? []));
 
   function selectPlot(cellId: string) {
+    if (interactionLocked) return;
+    if (splitSourceId) {
+      if (splitDestinationIds.has(cellId)) splitTargetId = cellId;
+      return;
+    }
     if (moveSourceId) {
       if (cellId !== moveSourceId) moveTargetId = cellId;
       return;
@@ -52,7 +61,7 @@
   function navigatePlot(_cellId: string) {
     // Arrow keys move focus only. The plot becomes the active workflow after
     // its button receives Enter, Space, or a pointer click.
-    if (moveSourceId) moveTargetId = null;
+    if (!interactionLocked && moveSourceId) moveTargetId = null;
   }
 
   async function focusPlot(cellId: string | null) {
@@ -64,6 +73,7 @@
     const previousId = selectedId;
     selectedId = null;
     cancelMove();
+    cancelSplit();
     await focusPlot(previousId);
   }
 
@@ -87,10 +97,9 @@
   }
 
   async function finishBatch() {
-    const kind = batchMode;
     selectingBatchPlots = false;
     await tick();
-    if (kind) document.querySelector<HTMLElement>(`[data-garden-command="${kind}"]`)?.focus({ preventScroll: true });
+    document.querySelector<HTMLElement>('[data-workflow-confirm]')?.focus({ preventScroll: true });
   }
 
   async function startMove() {
@@ -102,6 +111,18 @@
   function cancelMove() {
     moveSourceId = null;
     moveTargetId = null;
+  }
+
+  async function startSplit() {
+    cancelMove();
+    splitSourceId = selected?.id ?? null;
+    splitTargetId = null;
+    await focusPlot(splitSourceId);
+  }
+
+  function cancelSplit() {
+    splitSourceId = null;
+    splitTargetId = null;
   }
 
   function handleBatchKeydown(event: KeyboardEvent) {
@@ -206,6 +227,10 @@
       onfinishbatch={finishBatch}
       onstartmove={startMove}
       oncancelmove={cancelMove}
+      {splitTargetId}
+      onstartsplit={startSplit}
+      oncancelsplit={cancelSplit}
+      oninteractionlockchange={(locked) => { interactionLocked = locked; }}
       onclose={closePlotMenu}
       burnStyle={data.cardBurnStyle}
       {transportError}
@@ -225,6 +250,8 @@
           batchMode={selectingBatchPlots ? batchMode : null}
           {batchTargetIds}
           {moveTargetId}
+          splitTargetId={splitSourceId ? splitTargetId : null}
+          splitDestinationIds={splitSourceId ? splitDestinationIds : null}
           onselect={selectPlot}
           onnavigate={navigatePlot}
         />

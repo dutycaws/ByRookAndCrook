@@ -2,14 +2,16 @@
   import { PUBLIC_SUPABASE_URL } from '$env/static/public';
   import { enhance } from '$app/forms';
   import { beforeNavigate } from '$app/navigation';
-  import { onDestroy, onMount, tick } from 'svelte';
+import { onDestroy, onMount, tick, untrack } from 'svelte';
   import type { SubmitFunction } from '@sveltejs/kit';
   import type { GardenCommandKind, GardenCommandPayload, GardenCommandPreview, GameSnapshot, GardenInventoryItem, ShopItem } from '$lib/game/contracts';
   import ShopScene from '$lib/components/shop/ShopScene.svelte';
   import WorkflowHand from '$lib/components/ui/WorkflowHand.svelte';
   import CardWorkflowFrame from '$lib/components/ui/CardWorkflowFrame.svelte';
   import WorkflowInspection from '$lib/components/ui/WorkflowInspection.svelte';
+  import QuantityStepper from '$lib/components/ui/QuantityStepper.svelte';
   import GeneratedSupplies from './GeneratedSupplies.svelte';
+  import ShopGoodCard from './ShopGoodCard.svelte';
   import { shopItemAssetPublicUrl } from '$lib/game/shop-runtime-assets';
   import { sceneRuntimeAssetPublicUrl, type SceneRuntimeAssetId } from '$lib/game/scene-runtime-assets';
   import { resolveBurnAction, waitForBurn, type BurnStyle, type ResolvedBurnAction } from '$lib/card-effects';
@@ -34,17 +36,29 @@
   let selectedProvisionKey = $state<string | null>(null);
   let detailMode = $state<'item' | 'expand' | 'provision' | null>(null);
   let detailQuantity = $state(1);
+  let availableStock = $state(0);
   let hydrated = $state(false);
   let preview = $state<GardenCommandPreview | null>(null);
   let previewPayload = $state<ShopPayload | null>(null);
   let previewSignature = $state('');
-  let pendingAction = $state<{ signature: string; actionId: string; revision: number } | null>(null);
+  let pendingAction = $state<{
+    signature: string;
+    actionId: string;
+    revision: number;
+    saveId: string;
+    commandKind: ShopCommand;
+    payload: ShopPayload;
+    preview: GardenCommandPreview;
+  } | null>(null);
   let pending = $state(false);
   let message = $state<string | null>(null);
   let messageError = $state(false);
   let previewForm: HTMLFormElement | undefined = $state();
   let commitForm: HTMLFormElement | undefined = $state();
   let previewRequest = 0;
+  let previewRevision = $state<number | null>(null);
+  let observedSaveRevision = $state(untrack(() => snapshot.save.revision));
+  let pendingRevisionRefresh = $state(false);
   let completedOrder = $state<CompletedOrder | null>(null);
   let refreshWarning = $state('');
   let receiptBurning = $state(false);
@@ -125,18 +139,20 @@
       };
     }
     if (detailMode === 'item' && selectedItem) {
-      const canBuy = selectedItem.remainingStock > 0 && hydrated && hasCurrentPreview && preview?.canCommit === true;
-      const price = preview?.goldCost ?? detailTotal;
+      const retryingUnknownOrder = !!pendingAction && messageError;
+      const canBuy = retryingUnknownOrder || quantityLimit > 0 && hydrated && hasCurrentPreview && preview?.canCommit === true;
+      const price = pendingAction?.preview.goldCost ?? preview?.goldCost ?? detailTotal;
       return {
         id: `good:${selectedItem.itemKey}`, title: selectedItem.name, description: effectDescription(selectedItem), eyebrow: 'Elara’s ledger', icon: itemIcon(selectedItem),
         meta: `${selectedItem.price} gold each · ${selectedItem.remainingStock} in stock`,
-        actionLabel: pending ? 'Checking order…' : pendingAction && messageError ? `Retry · Buy for ${price} gold` : canBuy ? `Buy for ${price} gold` : selectedItem.remainingStock === 0 ? 'Out of stock' : hasCurrentPreview && preview?.canCommit === false ? 'Order unavailable' : 'Preparing order…',
+        actionLabel: pending ? 'Checking order…' : pendingAction && messageError ? `Retry · Buy for ${price} gold` : canBuy ? `Buy for ${price} gold` : quantityLimit === 0 ? 'Out of stock' : hasCurrentPreview && preview?.canCommit === false ? 'Order unavailable' : 'Preparing order…',
         disabled: !canBuy || pending || receiptBurning
       };
     }
     if (detailMode === 'expand' && nextExpansion) {
-      const canBuy = hydrated && hasCurrentPreview && preview?.canCommit === true;
-      const price = preview?.goldCost ?? nextExpansion.price;
+      const retryingUnknownOrder = !!pendingAction && messageError;
+      const canBuy = retryingUnknownOrder || hydrated && hasCurrentPreview && preview?.canCommit === true;
+      const price = pendingAction?.preview.goldCost ?? preview?.goldCost ?? nextExpansion.price;
       return {
         id: `expansion:${nextExpansion.plotCount}`, title: `Expand to ${nextExpansion.plotCount} plots`, description: 'Open new ground for a larger garden and more room to grow.', eyebrow: 'Garden capacity', icon: '⌂',
         meta: `${capacity} plots now · ${price} gold`,
@@ -155,9 +171,69 @@
     ? { itemKey: selectedItem.itemKey, quantity: detailQuantity }
     : detailMode === 'expand' && nextExpansion ? { plotCount: nextExpansion.plotCount } : null);
   let detailTotal = $derived(selectedItem && Number.isFinite(detailQuantity) ? selectedItem.price * detailQuantity : 0);
-  let projectedGold = $derived((snapshot.save.gold ?? 0) - detailTotal);
-  let hasCurrentPreview = $derived(!!preview && !!currentPayload && previewSignature === signature(detailMode === 'expand' ? 'expand' : 'purchase', currentPayload));
+  let hasCurrentPreview = $derived(
+    !!preview && !!currentPayload &&
+    previewSignature === signature(detailMode === 'expand' ? 'expand' : 'purchase', currentPayload) &&
+    previewRevision === snapshot.save.revision && preview.basedOnRevision === previewRevision
+  );
+  let quantityLimit = $derived(selectedItem ? Math.min(20, Math.max(0, availableStock)) : 0);
+  let authoritativeDetailTotal = $derived(hasCurrentPreview ? previewNumber('goldCost') : detailTotal);
+  let currentDetailGold = $derived(hasCurrentPreview && typeof preview?.goldBalance === 'number' ? preview.goldBalance : snapshot.save.gold ?? 0);
+  let projectedGold = $derived(currentDetailGold - authoritativeDetailTotal);
   let completedItem = $derived(completedOrder?.itemKey ? goods.find((item) => item.itemKey === completedOrder?.itemKey) ?? null : null);
+  let pendingRetryChoice = $derived.by((): WorkflowChoice => {
+    const action = pendingAction;
+    if (!action) return { id: 'shop-retry-unavailable', title: 'Order result unknown', disabled: true };
+    if (action.commandKind === 'purchase' && 'itemKey' in action.payload) {
+      const itemKey = action.payload.itemKey;
+      const item = goods.find((candidate) => candidate.itemKey === itemKey);
+      const quantity = 'quantity' in action.payload ? action.payload.quantity : 1;
+      const name = item?.name ?? itemKey;
+      return {
+        id: `shop-retry:${action.actionId}`,
+        title: name,
+        description: `Retry the same ${quantity} × ${name} purchase to recover its result.`,
+        eyebrow: 'Order recovery',
+        icon: item ? itemIcon(item) : '✿',
+        meta: `${action.preview.goldCost ?? 'Price checked'} gold`,
+        actionLabel: 'Retry purchase',
+        disabled: pending || !messageError
+      };
+    }
+    const plotCount = 'plotCount' in action.payload ? action.payload.plotCount : 0;
+    return {
+      id: `shop-retry:${action.actionId}`,
+      title: plotCount ? `Expand to ${plotCount} plots` : 'Garden expansion',
+      description: 'Retry the same expansion to recover its result.',
+      eyebrow: 'Order recovery',
+      icon: '⌂',
+      meta: `${action.preview.goldCost ?? 'Price checked'} gold`,
+      actionLabel: 'Retry garden expansion',
+      disabled: pending || !messageError
+    };
+  });
+
+  $effect(() => {
+    const revision = snapshot.save.revision;
+    const hasPendingAction = !!pendingAction;
+    const isCompleted = !!completedOrder;
+    const mode = detailMode === 'item' ? 'item' : detailMode === 'expand' ? 'expand' : null;
+
+    if (revision !== observedSaveRevision) {
+      observedSaveRevision = revision;
+      if (hasPendingAction) {
+        pendingRevisionRefresh = true;
+        return;
+      }
+      if (mode && !isCompleted) queuePreviewRefresh(revision, mode);
+      return;
+    }
+
+    if (!hasPendingAction && pendingRevisionRefresh) {
+      pendingRevisionRefresh = false;
+      if (mode && !isCompleted) queuePreviewRefresh(revision, mode);
+    }
+  });
 
   const categoryOptions: Array<{ key: ShopCategory; label: string; icon: string; description: string }> = [
     { key: 'seeds', label: 'Seeds', icon: '✿', description: 'Choose what takes root.' },
@@ -249,6 +325,7 @@
     detailMode = 'item';
     stage = 'inspection';
     detailQuantity = 1;
+    availableStock = Math.max(0, item.remainingStock);
     affordableOnly = false;
     message = null;
     messageError = false;
@@ -329,8 +406,16 @@
   }
 
   function correctQuantity() {
-    if (pendingAction || !selectedItem) return;
-    detailQuantity = Math.max(1, Math.min(20, previewNumber('remainingStock')));
+    if (pendingAction || !selectedItem || quantityLimit === 0) return;
+    detailQuantity = quantityLimit;
+    invalidatePreview();
+    void tick().then(() => requestPreview('item'));
+  }
+
+  function adjustQuantity(nextQuantity: number) {
+    if (pendingAction || !selectedItem || quantityLimit === 0) return;
+    if (!Number.isSafeInteger(nextQuantity) || nextQuantity < 1 || nextQuantity > quantityLimit) return;
+    detailQuantity = nextQuantity;
     invalidatePreview();
     void tick().then(() => requestPreview('item'));
   }
@@ -367,6 +452,16 @@
     preview = null;
     previewPayload = null;
     previewSignature = '';
+    previewRevision = null;
+  }
+
+  function queuePreviewRefresh(revision: number, expectedMode: 'item' | 'expand') {
+    if (pendingAction || completedOrder) return;
+    invalidatePreview();
+    void tick().then(() => {
+      if (pendingAction || completedOrder || snapshot.save.revision !== revision || detailMode !== expectedMode) return;
+      requestPreview(expectedMode);
+    });
   }
 
   function requestPreview(expectedMode: 'item' | 'expand') {
@@ -408,17 +503,52 @@
       }
       formData.set('commandKind', kind);
       formData.set('payload', JSON.stringify(payload));
+      const requestRevision = snapshot.save.revision;
+      const requestSignature = signature(kind, payload);
+      const expectedMode = kind === 'purchase' ? 'item' : 'expand';
       const requestId = ++previewRequest;
       pending = true;
       message = null;
-      return async ({ result }) => {
+      return async ({ result, update }) => {
         const data = 'data' in result ? result.data as { preview?: GardenCommandPreview; message?: string } | undefined : undefined;
         if (requestId !== previewRequest) return;
         pending = false;
         if (result.type === 'success' && data?.preview) {
+          const payloadStillCurrent = signature(kind, currentPayload) === requestSignature;
+          const revisionStillCurrent = snapshot.save.revision === requestRevision;
+          const previewRevisionMatches = data.preview.basedOnRevision === requestRevision;
+          if (!payloadStillCurrent || !revisionStillCurrent || !previewRevisionMatches) {
+            preview = null;
+            previewPayload = null;
+            previewSignature = '';
+            previewRevision = null;
+            if (!revisionStillCurrent && detailMode === expectedMode && !pendingAction) {
+              observedSaveRevision = snapshot.save.revision;
+              queuePreviewRefresh(snapshot.save.revision, expectedMode);
+            } else if (!payloadStillCurrent && revisionStillCurrent && detailMode === expectedMode && !pendingAction) {
+              queuePreviewRefresh(requestRevision, expectedMode);
+            } else if (!previewRevisionMatches && revisionStillCurrent && !pendingAction) {
+              await update({ reset: false, invalidateAll: true });
+              if (requestId === previewRequest && snapshot.save.revision !== requestRevision && detailMode === expectedMode) {
+                observedSaveRevision = snapshot.save.revision;
+                pendingRevisionRefresh = false;
+                queuePreviewRefresh(snapshot.save.revision, expectedMode);
+                return;
+              }
+              if (requestId === previewRequest && snapshot.save.revision === requestRevision && !pendingAction) {
+                message = 'The shop changed while you were choosing. Try adjusting the quantity for a fresh preview.';
+                messageError = true;
+              }
+            }
+            return;
+          }
           preview = data.preview;
           previewPayload = payload;
           previewSignature = signature(kind, payload);
+          previewRevision = requestRevision;
+          if (kind === 'purchase' && typeof data.preview.remainingStock === 'number') {
+            availableStock = Math.max(0, data.preview.remainingStock);
+          }
           messageError = false;
         } else {
           message = data?.message ?? 'Elara cannot prepare that preview right now.';
@@ -429,7 +559,12 @@
   }
 
   function confirmShopOrder() {
-    if (!pending && hasCurrentPreview && preview?.canCommit && !focusedChoice.disabled) commitForm?.requestSubmit();
+    if (pending) return;
+    if (pendingAction && messageError) {
+      commitForm?.requestSubmit();
+      return;
+    }
+    if (!pendingAction && hasCurrentPreview && preview?.canCommit === true && !focusedChoice.disabled) commitForm?.requestSubmit();
   }
 
   async function showReceiptAfterBurn() {
@@ -475,23 +610,43 @@
   }
 
   const commitPreview: SubmitFunction = ({ formData, cancel }) => {
-    if (!preview || !previewPayload || !hasCurrentPreview) {
-      cancel();
-      message = 'Ask for a fresh preview before confirming this order.';
-      messageError = true;
-      return;
+    let frozenAction = pendingAction;
+    if (frozenAction) {
+      if (!messageError) {
+        cancel();
+        return;
+      }
+    } else {
+      if (!preview || !previewPayload || !hasCurrentPreview || preview.canCommit !== true || preview.basedOnRevision !== snapshot.save.revision) {
+        cancel();
+        message = 'Ask for a fresh preview before confirming this order.';
+        messageError = true;
+        return;
+      }
+      if (preview.commandKind !== 'purchase' && preview.commandKind !== 'expand') {
+        cancel();
+        message = 'This shop order cannot be completed.';
+        messageError = true;
+        return;
+      }
+      frozenAction = {
+        signature: signature(preview.commandKind, previewPayload),
+        actionId: crypto.randomUUID(),
+        revision: snapshot.save.revision,
+        saveId: snapshot.save.id,
+        commandKind: preview.commandKind,
+        payload: previewPayload,
+        preview
+      };
+      pendingAction = frozenAction;
     }
-    const committedPreview = preview;
-    const committedPayload = previewPayload;
-    const currentSignature = signature(committedPreview.commandKind as ShopCommand, committedPayload);
-    if (!pendingAction || pendingAction.signature !== currentSignature || pendingAction.revision !== snapshot.save.revision) {
-      pendingAction = { signature: currentSignature, actionId: crypto.randomUUID(), revision: snapshot.save.revision };
-    }
-    formData.set('saveId', snapshot.save.id);
-    formData.set('actionId', pendingAction.actionId);
-    formData.set('expectedRevision', String(pendingAction.revision));
-    formData.set('commandKind', committedPreview.commandKind);
-    formData.set('payload', JSON.stringify(committedPayload));
+    const committedPreview = frozenAction.preview;
+    const committedPayload = frozenAction.payload;
+    formData.set('saveId', frozenAction.saveId);
+    formData.set('actionId', frozenAction.actionId);
+    formData.set('expectedRevision', String(frozenAction.revision));
+    formData.set('commandKind', frozenAction.commandKind);
+    formData.set('payload', JSON.stringify(frozenAction.payload));
     pending = true;
     message = null;
     return async ({ result, update }) => {
@@ -517,7 +672,7 @@
         } else if (committedPreview.commandKind === 'expand') {
           resolvedOrder = {
             kind: 'expand', name: 'Garden expanded', capacity: Number(resultData?.plotCount ?? 0),
-            cost: Number(resultData?.goldSpent ?? 0), previousGold: Number(snapshot.save.gold ?? 0),
+            cost: Number(resultData?.goldSpent ?? 0), previousGold: Number(resultData?.previousGold ?? committedPreview.goldBalance ?? snapshot.save.gold ?? 0),
             goldBalance: Number(resultData?.goldBalance ?? 0)
           };
           message = 'Garden expanded.';
@@ -526,6 +681,7 @@
         preview = null;
         previewPayload = null;
         previewSignature = '';
+        previewRevision = null;
         refreshWarning = '';
         try { await update({ reset: false, invalidateAll: true }); }
         catch { refreshWarning = 'Your order is confirmed, but updated stock could not be loaded. Refresh the shop before placing another order.'; }
@@ -567,11 +723,16 @@
     </div>
   {:else if item}
     {@const artUrl = itemArt(item)}
-    <div class="shop-hand-card good-card" data-good-key={item.itemKey} data-good-category={itemCategory(item)}>
-      <div class="shop-card-art good-art" aria-hidden="true"><span>{itemIcon(item)}</span>{#if artUrl}<img src={artUrl} alt="" onerror={(event) => event.currentTarget.remove()} />{/if}</div>
-      <div class="shop-card-copy"><p class="eyebrow">{itemCategory(item)}</p><h3>{item.name}</h3><p>{item.price} gold</p></div>
-      <div class="shop-card-meta"><span class:sold-out={item.remainingStock === 0}>{item.remainingStock === 0 ? 'Sold out' : `${item.remainingStock} in stock`}</span><span aria-hidden="true">↗</span></div>
-    </div>
+    <ShopGoodCard
+      {item}
+      eyebrow={itemCategory(item)}
+      detail={`${item.price} gold`}
+      meta={item.remainingStock === 0 ? 'Sold out' : `${item.remainingStock} in stock`}
+      icon={itemIcon(item)}
+      {artUrl}
+      category={itemCategory(item)}
+      unavailable={item.remainingStock === 0}
+    />
   {:else if expansion}
     <div class="shop-hand-card expansion-card" data-shop-category="garden">
       <div class="shop-card-art category-symbol" aria-hidden="true">⌂</div>
@@ -682,24 +843,21 @@
         <dl class="inspection-facts">
           <div><dt>Owned</dt><dd>{inventory.find((owned) => owned.itemKey === selectedItem.itemKey)?.quantity ?? 0}</dd></div>
         </dl>
-        {#if selectedItem.remainingStock > 0}
-          <label class="quantity-label" for="shop-quantity">Quantity</label>
-          <input id="shop-quantity" name="quantity" type="number" min="1" max="20" inputmode="numeric" aria-label="Quantity" disabled={!!pendingAction || pending} bind:value={detailQuantity} oninput={(event) => { detailQuantity = event.currentTarget.valueAsNumber; invalidatePreview(); void tick().then(() => requestPreview('item')); }} />
-          <p class="detail-total">Total {detailTotal} gold · {projectedGold} gold remaining.</p>
-        {/if}
+        <QuantityStepper value={detailQuantity} max={quantityLimit} disabled={!!pendingAction} onchange={adjustQuantity} />
+        <p class="detail-total">{hasCurrentPreview ? 'Total' : 'Estimated total'} {authoritativeDetailTotal} gold{#if projectedGold >= 0} · {projectedGold} gold remaining{/if}.</p>
         <form bind:this={previewForm} class="hidden-form" method="POST" action="?/preview" use:enhance={previewEnhancer('purchase', detailPayload)}>
           <input type="hidden" name="quantity" value={detailQuantity} />
         </form>
         <form bind:this={commitForm} class="hidden-form" data-shop-commit method="POST" action="?/command" use:enhance={commitPreview}></form>
-        {#if selectedItem.remainingStock === 0}
-          <p class="form-message error" role="alert"><strong>Out of stock.</strong> Restocks on tavern day {selectedItem.restockDay}.</p>
+        {#if quantityLimit === 0}
+          <p class="form-message error" role="alert"><strong>Out of stock.</strong> Restocks on tavern day {hasCurrentPreview && typeof preview?.restockDay === 'number' ? preview.restockDay : selectedItem.restockDay}.</p>
         {:else if hasCurrentPreview && preview?.canCommit === false}
           {#if previewStatus() === 'insufficient_gold'}
             <p class="form-message error" role="alert"><strong>Not enough gold.</strong> Need {previewNumber('goldDeficit')} more gold.</p>
             <button class="market-control" type="button" onclick={showAffordableGoods}>View affordable goods</button>
           {:else if previewStatus() === 'exceeds_stock'}
             <p class="form-message error" role="alert">Only {preview.remainingStock ?? 0} left.</p>
-            <button class="market-control" type="button" onclick={correctQuantity}>Use available quantity</button>
+            {#if quantityLimit > 0}<button class="market-control" type="button" onclick={correctQuantity}>Use available quantity</button>{/if}
           {:else}
             <p class="form-message error" role="alert">This order cannot be completed.</p>
           {/if}
@@ -735,6 +893,18 @@
         {:else if !hasCurrentPreview && !messageError}
           <p class="shop-muted" role="status">Checking Elara’s ledger…</p>
         {/if}
+      {/snippet}
+    </WorkflowInspection>
+  {:else if pendingAction && messageError}
+    <WorkflowInspection
+      item={pendingRetryChoice}
+      onconfirm={confirmShopOrder}
+      confirmLabel={pendingRetryChoice.actionLabel}
+      pending={pending}
+      error={message}
+    >
+      {#snippet options()}
+        <form bind:this={commitForm} class="hidden-form" data-shop-commit method="POST" action="?/command" use:enhance={commitPreview}></form>
       {/snippet}
     </WorkflowInspection>
   {:else if detailMode === 'provision' && selectedProvision && supplies}
@@ -787,7 +957,6 @@
   .market-control:focus-visible { outline: 2px solid #ffe49c; outline-offset: 2px; }
   .shop-hand-card { display: grid; height: 100%; min-height: 12rem; grid-template-rows: minmax(4rem, auto) 1fr auto; gap: .5rem; }
   .shop-card-art { position: relative; display: grid; min-height: 4.4rem; place-items: center; overflow: hidden; color: #f0d58c; background: radial-gradient(circle, #3d2a14, #120c06); font-size: 2.3rem; }
-  .shop-card-art img { position: absolute; inset: .25rem; width: calc(100% - .5rem); height: calc(100% - .5rem); object-fit: contain; }
   .category-symbol { width: 4rem; min-height: 4rem; border: 1px solid #8b6d37; border-radius: 50%; background: radial-gradient(circle, #583d1e, #1a1007); }
   .shop-card-copy { min-width: 0; align-self: center; }
   .shop-card-copy .eyebrow { color: #b6d382; font: 600 .62rem 'Cinzel', serif; letter-spacing: .1em; text-transform: uppercase; }
@@ -803,8 +972,6 @@
   .inspection-facts div { display: flex; justify-content: space-between; gap: .75rem; }
   .inspection-facts dt { color: #c7b991; }
   .inspection-facts dd { margin: 0; color: #f0d58c; text-align: right; }
-  .quantity-label { color: #d4c39f; font-size: .78rem; }
-  .shop-market input[type='number'] { width: 100%; min-width: 0; min-height: 44px; padding: .45rem .55rem; border: 1px solid #755a2d; border-radius: .35rem; color: #f1e6ca; background: #0c0804; }
   .detail-total { margin: -.2rem 0 0; color: #d3bb7d; font-size: .8rem; }
   .hidden-form { display: none; }
   .form-message { margin: 0; color: #d5e2b7; font-size: .8rem; line-height: 1.45; }

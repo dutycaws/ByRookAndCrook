@@ -12,12 +12,17 @@ uses the centered enlarged card approved during the prototype refinement.
 
 ## Route responsibilities
 
-- Bar: directly select a patron, then navigate their actions, conversation,
-  offerings, and journal through the hand and folio. Dialogue recovery and
+- Bar: directly select a patron to see their resident details immediately, then
+  navigate conversation and offerings through the hand. A Journal button opens
+  the floating history folio. Dialogue recovery and
   settlement remain owned by the existing real game flows.
-- Garden: directly select a plot, then use its contextual hand. Batch and move
+- Garden: directly select a plot, then use its contextual hand. Plant opens a
+  hand of owned seeds using the Shop's shared item-card presentation, with stock
+  quantities and seed-specific planting guidance. Batch and move
   modes still target actual plots. Command previews, action IDs, revision checks,
-  and unknown-outcome retries remain in the existing command layer.
+  and unknown-outcome retries remain in the existing command layer. Manage colony
+  opens feeding, honey extraction, treatment, and splitting action cards in the
+  same scene hand, with quantity choices and authoritative previews in the folio.
 - Shop: category and item hands include garden expansion. Item inspection leads
   to the existing preview and purchase commands; generated supplies retain their
   separate purchase action.
@@ -84,3 +89,49 @@ Screenshots are saved outside the repository, in `/tmp/rook-unified-implementati
 | Bakery | [Before](/tmp/rook-unified-implementation/bakery-before.jpg) | [After](/tmp/rook-unified-implementation/bakery-after.jpg) |
 
 Additional captures: [Bar chat](/tmp/rook-unified-implementation/bar-chat-after.jpg), [right journal folio](/tmp/rook-unified-implementation/bar-journal-after.jpg), [Bar mobile](/tmp/rook-unified-implementation/bar-after-mobile.jpg), [Garden mobile](/tmp/rook-unified-implementation/garden-after-mobile.jpg), [Shop mobile](/tmp/rook-unified-implementation/shop-after-mobile.jpg), [Shop receipt](/tmp/rook-unified-implementation/shop-receipt-after.jpg), [Brewery ingredient inspection](/tmp/rook-unified-implementation/brewery-inspection-mobile.jpg), [Bakery mobile result](/tmp/rook-unified-implementation/bakery-after-mobile.jpg).
+
+## Resident details correction
+
+Resident details now appear immediately on NPC selection. The two details/history
+cards were removed; Journal is a persistent contextual button. Opening history
+preserves the underlying action, conversation, or serving menu, and closing it
+restores focus to Journal. The default profile no longer repeats the scene's
+resident name visually.
+
+Verified direct selection, Journal opening and Escape restoration from actions,
+conversation choices and the active composer, plus history close from serving.
+The composer stays mounted and returns when history closes. Phone layout at
+390 × 844 has no page-width overflow; details follow the hand below the scene.
+`npm run check` returned zero errors and warnings; `git diff --check` passed.
+No gameplay transactions were needed for this correction.
+
+Local correction screenshots: [Before](/tmp/rook-unified-implementation/bar-details-correction-before.jpg),
+[Details after](/tmp/rook-unified-implementation/bar-details-correction-after.jpg),
+[Journal after](/tmp/rook-unified-implementation/bar-journal-correction-after.jpg),
+[Mobile](/tmp/rook-unified-implementation/bar-details-correction-mobile.jpg).
+
+## Garden seed and colony hands
+
+Plant opens a seed-only hand with owned quantities and the same `ShopGoodCard`
+face and artwork used by the Shop. Selecting a seed requests the existing
+planting preview; confirmation still uses the existing command path. Escape
+returns to the chosen seed. Empty inventory has a shop destination. A planting
+preview response is discarded if the player changes plots or leaves that menu.
+
+After Manage colony, the main scene hand offers Feed colony and Extract honey,
+alongside the existing treatment and splitting actions. Only the selected
+action's quantity or supply controls appear. Authoritative previews use the
+shared centered confirmation, preserving the existing command IDs, revisions,
+and retry behavior. The folio uses dividers rather than nested cards, and preview
+metadata and duplicate rejection messages are omitted from the player view.
+
+Local evidence: [Seed hand before](/tmp/rook-unified-implementation/garden-seed-hand-before.jpg),
+[Seed hand after](/tmp/rook-unified-implementation/garden-seed-hand-after.jpg),
+[Colony hand](/tmp/rook-unified-implementation/garden-apiary-hand-after.jpg),
+[Extraction preview](/tmp/rook-unified-implementation/garden-apiary-preview-after.jpg).
+
+Verified the seed hand and colony workflows in the running browser on desktop and at 390 × 844. Seed artwork loads, arrow keys move between cards, and Enter opens the existing planting preview. Extraction opens quantity controls and the authoritative preview. Zero-feed inventory produces a blocked confirmation. Escape and Back restore focus to the chosen seed or colony action; Back then returns to Apiary navigation. The mobile hand scrolls horizontally without page-width overflow. Shared card effects retain reduced-motion handling.
+
+`npm run check` passes with zero errors and warnings; `npm run build` passes. `git diff --check` passes. Planting, feeding, and extraction were verified through previews without applying game mutations. Empty seed inventory and command retry states were preserved in code but were not forced in the live save.
+
+Mobile evidence: [Seed hand](/tmp/rook-unified-implementation/garden-seed-hand-mobile.jpg), [Colony hand](/tmp/rook-unified-implementation/garden-apiary-hand-mobile.jpg), [Extraction preview](/tmp/rook-unified-implementation/garden-apiary-preview-mobile.jpg). Screenshots remain local, outside the repository.

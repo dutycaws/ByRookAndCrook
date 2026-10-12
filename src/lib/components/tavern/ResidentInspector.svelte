@@ -85,7 +85,7 @@
     <header class="folio-heading">
       <div class="folio-identity">
         <p class="folio-eyebrow">{interactionOpen ? 'A moment at the bar' : 'Resident'}</p>
-        <h2 id="resident-profile-title">{patron.name}</h2>
+        <h2 id="resident-profile-title" class="sr-only">Resident details for {patron.name}</h2>
         <div class="folio-meta">
           <span>{patron.title}</span>
           {#if relationshipStage}<span class="relationship-stage">{relationshipStage}</span>{/if}
