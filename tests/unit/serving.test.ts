@@ -15,6 +15,23 @@ const snapshot = {
 };
 
 describe('bar snapshot boundary', () => {
+  it('retains committed relationship feedback and earned trinkets through the route boundary', () => {
+    const projected = {
+      ...structuredClone(snapshot),
+      roster: [{ ...snapshot.roster[0], relationshipStage: 'acquaintance',
+        recentRelationshipChange: { delta: -2, dayNumber: 1 },
+        relationshipRepair: { offenseDay: 1, distinctFollowThroughDays: 0, requiredDays: 2 } }],
+      trinkets: { collection: [{ id: crypto.randomUUID(), sourceNpcId: snapshot.roster[0]!.npcId,
+        sourceMilestoneId: 'first-milestone', catalogId: 'food_revenue', artworkId: 'copper-leaf',
+        name: 'Copper leaf', dedication: 'A reminder of the help you offered on the old road.',
+        slot: 0, earnedAt: '2026-10-04T00:00:00Z' }] }
+    };
+    const parsed = parseBarSnapshot(projected as Json);
+    expect(parsed?.trinkets).toEqual(projected.trinkets);
+    expect(parsed?.roster[0]?.recentRelationshipChange).toEqual({ delta: -2, dayNumber: 1 });
+    expect(parsed?.roster[0]?.relationshipRepair?.requiredDays).toBe(2);
+  });
+
   it('accepts a generated promoted resident through the same roster contract', () => {
     const promoted: any = structuredClone(snapshot);
     promoted.roster[0]!.origin = 'procedural';

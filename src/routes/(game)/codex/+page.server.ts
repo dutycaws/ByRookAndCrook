@@ -2,16 +2,21 @@ import { error } from '@sveltejs/kit';
 import { getSnapshot } from '$lib/server/game';
 import { parsePublicWorldCodex, parseRuntimeArtProjection, publicCodexArtPlaceholder } from '$lib/game/evolving-world';
 import { resolvePublicRuntimeArtPreviews } from '$lib/server/evolving-world-art/public-preview';
+import { getNpcHistory } from '$lib/server/npc-history';
+import { getTavernReports } from '$lib/server/tavern-reports';
+import type { Journal } from '$lib/game/dialogue';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals, setHeaders }) => {
+export const load: PageServerLoad = async ({ locals, setHeaders, url }) => {
   const user = await locals.getVerifiedUser();
   if (!user) error(401, 'Sign in to read the codex.');
   setHeaders({ 'cache-control': 'private, no-store' });
 
   try {
     const snapshot = await getSnapshot(locals.supabase);
-    if (!snapshot) return { snapshot: null, codex: null };
+    if (!snapshot) return { snapshot: null, codex: null, residents:[],journals:{} as Record<string,Journal>,hospitality:[],tavernReports:[] };
+    const history=await getNpcHistory(locals.supabase,{includeArchived:true,requested:url.searchParams.get('resident'),historyCursor:url.searchParams.get('questCursor')});
+    const tavernReports=await getTavernReports(locals.supabase);
     const rpc = locals.supabase.rpc.bind(locals.supabase) as any;
     const result = await rpc('world_public_codex', { p_save_id: snapshot.save.id });
     if (result.error) throw result.error;
@@ -23,7 +28,7 @@ export const load: PageServerLoad = async ({ locals, setHeaders }) => {
       const projection = projectionByEntityId.get(entity.id);
       return projection ? [projection] : [];
     }));
-    return { snapshot, codex: { ...codex, entities: codex.entities.map((entity) => ({ ...entity, art: art.get(entity.id) ?? publicCodexArtPlaceholder() })) } };
+    return { snapshot, ...history, tavernReports, codex: { ...codex, entities: codex.entities.map((entity) => ({ ...entity, art: art.get(entity.id) ?? publicCodexArtPlaceholder() })) } };
   } catch (cause) {
     console.error('world_public_codex_failed', { cause: cause instanceof Error ? cause.name : 'unknown' });
     error(500, 'The world codex is unavailable. Please try again.');

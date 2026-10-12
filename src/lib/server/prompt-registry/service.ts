@@ -42,12 +42,13 @@ export class PromptRegistryService {
     return this.resolve(result.data);
   }
 
-  async recordSafeRun(input: { executionId: string; attempt?: number; workflow: string; nodeKey: string; prompt: PromptSnapshot; status: 'started' | 'completed' | 'failed' | 'reused' | 'skipped'; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; errorCode?: string }): Promise<void> {
+  async recordSafeRun(input: { executionId: string; attempt?: number; workflow: string; nodeKey: string; prompt: PromptSnapshot; status: 'started' | 'completed' | 'failed' | 'reused' | 'skipped'; model?: string; durationMs?: number; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; errorCode?: string }): Promise<void> {
     const result = await this.client.rpc('prompt_registry_service_record_run', {
       p_execution_id: input.executionId, p_attempt: input.attempt ?? 0, p_workflow: input.workflow, p_node_key: input.nodeKey, p_prompt_key: input.prompt.key,
       p_release_id: input.prompt.releaseId, p_revision_id: input.prompt.revisionId, p_status: input.status,
       p_model: input.model ?? null, p_duration_ms: input.durationMs ?? null, p_input_tokens: input.inputTokens ?? null,
-      p_output_tokens: input.outputTokens ?? null, p_error_code: input.errorCode ?? null
+      p_output_tokens: input.outputTokens ?? null, p_error_code: input.errorCode ?? null,
+      p_cached_input_tokens: input.cachedInputTokens ?? null, p_cache_write_input_tokens: input.cacheWriteInputTokens ?? null
     });
     if (result.error) throw new Error(result.error.message);
   }

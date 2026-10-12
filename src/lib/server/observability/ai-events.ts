@@ -10,7 +10,7 @@ export const AI_OBSERVABILITY_VERSION = 'ai-observability-v1' as const;
 
 export type AiWorkflow = 'dialogue' | 'world_settlement';
 export type AiEventStatus = 'started' | 'completed' | 'failed' | 'skipped' | 'reused';
-export type AiTokenUsage = { input: number; output: number };
+export type AiTokenUsage = { input: number; output: number; cachedInputTokens?: number; cacheWriteInputTokens?: number };
 /**
  * Bounded, content-free measurements from the shared NPC-memory context path.
  * These are deliberately measurements rather than a context manifest: source
@@ -130,7 +130,14 @@ function tokenUsage(value: unknown): AiTokenUsage | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
   if (!finiteInteger(candidate.input, 0, 10_000_000) || !finiteInteger(candidate.output, 0, 10_000_000)) return undefined;
-  return { input: candidate.input, output: candidate.output };
+  const cachedInputTokens = finiteInteger(candidate.cachedInputTokens, 0, candidate.input as number) ? candidate.cachedInputTokens : undefined;
+  const cacheWriteInputTokens = finiteInteger(candidate.cacheWriteInputTokens, 0, candidate.input as number) ? candidate.cacheWriteInputTokens : undefined;
+  return {
+    input: candidate.input,
+    output: candidate.output,
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cacheWriteInputTokens !== undefined ? { cacheWriteInputTokens } : {})
+  };
 }
 
 function memoryContextMeasurements(value: unknown): AiMemoryContextMeasurements | undefined {

@@ -11,7 +11,7 @@ import { SETTLEMENT_PROMPT_KEY, releaseTextPrompt } from '$lib/server/prompt-reg
 import { promptRegistryService, type PromptRegistryService } from '$lib/server/prompt-registry/service';
 import {
   CANON_CHECKPOINT_STAGE, PROCEDURAL_WORLD_CHECKPOINT_STAGE, SETTLEMENT_PROVIDER_CALL_BUDGETS, SOCIAL_ENCOUNTER_CHECKPOINT_STAGE, frozenCanonEventContext, frozenEvolutionContext, parseCriticOutput, parseFrozenCanonEventProposal, parsePublicDigest, parseSettlementClaim, proposalBeliefsAreAttributed, proposalEvidenceIsAuthorized, SettlementProviderError,
-  type ProviderResult, type ProviderStage, type SettlementClaim, type SettlementProvider
+  type ProviderResult, type ProviderStage, type ProviderUsage, type SettlementClaim, type SettlementProvider
 } from './settlement-contracts';
 
 type RpcResult = { data: unknown; error: { message: string } | null };
@@ -41,7 +41,22 @@ function checkpoint(claim: SettlementClaim, stage: string): Record<string, unkno
   const match = claim.checkpoints.find((candidate) => candidate.stage === stage);
   return match?.payload ?? null;
 }
-function usage(result: ProviderResult): Record<string, unknown> { return { input: result.usage.input, output: result.usage.output, durationMs: result.durationMs }; }
+function cacheBreakdown(value: Partial<ProviderUsage>): Pick<ProviderUsage, 'cachedInputTokens' | 'cacheWriteInputTokens'> {
+  if (value.input === undefined) return {};
+  const cached = value.cachedInputTokens;
+  const cacheWrite = value.cacheWriteInputTokens;
+  const cachedFits = cached !== undefined && cached <= value.input;
+  const cacheWriteFits = cacheWrite !== undefined && cacheWrite <= value.input;
+  const combinedFits = cached === undefined || cacheWrite === undefined || cached + cacheWrite <= value.input;
+  return {
+    ...(cachedFits && combinedFits ? {cachedInputTokens:cached} : {}),
+    ...(cacheWriteFits && combinedFits ? {cacheWriteInputTokens:cacheWrite} : {})
+  };
+}
+function usage(result: ProviderResult): Record<string, unknown> {
+  return { input: result.usage.input, output: result.usage.output, durationMs: result.durationMs,
+    ...cacheBreakdown(result.usage) };
+}
 function publicFacts(claim: SettlementClaim, accepted: boolean): Record<string, unknown> {
   // This is intentionally constructed, never copied, from the private frozen snapshot.
   return { dayNumber: claim.inputSnapshot.dayNumber, jobKind: claim.kind, acceptedProposal: accepted, knownPublicEntityIds: Array.isArray(claim.inputSnapshot.publicEntityIds) ? claim.inputSnapshot.publicEntityIds.filter((id): id is string => typeof id === 'string').slice(0, 12) : [] };
@@ -204,12 +219,21 @@ export async function runSettlementClaim(client: SettlementWorkerClient, rawClai
     await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'started',attempt:claim.attempt});
     try {
       const result = await provider.generate(stage, payload, controller.signal,prompt);
-      await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'completed',model:result.model,durationMs:result.durationMs,inputTokens:result.usage.input,outputTokens:result.usage.output}).catch(()=>{});
+      await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'completed',model:result.model,durationMs:result.durationMs,inputTokens:result.usage.input,outputTokens:result.usage.output,...cacheBreakdown(result.usage)}).catch(()=>{});
       await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'completed',attempt:claim.attempt,durationMs:result.durationMs,model:result.model,tokenUsage:result.usage});
       return result;
     } catch (cause) {
-      await runtime.promptRegistry?.recordSafeRun({executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'failed',errorCode:'provider_failed'}).catch(()=>{});
-      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,errorCode:controller.signal.aborted?'provider_timeout':errorCode(cause)});
+      const providerFailure=cause instanceof SettlementProviderError ? cause : null;
+      const failedUsage=providerFailure?.usage;
+      await runtime.promptRegistry?.recordSafeRun({
+        executionId:correlationId,attempt:claim.attempt,workflow:'world_settlement',nodeKey:stage,prompt,status:'failed',errorCode:'provider_failed',
+        ...(providerFailure?.model !== undefined ? {model:providerFailure.model} : {}),
+        ...(providerFailure?.durationMs !== undefined ? {durationMs:providerFailure.durationMs} : {}),
+        ...(failedUsage?.input !== undefined ? {inputTokens:failedUsage.input} : {}),
+        ...(failedUsage?.output !== undefined ? {outputTokens:failedUsage.output} : {}),
+        ...cacheBreakdown(failedUsage ?? {})
+      }).catch(()=>{});
+      await emitAiObservability(observability,{correlationId,workflow:'world_settlement',stage,status:'failed',attempt:claim.attempt,...(providerFailure?.durationMs !== undefined ? {durationMs:providerFailure.durationMs} : {}),errorCode:controller.signal.aborted?'provider_timeout':errorCode(cause)});
       throw cause;
     }
   };

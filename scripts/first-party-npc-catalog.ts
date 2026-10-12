@@ -11,6 +11,7 @@ const CATALOG_DIRECTORY = 'supabase/content/first-party-npcs';
  * checks. The JSON files remain the only authored source.
  */
 export const GENERATED_CATALOG_MIGRATION = 'supabase/migrations/202609190064_first_party_npc_catalog.generated.sql';
+export const GENERATED_ACTIVE_CATALOG_MIGRATION = 'supabase/migrations/20261004203029_first_party_npc_catalog_v2.sql';
 const stable = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
@@ -44,10 +45,10 @@ export function catalogPublications(catalogs: FirstPartyNpcCatalog[]): CatalogRe
   }))).sort((left, right) => left.startingRosterOrder - right.startingRosterOrder || left.versionNumber - right.versionNumber || left.releaseKey.localeCompare(right.releaseKey));
 }
 
-/** Deterministic adapter: all table shape and validation remain in the private install function. */
-export function generateFirstPartyCatalogSql(catalogs = readFirstPartyCatalogs()): string {
+/** Deterministic adapter for the original v1 installation migration. */
+function generateCatalogInstallSql(publications: CatalogReleasePublication[]): string {
   const lines = ['-- GENERATED from supabase/content/first-party-npcs. Do not edit.', 'begin;'];
-  for (const release of catalogPublications(catalogs)) {
+  for (const release of publications) {
     const canonicalSheet = canonicalNpcSheet(release.sheet as never);
     if (canonicalSheet.includes('$npc$')) {
       throw new Error(`${release.identityKey}/${release.releaseKey} contains the reserved SQL catalog delimiter.`);
@@ -59,13 +60,30 @@ export function generateFirstPartyCatalogSql(catalogs = readFirstPartyCatalogs()
   return lines.join('\n');
 }
 
+/** Keep the original installation migration frozen at v1 for an additive reset path. */
+export function generateFirstPartyCatalogSql(catalogs = readFirstPartyCatalogs()): string {
+  const v1 = catalogPublications(catalogs).filter((release) => release.versionNumber === 1).map((release) => ({ ...release, isCurrent: true }));
+  return generateCatalogInstallSql(v1);
+}
+
+/** Publish each identity's currently selected version through a new migration. */
+export function generateActiveFirstPartyCatalogSql(catalogs = readFirstPartyCatalogs()): string {
+  return generateCatalogInstallSql(catalogPublications(catalogs).filter((release) => release.isCurrent));
+}
+
 function main(): void {
   const mode = process.argv.includes('--generate') ? 'generate' : 'check';
-  const generated = generateFirstPartyCatalogSql();
-  if (mode === 'generate') { writeFileSync(GENERATED_CATALOG_MIGRATION, generated); console.info(`Wrote ${GENERATED_CATALOG_MIGRATION}.`); return; }
-  const committed = readFileSync(GENERATED_CATALOG_MIGRATION, 'utf8');
-  if (generated !== committed) {
-    throw new Error(`${GENERATED_CATALOG_MIGRATION} is stale. Run npm run npc:catalog:generate and commit the result.`);
+  const generated = [
+    [GENERATED_CATALOG_MIGRATION, generateFirstPartyCatalogSql()],
+    [GENERATED_ACTIVE_CATALOG_MIGRATION, generateActiveFirstPartyCatalogSql()]
+  ] as const;
+  if (mode === 'generate') {
+    for (const [path, sql] of generated) { writeFileSync(path, sql); console.info(`Wrote ${path}.`); }
+    return;
+  }
+  for (const [path, sql] of generated) {
+    const committed = readFileSync(path, 'utf8');
+    if (sql !== committed) throw new Error(`${path} is stale. Run npm run npc:catalog:generate and commit the result.`);
   }
   console.info(`First-party NPC catalog: ${catalogPublications(readFirstPartyCatalogs()).length} immutable release publications are valid and deterministic.`);
 }

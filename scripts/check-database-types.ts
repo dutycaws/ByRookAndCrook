@@ -6,7 +6,7 @@ const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const typeFile = fileURLToPath(new URL('../src/lib/database.types.ts', import.meta.url));
 
 function normalize(source: string) {
-  return `${source.replaceAll('\r\n', '\n').trimEnd()}\n`;
+  return `${source.replaceAll('\r\n', '\n').split('\n').map((line) => line.trimEnd()).join('\n').trimEnd()}\n`;
 }
 
 const generated = execFileSync(

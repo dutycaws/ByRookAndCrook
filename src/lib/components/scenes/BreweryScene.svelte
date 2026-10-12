@@ -171,7 +171,8 @@
       durationSeconds: session.durationSeconds,
       countdownSeconds: session.countdownSeconds
     };
-    controller = restoreGuidedStirState(localStorage.getItem(trackedStorageKey), config, Date.now(), reducedMotion);
+    const storedState = trackedStorageKey ? localStorage.getItem(trackedStorageKey) : null;
+    controller = restoreGuidedStirState(storedState, config, Date.now(), reducedMotion);
     emit(Date.now(), true);
     scheduleFrame();
   }

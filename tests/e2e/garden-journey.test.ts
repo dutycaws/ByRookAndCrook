@@ -284,12 +284,12 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
     await page.goto(`/bar?npc=${resident!.instanceId}`);
     await expect(page.locator('.tavern-scene')).toBeVisible();
     await page.getByRole('button', { name: `Serve to ${resident!.name}`, exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('Earned 10 gold');
+    await expect(page.getByRole('region', { name: 'Serve food or drink' }).getByRole('status')).toContainText('Earned 10 gold');
     await expect(page.getByLabel('Tavern gold')).toContainText('10 gold');
     await expect(page.getByRole('heading', { name: 'No hospitality ready to serve' })).toBeVisible();
     await page.reload();
     await expect(page.getByLabel('Tavern gold')).toContainText('10 gold');
-    await expect(page.locator('.serving-history li')).toContainText('Relationship +1');
+    await expect(page.locator('.serving-history li')).toContainText('Trust grew');
     await page.getByRole('link', { name: 'Brewery', exact: true }).click();
     await page.getByRole('button', { name: 'Rest and begin next day' }).click();
     await expect(page.getByText('Tavern day 2 · Daily craft')).toBeVisible();

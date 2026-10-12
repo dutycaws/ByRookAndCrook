@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import sharp from 'sharp';
 import { createTestPlayer } from '../helpers/local-supabase';
 import { createNpcSheet } from '../../src/lib/game/community-npc-ui';
+import type { NpcSheet } from '../../src/lib/game/npc-sheet';
 import type { Json } from '../../src/lib/database.types';
 
 /**
@@ -51,7 +52,7 @@ async function createDraft(player: Awaited<ReturnType<typeof createAuthor>>, nam
 async function workspace(player: Awaited<ReturnType<typeof createAuthor>>, npcId: string) {
   const result = await player.client.rpc('npc_author_workspace_detail', { p_npc_id: npcId });
   if (result.error) throw result.error;
-  return result.data as unknown as { draft: { sheet: { identity: Record<string, string> } } };
+  return result.data as unknown as { draft: { sheet: NpcSheet } };
 }
 
 async function completeAssistanceFixture(player: Awaited<ReturnType<typeof createAuthor>>, npcId: string, revision: number) {
@@ -249,6 +250,65 @@ test('guided authoring saves a readable world and story arc across reloads', asy
     const textareasAreGuided = await page.locator('textarea').evaluateAll((fields) => fields.every((field) => !(field as HTMLTextAreaElement).value.trim().startsWith('[')));
     expect(textareasAreGuided).toBe(true);
     await expect(page.locator('input[type="hidden"][name="entities"]')).toHaveCount(1);
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('first-quest keepsakes and setback warnings remain editable and persist after reload', async ({ page }) => {
+  const player = await createAuthor();
+  const npcId = await createDraft(player, `Keepsake Courier ${crypto.randomUUID().slice(0, 6)}`);
+  try {
+    await signIn(page, player);
+    await page.goto(`/authoring/npcs/${npcId}?section=sheet`);
+    const taskMenu = page.getByRole('navigation', { name: 'NPC sheet tasks' });
+    await taskMenu.getByRole('button', { name: /Story:/ }).click();
+    const storyTasks = page.getByRole('navigation', { name: 'Story tasks' });
+    await storyTasks.getByRole('button', { name: 'Goal' }).click();
+    await page.getByLabel('Effect').selectOption('harvest_quality');
+    await page.getByLabel('Supported artwork').selectOption('seed-glass');
+    await page.getByLabel('Reward name').fill('A seed for the homeward road');
+    await page.getByLabel('Personal dedication').fill('A small green promise to remember the care shown along the road.');
+
+    await storyTasks.getByRole('button').nth(1).click();
+    const setbacks = page.locator('.advanced-loss').first();
+    await setbacks.locator('summary').click();
+    await page.getByLabel('This chapter can permanently remove the character').check();
+    await page.getByLabel('Repeated failed attempts can end this chapter permanently').check();
+    await page.getByLabel('Unsuccessful attempt allowance').selectOption('4');
+    const warningFields = setbacks.locator('.failure-warnings textarea');
+    await expect(warningFields).toHaveCount(3);
+    await warningFields.nth(0).fill('The first setback warns that another failure may force a change of course.');
+    await warningFields.nth(1).fill('The second setback warns that this chapter may soon have to end.');
+    await warningFields.nth(2).fill('The third setback warns that one final failure will end this chapter.');
+    await expect(page.getByRole('status', { name: 'Draft save status' })).toHaveText('Saved');
+
+    let saved = await workspace(player, npcId);
+    expect(saved.draft.sheet.campaign.initialQuestTrinket).toMatchObject({
+      catalogId: 'harvest_quality', artworkId: 'seed-glass', name: 'A seed for the homeward road'
+    });
+    expect(saved.draft.sheet.campaign.milestones[0]).toMatchObject({
+      failureCondition: { type: 'attempt_allowance_exhausted', maxAttempts: 4 },
+      warnings: [
+        { afterSetbacks: 1, text: 'The first setback warns that another failure may force a change of course.' },
+        { afterSetbacks: 2, text: 'The second setback warns that this chapter may soon have to end.' },
+        { afterSetbacks: 3, text: 'The third setback warns that one final failure will end this chapter.' }
+      ]
+    });
+
+    await page.reload();
+    await taskMenu.getByRole('button', { name: /Story:/ }).click();
+    await storyTasks.getByRole('button', { name: 'Goal' }).click();
+    await expect(page.getByLabel('Effect')).toHaveValue('harvest_quality');
+    await expect(page.getByLabel('Reward name')).toHaveValue('A seed for the homeward road');
+    await storyTasks.getByRole('button').nth(1).click();
+    const reloadedSetbacks = page.locator('.advanced-loss').first();
+    await reloadedSetbacks.locator('summary').click();
+    await expect(page.getByLabel('Repeated failed attempts can end this chapter permanently')).toBeChecked();
+    await expect(page.getByLabel('Unsuccessful attempt allowance')).toHaveValue('4');
+    await expect(reloadedSetbacks.locator('.failure-warnings textarea')).toHaveCount(3);
+    saved = await workspace(player, npcId);
+    expect(saved.draft.sheet.campaign.milestones[0].warnings?.[2].text).toBe('The third setback warns that one final failure will end this chapter.');
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }

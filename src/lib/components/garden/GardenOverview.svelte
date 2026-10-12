@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { GameSnapshot } from '$lib/game/contracts';
+  import type { GameSnapshot, GardenState } from '$lib/game/contracts';
 
   let { snapshot }: { snapshot: GameSnapshot } = $props();
 
@@ -24,18 +24,17 @@
         : []);
   }
 
-  let unlocked = $derived(snapshot.cells.filter((cell) => cell.unlocked !== false));
+  function forecastClues(day: GardenState['forecast'][number]): string[] {
+    const rain = day.rainfall >= 18 ? 'Steady rain' : day.rainfall >= 7 ? 'Passing showers' : day.rainfall > 0 ? 'A little rain' : 'Dry skies';
+    const drying = day.drying >= 10 ? 'Soil may dry quickly' : day.drying <= 4 ? 'Soil may hold moisture' : 'Gentle drying';
+    const light = day.lightDelta >= 5 ? 'Brighter light' : day.lightDelta <= -10 ? 'Less light' : 'Changing light';
+    return [rain, drying, light];
+  }
+
   let latestEvents = $derived(reportEvents(snapshot.garden?.latestReport));
 </script>
 
 <div class="garden-overview">
-  <dl class="craft-status-list">
-    <div><dt>Day</dt><dd>{snapshot.save.currentDay}</dd></div>
-    <div><dt>Plots</dt><dd>{snapshot.garden?.plotCount ?? unlocked.length}</dd></div>
-    <div><dt>Ready</dt><dd>{unlocked.filter((cell) => cell.harvestable).length}</dd></div>
-    <div><dt>Gold</dt><dd>{snapshot.save.gold ?? 0}</dd></div>
-  </dl>
-
   {#if snapshot.garden?.forecast.length}
     <section class="overview-section" aria-label="Three-day forecast">
       <p class="eyebrow">Three-day forecast</p>
@@ -44,7 +43,7 @@
           <div>
             <strong>Day {day.dayNumber}</strong>
             <span>{day.name}</span>
-            <small>Rain {day.rainfall} · Drying {day.drying >= 0 ? '+' : ''}{day.drying} · Light {day.lightDelta >= 0 ? '+' : ''}{day.lightDelta}</small>
+            <small>{forecastClues(day).join(' · ')}</small>
           </div>
         {/each}
       </div>
@@ -52,8 +51,8 @@
   {/if}
 
   {#if snapshot.garden?.latestReport}
-    <details class="overview-section daily-report" open={latestEvents.length > 0}>
-      <summary>Latest garden report</summary>
+    <details class="overview-section daily-report">
+      <summary>Latest garden report · {latestEvents.length} event{latestEvents.length === 1 ? '' : 's'}</summary>
       {#if reportSummary(snapshot.garden.latestReport)}
         <p>{reportSummary(snapshot.garden.latestReport)}</p>
       {/if}

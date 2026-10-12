@@ -1,13 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NpcSheet } from '$lib/game/npc-sheet';
 import { createNpcSheet } from '$lib/game/community-npc-ui';
 import { localScenePublicUrl, localSettingPublicUrl } from '$lib/server/community-npc-jobs/local-assets';
 import { authoringProviderAvailability, runAuthoringJob, runLocalAuthoringJob, runLocalNpcEvaluation, type CompletionClient } from '$lib/server/community-npc-jobs/runner';
 import { createAuthoringProvider, type AuthoringProvider } from '$lib/server/community-npc-jobs/provider';
 import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+import { captureMockedNpcProviderRequests } from '../helpers/capture-npc-provider-payloads';
 
 const promptRelease = fixturePromptRelease;
 const authoringRuntime = <T extends Record<string, unknown>>(runtime: T) => ({ ...runtime, promptRelease });
+afterEach(() => { captureMockedNpcProviderRequests('community-npc-jobs.test.ts'); vi.unstubAllGlobals(); });
 
 function sheet(): NpcSheet {
   const value = createNpcSheet('Mara Reed');
@@ -69,16 +71,25 @@ describe('community NPC authoring provider jobs', () => {
   });
 
   it('uses a strict Responses structured result for the configured OpenAI adapter', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ replacementJson: JSON.stringify({ ...sheet().identity, title: 'Trailwarden' }), explanation: 'Clarifies her role.' }) }] }] }), { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      const result = body.text.format.name === 'npc_authoring_assistance'
+        ? { replacementJson: JSON.stringify({ ...sheet().identity, title: 'Trailwarden' }), explanation: 'Clarifies her role.' }
+        : { reply: 'The old road is quiet tonight, but I still watch it.' };
+      return new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(result) }] }] }), { status: 200 });
+    });
     vi.stubGlobal('fetch', fetchMock);
-    try {
-      const result = await createAuthoringProvider({ NPC_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' }, promptRelease).assist({ section: 'identity', instruction: 'Clarify her role.', sheet: sheet() }, new AbortController().signal);
-      expect(result).toMatchObject({ replacement: { title: 'Trailwarden' }, explanation: 'Clarifies her role.' });
-      const [, request] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-      const body = JSON.parse(String(request.body));
-      expect(body).toMatchObject({ model: 'gpt-5.6-terra', store: false, text: { format: { type: 'json_schema', strict: true, name: 'npc_authoring_assistance' } } });
-      expect(body.input[1].content).toContain('replace_one_section');
-    } finally { vi.unstubAllGlobals(); }
+    const provider = createAuthoringProvider({ NPC_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' }, promptRelease);
+    const result = await provider.assist({ section: 'identity', instruction: 'Clarify her role.', sheet: sheet() }, new AbortController().signal);
+    expect(result).toMatchObject({ replacement: { title: 'Trailwarden' }, explanation: 'Clarifies her role.' });
+    const [, request] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(request.body));
+    expect(body).toMatchObject({ model: 'gpt-6-luna', store: false, text: { format: { type: 'json_schema', strict: true, name: 'npc_authoring_assistance' } } });
+    expect(body.input[1].content).toContain('replace_one_section');
+    await expect(provider.sandbox({ sheet: sheet(), turns: [{ role: 'keeper', content: 'How is the north road?' }] }, new AbortController().signal))
+      .resolves.toEqual({ reply: 'The old road is quiet tonight, but I still watch it.' });
+    const sandboxCall = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(sandboxCall[1].body))).toMatchObject({ model: 'gpt-6-luna', store: false, text: { format: { name: 'npc_authoring_sandbox' } } });
   });
 
   it('keeps local scene fixture failure explicit and deterministic evaluation structural', async () => {

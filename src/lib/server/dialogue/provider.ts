@@ -1,13 +1,19 @@
 import { schemas, matchesSchema, type Stage } from './schemas';
 import { PROMPT_VERSION } from './prompts';
 import type { PromptSnapshot } from '$lib/server/prompt-registry';
+import { npcTextModel } from '$lib/server/npc-model-routing';
+import { parseTextProviderUsage } from '$lib/server/provider-usage';
 export interface ContextCount { model: string; counterId: string; inputTokens: number; durationMs: number }
-export interface StageOutput { value: unknown; usage: { input: number; output: number }; model: string; durationMs: number; promptVersion: string; preflight?: { inputTokens: number; durationMs: number } }
+export interface StageOutput { value: unknown; usage: { input: number; output: number; cachedInputTokens?: number; cacheWriteInputTokens?: number }; model: string; durationMs: number; promptVersion: string; preflight?: { inputTokens: number; durationMs: number } }
 /** Prompt snapshots are supplied by the orchestrator after it resolves the
  * durable turn pin. Fixture implementations may ignore the fourth argument. */
 export interface DialogueProvider { contextIdentity?: string; countContext?(canonicalContext: string, signal: AbortSignal): Promise<ContextCount>; generate(stage: Stage, payload: unknown, signal: AbortSignal, prompt: PromptSnapshot): Promise<StageOutput> }
 export class ProviderUnavailable extends Error {
   constructor(message: string) { super(message); this.name = 'ProviderUnavailable'; }
+}
+/** A completed, non-refusal response that cannot be checkpointed safely. */
+export class ProviderStructuredOutputError extends ProviderUnavailable {
+  constructor(message: string) { super(message); }
 }
 export class ProviderContextBudgetError extends Error {
   constructor(message: string) { super(message); this.name = 'ProviderContextBudgetError'; }
@@ -52,9 +58,9 @@ export function createProvider(config: Record<string,string | undefined>): Dialo
   const provider = config.NPC_PROVIDER ?? 'openai';
   if (provider==='local') return { async countContext() { throw new ProviderUnavailable('Local model support is not implemented.'); }, async generate() { throw new ProviderUnavailable('Local model support is not implemented.'); } };
   if (provider!=='openai') throw new ProviderUnavailable('Unknown NPC provider.');
-  return { contextIdentity:`${config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna'}:openai-responses-input-tokens-v1`, async countContext(canonicalContext,signal) {
+  return { contextIdentity:`${npcTextModel(config,'context')}:openai-responses-input-tokens-v1`, async countContext(canonicalContext,signal) {
     if (!config.OPENAI_API_KEY) throw new ProviderUnavailable('OpenAI is not configured.');
-    const model=config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna'; const started=performance.now();
+    const model=npcTextModel(config,'context'); const started=performance.now();
     const response=await fetch('https://api.openai.com/v1/responses/input_tokens',{method:'POST',headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,input:canonicalContext}),signal});
     if(!response.ok) throw new ProviderContextBudgetError('The selected dialogue model does not support verified input-token counting.');
     const data=await response.json(); if(!Number.isSafeInteger(data?.input_tokens) || data.input_tokens<0) throw new ProviderContextBudgetError('The token-count service returned an invalid count.');
@@ -63,19 +69,22 @@ export function createProvider(config: Record<string,string | undefined>): Dialo
     if (!config.OPENAI_API_KEY) throw new ProviderUnavailable('OpenAI is not configured.');
     if (!prompt || prompt.promptType !== 'text_system') throw new ProviderUnavailable('The pinned dialogue prompt is unavailable.');
     const started=performance.now();
-    const model = stage==='deliberate' || stage==='speak' ? config.NPC_CHARACTER_MODEL ?? 'gpt-5.6-terra' : config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna';
+    const model = npcTextModel(config,stage==='deliberate' || stage==='speak' ? 'character' : 'context');
     const body = buildDialogueResponseBody(stage,payload,prompt,model);
     const preflight=await preflightOpenAiRequest(body,signal,config.OPENAI_API_KEY,config.NPC_MODEL_INPUT_CAPACITY);
     const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal});
     if(!response.ok) throw new ProviderUnavailable(`OpenAI request failed (${response.status}).`);
     const result=await response.json();
     if(result.status!=='completed') throw new ProviderUnavailable('OpenAI did not complete the generation.');
+    if(result.output?.some((item:any)=>item.type==='message' && item.content?.some((part:any)=>part.type==='refusal'))) {
+      throw new ProviderUnavailable('The model declined this conversation request. Please rephrase it.');
+    }
     const raw=stage==='investigate' ? result.output?.find((o:any)=>o.type==='function_call'&&o.name==='request_context')?.arguments
       : result.output?.filter((o:any)=>o.type==='message').flatMap((o:any)=>o.content).filter((o:any)=>o.type==='output_text').map((o:any)=>o.text).join('');
-    let value; try {value=JSON.parse(raw);} catch {throw new ProviderUnavailable('OpenAI returned an incomplete structured response.');}
-    if(!matchesSchema(value,schemas[stage])) throw new ProviderUnavailable('OpenAI returned an invalid structured response.');
+    let value; try {value=JSON.parse(raw);} catch {throw new ProviderStructuredOutputError('OpenAI returned an incomplete structured response.');}
+    if(!matchesSchema(value,schemas[stage])) throw new ProviderStructuredOutputError('OpenAI returned an invalid structured response.');
     // Preserve the checkpoint-compatible semantic version; the safe ledger
     // carries the pinned revision and content hash separately.
-    return {value,usage:{input:result.usage?.input_tokens??0,output:result.usage?.output_tokens??0},model,durationMs:Math.round(performance.now()-started),promptVersion:PROMPT_VERSION,preflight};
+    return {value,usage:parseTextProviderUsage(result.usage),model,durationMs:Math.round(performance.now()-started),promptVersion:PROMPT_VERSION,preflight};
   }};
 }

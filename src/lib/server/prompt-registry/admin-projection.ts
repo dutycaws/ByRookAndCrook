@@ -17,6 +17,8 @@ export type SafePromptExecutionRun = Readonly<{
   durationMs: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  cachedInputTokens: number | null;
+  cacheWriteInputTokens: number | null;
   errorCode: string | null;
   occurredAt: string;
 }>;
@@ -25,6 +27,9 @@ const isPromptKey = (value: string): value is PromptKey => (PROMPT_KEYS as reado
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function text(value: unknown): string | null { return typeof value === 'string' && value.length ? value : null; }
 function count(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
+function inputBreakdown(value: unknown, inputTokens: number | null): number | null {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && inputTokens !== null && (value as number) <= inputTokens ? value as number : null;
+}
 
 /** The browser receives this fixed operational projection only.  It is
  * deliberately incapable of carrying prompt text, input data, model output,
@@ -43,7 +48,14 @@ export function safePromptExecutionRuns(value: unknown): SafePromptExecutionRun[
     const occurredAt = text(row.occurredAt);
     const attempt = count(row.attempt);
     if (!executionId || !workflow || !node || !promptKey || !releaseId || !revisionId || !status || !occurredAt || attempt === null) return [];
-    return [{ executionId, attempt, workflow, node, promptKey, releaseId, revisionId, status, occurredAt, model: text(row.model), durationMs: count(row.durationMs), inputTokens: count(row.inputTokens), outputTokens: count(row.outputTokens), errorCode: text(row.errorCode) }];
+    const inputTokens = count(row.inputTokens);
+    let cachedInputTokens = inputBreakdown(row.cachedInputTokens, inputTokens);
+    let cacheWriteInputTokens = inputBreakdown(row.cacheWriteInputTokens, inputTokens);
+    if (cachedInputTokens !== null && cacheWriteInputTokens !== null && cachedInputTokens + cacheWriteInputTokens > inputTokens!) {
+      cachedInputTokens = null;
+      cacheWriteInputTokens = null;
+    }
+    return [{ executionId, attempt, workflow, node, promptKey, releaseId, revisionId, status, occurredAt, model: text(row.model), durationMs: count(row.durationMs), inputTokens, outputTokens: count(row.outputTokens), cachedInputTokens, cacheWriteInputTokens, errorCode: text(row.errorCode) }];
   });
 }
 

@@ -44,7 +44,7 @@ export type NpcMemoryOutcome =
 
 export type NpcMemorySummaryV2Provider = {
   preflight(input: { systemPrompt: string; payload: Record<string, unknown>; model: string; maxSummaryChars: number; maxCitations: number; maxBytes: number; signal: AbortSignal }): Promise<{ prepared: NpcMemorySummaryV2Prepared; inputTokens: number; durationMs: number }>;
-  generate(input: { prepared: NpcMemorySummaryV2Prepared; signal: AbortSignal }): Promise<{ result: Record<string, unknown>; model: string; providerRequestId?: string; inputTokens: number; outputTokens: number; durationMs: number }>;
+  generate(input: { prepared: NpcMemorySummaryV2Prepared; signal: AbortSignal }): Promise<{ result: Record<string, unknown>; model: string; providerRequestId?: string; inputTokens: number; outputTokens: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; durationMs: number }>;
 };
 export type NpcMemorySummaryV2Prepared = Readonly<{ body: Record<string, unknown>; model: string; inputTokens: number; maxSummaryChars: number; maxCitations: number }>;
 export type NpcMemoryEmbeddingPrepared = Readonly<{ body: Readonly<{ model: string; input: string; dimensions: number; encoding_format: 'float' }> }>;

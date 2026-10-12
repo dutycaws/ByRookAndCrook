@@ -4,6 +4,7 @@ import { QUEST_TRANSITION_PROPOSAL_CONTRACT } from '../../src/lib/server/evolvin
 import { SETTLEMENT_PROMPTS } from '../../src/lib/server/evolving-world/prompts';
 import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
 import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+import { captureMockedNpcProviderRequests } from '../helpers/capture-npc-provider-payloads';
 
 const context = () => ({
   terminalEventId: 'terminal-event-1', residentId: 'resident-1', frozenTargetRefs: ['millhaven', 'north-road'],
@@ -30,7 +31,7 @@ function generate(stage: Parameters<ReturnType<typeof createSettlementProvider>[
   return provider.generate(stage, payload, new AbortController().signal, fixturePromptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { captureMockedNpcProviderRequests('world-quest-transition-provider.test.ts'); vi.unstubAllGlobals(); });
 
 describe('quest transition provider stages', () => {
   it('includes the same complete inner proposal contract in proposer and repair source prompts', () => {
@@ -50,15 +51,27 @@ describe('quest transition provider stages', () => {
   it('validates frozen proposer output and uses a strict proposal schema', async () => {
     const requests: any[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url, init: RequestInit) => { requests.push(JSON.parse(String(init.body))); return String(url).endsWith('/input_tokens') ? new Response(JSON.stringify({input_tokens:5}),{status:200}) : completed({ proposalJson: JSON.stringify(proposal()) }); }));
-    await expect(generate('quest_transition_proposer', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier() })).resolves.toMatchObject({ value: { kind: 'successor' }, model: 'gpt-5.6-terra', promptVersion: 'quest-transition-v1' });
+    await expect(generate('quest_transition_proposer', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier() })).resolves.toMatchObject({ value: { kind: 'successor' }, model: 'gpt-6-luna', promptVersion: 'quest-transition-v1' });
     expect(requests[0].text.format).toMatchObject({ name: 'world_quest_transition_proposer', strict: true, schema: { additionalProperties: false, required: ['proposalJson'], properties: { proposalJson: { maxLength: 6000 } } } });
     expect(requests[0].input[0].content).toContain('frozen transition context');
+  });
+
+  it('captures the departure transition request from the production provider path', async () => {
+    const departure = { version: 'quest-transition-v1', kind: 'departure', terminalEventId: 'terminal-event-1', privateRationale: 'The road now leads beyond the village.', farewellText: 'I will remember your kindness.', publicNews: 'Lira has set out for the northern road.' };
+    const fetch = vi.fn(async (url: string) => String(url).endsWith('/input_tokens')
+      ? new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 })
+      : completed({ proposalJson: JSON.stringify(departure) }));
+    vi.stubGlobal('fetch', fetch);
+    const terminalContext = { ...frozenContext(), terminalEvent: { id: 'terminal-event-1', outcome: 'abandoned' } };
+    const dossier = { ...memoryDossier(), evidence: terminalContext };
+    await expect(generate('quest_transition_proposer', { context: context(), frozenContext: terminalContext, memoryDossier: dossier }))
+      .resolves.toMatchObject({ value: { kind: 'departure' }, model: 'gpt-6-luna' });
   });
 
   it('uses bounded critic instructions and rejects repairs or malformed payloads before fetch', async () => {
     const fetch = vi.fn(async (url) => String(url).endsWith('/input_tokens') ? new Response(JSON.stringify({input_tokens:5}),{status:200}) : completed({ decision: 'repair', instructions: [{ code: 'plan_shape', path: 'plan' }] }));
     vi.stubGlobal('fetch', fetch);
-    await expect(generate('quest_transition_critic', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() })).resolves.toMatchObject({ value: { decision: 'repair' }, model: 'gpt-5.6-luna' });
+    await expect(generate('quest_transition_critic', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() })).resolves.toMatchObject({ value: { decision: 'repair' }, model: 'gpt-6-luna' });
     await expect(generate('quest_transition_final_critic', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal() })).rejects.toMatchObject({ code: 'provider_malformed' });
     await expect(generate('quest_transition_repair', { context: context(), frozenContext: frozenContext(), memoryDossier: memoryDossier(), proposal: proposal(), instructions: [{ code: 'not-real', path: 'plan' }] })).rejects.toMatchObject({ code: 'provider_malformed' });
     await expect(generate('quest_transition_proposer', { context: { ...context(), frozenTargetRefs: ['unknown'], extra: true }, frozenContext: frozenContext(), memoryDossier: memoryDossier() })).rejects.toMatchObject({ code: 'provider_malformed' });
@@ -99,6 +112,7 @@ describe('quest transition provider stages', () => {
       expect(requests[0].body).toMatchObject({model:expect.any(String),input:expect.any(Array),text:expect.any(Object)});
       expect(JSON.stringify(requests[0].body.input)).toContain('memoryDossier');
       expect(requests).toHaveLength(accepted?2:1);
+      captureMockedNpcProviderRequests('world-quest-transition-provider.test.ts');
       vi.unstubAllGlobals();
     }
   });
@@ -114,7 +128,7 @@ describe('quest transition provider stages', () => {
       const provider=createSettlementProvider({OPENAI_API_KEY:'test-key',NPC_MODEL_INPUT_CAPACITY:'100000'});
       const run=()=>provider.generate(stage,payload,new AbortController().signal,fixturePromptRelease.prompts[SETTLEMENT_PROMPT_KEY[stage]]);
       if(accepted) await expect(run()).resolves.toBeTruthy(); else await expect(run()).rejects.toMatchObject({code:'provider_malformed'});
-      expect(fetch).toHaveBeenCalledTimes(accepted?2:1); vi.unstubAllGlobals();
+      expect(fetch).toHaveBeenCalledTimes(accepted?2:1); captureMockedNpcProviderRequests('world-quest-transition-provider.test.ts'); vi.unstubAllGlobals();
     }
   });
 

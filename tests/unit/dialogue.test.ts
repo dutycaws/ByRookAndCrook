@@ -1,4 +1,4 @@
-import { describe,it,expect } from 'vitest';
+import { describe,it,expect,vi } from 'vitest';
 import { mergeEnvironment } from '../../scripts/environment-merge';
 import { parseInput,runDialogue,validateDecision } from '../../src/lib/server/dialogue/orchestrator';
 import { createProvider, type DialogueProvider } from '../../src/lib/server/dialogue/provider';
@@ -58,6 +58,41 @@ function cognitionClient(base: Record<string, unknown>) {
   } as any;
 }
 describe('dialogue boundaries',()=>{
+  it.each(['recovers','malformed_twice','refusal','call_budget','incomplete_status'])('handles %s when serving mead produces malformed completed Remember JSON', async(mode)=>{
+    const base={instanceId:npcId,name:'Lira',recent:[],questStatus:'active',allowedTargets:[],hospitality:{beverage:'mead'}};
+    const original=cognitionClient(base);
+    let completes=0; let reserves=0; let memoryRequests=0;
+    const client={rpc(name:string,args?:Record<string,unknown>){
+      if(name==='npc_dialogue_complete') completes++;
+      if(name==='npc_dialogue_checkpoint' && args?.p_stage==='reserve') reserves++;
+      return original.rpc(name,args);
+    }} as any;
+    vi.stubGlobal('fetch',vi.fn(async(url:string)=>{
+      if(url.endsWith('/input_tokens')) return new Response(JSON.stringify({input_tokens:12}));
+      memoryRequests++;
+      const content=mode==='refusal' ? [{type:'refusal',refusal:'Test refusal'}]
+        : [{type:'output_text',text:memoryRequests===1 || mode==='malformed_twice' ? '{"memories":[' : '{"memories":[]}'}];
+      return new Response(JSON.stringify({status:mode==='incomplete_status' ? 'incomplete' : 'completed',usage:{input_tokens:12,output_tokens:4},output:[{type:'message',content}]}));
+    }));
+    const real=createProvider({OPENAI_API_KEY:'test-key',NPC_MODEL_INPUT_CAPACITY:'90000'});
+    const provider:DialogueProvider={async countContext(){return {model:'fixture',counterId:'fixture-counter',inputTokens:1,durationMs:1};},async generate(stage,payload,signal,prompt){
+      if(stage==='remember') return real.generate(stage,payload,signal,prompt);
+      const value=stage==='investigate' ? {kind:'social',needsMore:false,remember:true,requests:[]}
+        : stage==='deliberate' ? {stance:'respond',reaction:0,subject:'hospitality',evidence:'',intention:null}
+        : stage==='speak' ? {text:'Thank you for the mead.'} : {ok:true,issues:[]};
+      return {value,usage:{input:1,output:1},model:'fixture',durationMs:1,promptVersion:'fixture'};
+    }};
+    try {
+      const action=runDialogue(client,'33333333-3333-4333-8333-333333333333',{turnId,npcId,message:'Enjoy this mead.',expectedConversationSequence:0,interactionVersion:'dialogue-v2'},provider,{promptRegistry,maxCalls:mode==='call_budget' ? 5 : 8});
+      if(mode==='recovers') await expect(action).resolves.toMatchObject({status:'completed'});
+      else await expect(action).rejects.toMatchObject({status:503,code:'PROVIDER_FAILED'});
+      const retry=mode==='recovers' || mode==='malformed_twice';
+      expect(memoryRequests).toBe(retry ? 2 : 1);
+      expect(reserves).toBe(retry ? 6 : 5);
+      expect(completes).toBe(mode==='recovers' ? 1 : 0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('marks a claimed turn failed before returning a registry outage',async()=>{
     const calls:Array<{name:string;args:Record<string,unknown>}> = [];
     const signals:AbortSignal[] = [];

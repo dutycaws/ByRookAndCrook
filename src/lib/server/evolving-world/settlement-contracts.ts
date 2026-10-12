@@ -63,7 +63,7 @@ export function promptVersionForProviderStage(stage: ProviderStage): string {
 }
 export type SettlementJobKind = 'snapshot' | 'canon' | 'resident' | 'social_encounter' | 'procedural_world' | 'quest' | 'effects' | 'news' | 'finalize';
 
-export type ProviderUsage = { input: number; output: number };
+export type ProviderUsage = { input: number; output: number; cachedInputTokens?: number; cacheWriteInputTokens?: number };
 export type ProviderResult = { value: unknown; model: string; usage: ProviderUsage; durationMs: number; promptVersion: string };
 export type SettlementProviderDiagnosticReason =
   | 'provider_payload_contract_invalid'
@@ -96,7 +96,10 @@ export class SettlementProviderError extends Error {
   constructor(
     public readonly code: 'provider_unavailable' | 'provider_timeout' | 'provider_malformed' | 'provider_failed',
     message: string,
-    public readonly diagnosticReason?: SettlementProviderDiagnosticReason
+    public readonly diagnosticReason?: SettlementProviderDiagnosticReason,
+    public readonly usage?: Partial<ProviderUsage>,
+    public readonly model?: string,
+    public readonly durationMs?: number
   ) {
     super(message); this.name = 'SettlementProviderError';
   }

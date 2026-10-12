@@ -49,6 +49,9 @@ describe('media evidence policy', () => {
     expect(requiredOutputsFor('screenshots')).toHaveLength(10);
     expect(requiredOutputsFor('motion-proofs')).toContain('brewery-demo.webm');
     expect(requiredOutputsFor('scene-acceptance')).toContain('acceptance-results.json');
+    expect(requiredOutputsFor('tavern-acceptance')).toEqual(expect.arrayContaining([
+      'tavern-overview-desktop.jpg', 'tavern-selected-mobile.jpg', 'normal-desktop.webm', 'reduced-mobile.webm'
+    ]));
     expect(requiredOutputsFor('issue-24-scene-acceptance')).toEqual(expect.arrayContaining([
       'shop-1672x941.png', 'bar-390x844.png', 'shop-parallax.webm', 'bar-selection-parallax.webm', 'issue-24-results.json'
     ]));

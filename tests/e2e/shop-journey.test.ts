@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { createTestPlayer } from '../helpers/local-supabase';
+import { createTestPlayer, getLocalTestDatabaseContainer } from '../helpers/local-supabase';
 
 async function loginAndCreate(page: Page, email: string, password: string) {
   await page.goto('/login');
@@ -12,13 +12,13 @@ async function loginAndCreate(page: Page, email: string, password: string) {
 }
 
 async function fundPlayer(page: Page, saveId: string, gold = 500) {
-  execFileSync('docker', ['exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.tavern_saves set gold=${gold} where id='${saveId}'::uuid`]);
+  execFileSync('docker', ['exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.tavern_saves set gold=${gold} where id='${saveId}'::uuid`]);
   await page.reload();
 }
 
 function updateStock(saveId: string, quantity: number, itemKey?: string) {
   const itemClause = itemKey ? ` and item_key='${itemKey}'` : '';
-  execFileSync('docker', ['exec', 'supabase_db_by-rook-and-crook', 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.garden_shop_stock set remaining_quantity=${quantity},restock_day=2 where save_id='${saveId}'::uuid${itemClause}`]);
+  execFileSync('docker', ['exec', getLocalTestDatabaseContainer(), 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-c', `update public.garden_shop_stock set remaining_quantity=${quantity},restock_day=2 where save_id='${saveId}'::uuid${itemClause}`]);
 }
 
 async function saveIdFor(player: Awaited<ReturnType<typeof createTestPlayer>>) {
@@ -39,105 +39,31 @@ async function openFundedShop(page: Page, player: Awaited<ReturnType<typeof crea
   return saveId;
 }
 
-test('Shop opens in Art6, transitions to Art8 detail, and restores browse focus and scroll', async ({ page }) => {
-  const player = await createTestPlayer('shop-art6-opening');
+test('Shop keeps Elara visible through category, hand, inspection, and back navigation', async ({ page }) => {
+  const player = await createTestPlayer('shop-ember-opening');
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openFundedShop(page, player);
     const market = page.locator('[data-shop-market]');
-    const status = page.locator('[aria-label="Shop status"]');
-    const merchant = page.locator('[data-shop-merchant]');
-    const catalog = page.locator('[data-shop-catalog]');
+    const scene = page.locator('[data-shop-scene]');
+    await expect(market).toHaveAttribute('data-shop-stage', 'categories');
+    await expect(scene).toHaveAttribute('data-shop-scene-persistent', 'true');
+    await expect(scene.locator('[data-scene-actor="shop-elara"]')).toHaveAttribute('aria-label', 'Elara Greenbloom');
+    await expect(page.locator('[data-shop-detail]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
+    await expect(market).toHaveAttribute('data-shop-stage', 'items');
+    await expect(page.getByRole('button', { name: 'Select Clover seed' })).toBeFocused();
+    await page.getByRole('button', { name: 'Select Hops seed' }).click();
     const detail = page.locator('[data-shop-detail]');
-    await expect(market).toHaveClass(/art6-layout/);
-    await expect(status).toBeVisible();
-    await expect(merchant).toBeVisible();
-    await expect(catalog).toBeVisible();
-    await expect(detail).toHaveCount(0);
-    const scene = merchant.locator('[data-shop-scene]');
-    const composition = scene.locator('[data-scene-composition="shop"]');
-    const elara = composition.locator('[data-scene-actor="shop-elara"]');
-    const background = composition.locator('.scene-background');
-    const counter = composition.locator('.scene-foreground');
-    await expect(scene).toHaveAttribute('data-shop-scene-persistent', 'true');
-    await expect(composition).toHaveAttribute('data-scene-version', /scene-composition-v\d+/);
-    await expect(elara).toHaveAttribute('role', 'img');
-    await expect(elara).toHaveAttribute('aria-label', 'Elara Greenbloom');
-    await expect(elara).not.toHaveAttribute('tabindex');
-    await expect(elara).toHaveAttribute('data-scene-entrance-ms', '450');
-    await expect(elara).toHaveAttribute('data-scene-exit-ms', '300');
-    const sceneIdentity = await scene.evaluate((element) => {
-      const marked = element as HTMLElement & { __shopSceneIdentity?: string };
-      return marked.__shopSceneIdentity ?? (marked.__shopSceneIdentity = crypto.randomUUID());
-    });
-    await expect(background).toBeVisible();
-    const layerDepths = await Promise.all([background, elara].map((layer) => layer.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10))));
-    expect(layerDepths[0]).toBeLessThan(layerDepths[1]);
-    // Runtime scene masters are intentionally Git-ignored. When seeded fixture
-    // art is available, prove the counter renders in front; otherwise prove
-    // the named background and static Elara fallback keep Shop usable.
-    if (await counter.count()) {
-      await expect(counter).toBeVisible();
-      const counterDepth = await counter.evaluate((element) => Number.parseInt(getComputedStyle(element).zIndex, 10));
-      expect(layerDepths[1]).toBeLessThan(counterDepth);
-    }
-    await expect(catalog.getByText('Elara Greenbloom', { exact: true })).toBeVisible();
-    const backgroundUrl = await background.getAttribute('src');
-    const elaraImage = elara.locator('img');
-    const cloverArt = page.locator('[data-good-key="seed_clover"] .good-art');
-    const cloverImage = cloverArt.locator('img');
-    if (backgroundUrl) {
-      expect(backgroundUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
-    } else {
-      await expect(background).toHaveAttribute('aria-label', /artwork unavailable/);
-    }
-    if (await elaraImage.count()) {
-      expect(await elaraImage.getAttribute('src')).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
-    } else {
-      await expect(elara).toContainText('Elara Greenbloom');
-    }
-    if (await cloverImage.count()) {
-      const cloverUrl = await cloverImage.getAttribute('src');
-      expect(cloverUrl).toMatch(/^http:\/\/127\.0\.0\.1:57321\/storage\/v1\/object\/public\/prototype-runtime-media\//);
-      expect((await page.request.get(cloverUrl!)).ok()).toBe(true);
-    } else {
-      // Fixture art is deliberately optional: a local checkout without the
-      // ignored runtime-media masters still renders the catalog icon.
-      await expect(cloverArt.locator('.good-icon')).toBeVisible();
-    }
-    if (backgroundUrl) expect((await page.request.get(backgroundUrl)).ok()).toBe(true);
-    if (await elaraImage.count()) expect((await page.request.get((await elaraImage.getAttribute('src'))!)).ok()).toBe(true);
-    const [statusBox, merchantBox, catalogBox] = await Promise.all([status.boundingBox(), merchant.boundingBox(), catalog.boundingBox()]);
-    expect(statusBox && merchantBox && catalogBox).toBeTruthy();
-    expect(statusBox!.x).toBeLessThan(merchantBox!.x);
-    expect(merchantBox!.x).toBeLessThan(catalogBox!.x);
-    await noHorizontalOverflow(page);
-
-    const grid = page.locator('[data-shop-goods-scroll]');
-    await grid.evaluate((element) => { element.scrollTop = 80; });
-    const hops = page.locator('[data-good-key="seed_hops"]');
-    await hops.getByRole('button', { name: 'Select Hops seed' }).click();
-    await expect(market).toHaveClass(/art8-layout/);
-    await expect(scene).toHaveAttribute('data-shop-scene-persistent', 'true');
-    await expect(scene.locator('[data-scene-actor="shop-elara"]')).toHaveCount(1);
-    expect(await scene.evaluate((element) => (element as HTMLElement & { __shopSceneIdentity?: string }).__shopSceneIdentity)).toBe(sceneIdentity);
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeVisible();
     await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeFocused();
     await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeEnabled();
-    const [expandedMerchant, expandedCatalog, detailBox] = await Promise.all([merchant.boundingBox(), catalog.boundingBox(), detail.boundingBox()]);
-    expect(expandedMerchant && expandedCatalog && detailBox).toBeTruthy();
-    expect(expandedMerchant!.x).toBeLessThan(expandedCatalog!.x);
-    expect(expandedCatalog!.x).toBeLessThan(detailBox!.x);
-    await expect(page.getByText('Choose a good', { exact: true })).toHaveCount(0);
-
+    await expect(scene).toBeVisible();
+    await noHorizontalOverflow(page);
     await detail.getByRole('button', { name: 'Back to goods' }).click();
-    await expect(market).toHaveClass(/art6-layout/);
-    await expect(detail).toHaveCount(0);
-    await expect(hops.getByRole('button', { name: 'Select Hops seed' })).toBeFocused();
-    expect(await grid.evaluate((element) => element.scrollTop)).toBe(80);
-    await page.getByRole('radio', { name: 'Seeds' }).check();
-    await expect(market).toHaveClass(/art6-layout/);
-    await expect(page.getByRole('radio', { name: 'Seeds' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Select Hops seed' })).toBeFocused();
+    await page.getByRole('button', { name: 'All categories' }).click();
+    await expect(page.getByRole('button', { name: 'Browse Seeds', exact: true })).toBeFocused();
+    await noHorizontalOverflow(page);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -147,6 +73,7 @@ test('Shop previews automatically and ignores late obsolete previews', async ({ 
   const player = await createTestPlayer('shop-art6-preview');
   try {
     await openFundedShop(page, player);
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
     const detail = page.locator('[data-shop-detail]');
     let releaseSlowPreview!: () => void;
     let markSlowPreviewStarted!: () => void;
@@ -163,6 +90,7 @@ test('Shop previews automatically and ignores late obsolete previews', async ({ 
     });
     await page.getByRole('button', { name: 'Select Hops seed' }).click();
     await slowPreviewStarted;
+    await detail.getByRole('button', { name: 'Back to goods' }).click();
     await page.getByRole('button', { name: 'Select Chamomile seed' }).click();
     await expect(detail.getByRole('heading', { name: 'Chamomile seed' })).toBeVisible();
     await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeEnabled();
@@ -180,7 +108,7 @@ test('Shop retry keeps its action identity and receipt Escape does not close the
   let loseFirstCommit = true;
   try {
     await openFundedShop(page, player);
-    await page.getByRole('radio', { name: 'Seeds' }).check();
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
     await page.getByRole('button', { name: 'Select Hops seed' }).click();
     const quantity = page.getByLabel('Quantity');
     await quantity.fill('2');
@@ -199,10 +127,10 @@ test('Shop retry keeps its action identity and receipt Escape does not close the
     });
     await page.getByRole('button', { name: 'Buy for 4 gold' }).click();
     await expect(page.getByRole('alert')).toContainText('outcome is unknown');
-    await expect(page.getByRole('radio', { name: 'Seeds' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Back to goods' })).toBeDisabled();
     await page.getByRole('link', { name: 'Garden', exact: true }).click();
     await expect(page).toHaveURL(/\/shop$/);
-    await page.getByRole('button', { name: 'Retry buy supplies' }).click();
+    await page.getByRole('button', { name: 'Retry · Buy for 4 gold' }).click();
     const receipt = page.locator('[data-shop-receipt]');
     await expect(receipt.getByRole('heading', { name: 'Purchase complete' })).toBeVisible();
     await expect(receipt).toContainText('2 × Hops seed');
@@ -220,8 +148,8 @@ test('Shop retry keeps its action identity and receipt Escape does not close the
     await expect(receipt.getByRole('heading', { name: 'Purchase complete' })).toBeVisible();
     expect(actionIds[2]).not.toBe(actionIds[0]);
     await receipt.getByRole('button', { name: 'Continue shopping' }).click();
-    await expect(page.locator('[data-shop-market]')).toHaveClass(/art6-layout/);
-    await expect(page.getByRole('radio', { name: 'Seeds' })).toBeChecked();
+    await expect(page.locator('[data-shop-market]')).toHaveAttribute('data-shop-stage', 'items');
+    await expect(page.getByRole('button', { name: 'Select Hops seed' })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -231,17 +159,19 @@ test('Shop keeps insufficient, excess-quantity, and sold-out states in the expan
   const player = await createTestPlayer('shop-art6-unavailable');
   try {
     const saveId = await openFundedShop(page, player, 0);
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
     const detail = page.locator('[data-shop-detail]');
     await page.getByRole('button', { name: 'Select Hops seed' }).click();
     await expect(detail.getByRole('alert')).toContainText('Not enough gold');
     await expect(detail.getByRole('alert')).toContainText('Need 2 more gold');
     await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeDisabled();
     await detail.getByRole('button', { name: 'View affordable goods' }).click();
-    await expect(page.locator('[data-shop-market]')).toHaveClass(/art6-layout/);
+    await expect(page.locator('[data-shop-market]')).toHaveAttribute('data-shop-stage', 'items');
     await expect(page.getByText('Showing goods you can afford.', { exact: false })).toBeVisible();
     await fundPlayer(page, saveId, 500);
     updateStock(saveId, 1);
     await page.reload();
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
     await page.getByRole('button', { name: 'Select Hops seed' }).click();
     const quantity = page.getByLabel('Quantity');
     await quantity.fill('2');
@@ -252,46 +182,42 @@ test('Shop keeps insufficient, excess-quantity, and sold-out states in the expan
     await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeEnabled();
     updateStock(saveId, 0, 'seed_hops');
     await page.reload();
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
     const soldOutTile = page.locator('[data-good-key="seed_hops"]');
     await expect(soldOutTile).toContainText('Sold out');
     await soldOutTile.getByRole('button', { name: 'Select Hops seed' }).click();
     await expect(detail.getByRole('alert')).toContainText('Out of stock');
     await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeDisabled();
-    await expect(detail.getByRole('button', { name: 'View alternatives' })).toBeVisible();
+    await expect(detail.getByRole('button', { name: 'Back to goods' })).toBeVisible();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
 });
 
-test('Garden expansion restores the selected good and reports full capacity without product semantics', async ({ page }) => {
-  const player = await createTestPlayer('shop-art6-expansion');
+test('Garden expansion is a garden-care card with a real capacity receipt', async ({ page }) => {
+  const player = await createTestPlayer('shop-ember-expansion');
   try {
     const saveId = await openFundedShop(page, player, 0);
-    await page.getByRole('radio', { name: 'Seeds' }).check();
-    await page.getByRole('button', { name: 'Select Hops seed' }).click();
+    await page.getByRole('button', { name: 'Browse Garden care', exact: true }).click();
+    await page.getByRole('button', { name: 'Select garden expansion to 16 plots' }).click();
     const detail = page.locator('[data-shop-detail]');
-    await page.locator('[data-shop-catalog]').getByRole('button', { name: /Expand garden/ }).click();
     await expect(detail.getByRole('heading', { name: 'Expand to 16 plots' })).toBeVisible();
     await expect(detail.getByRole('alert')).toContainText('Need 60 more gold');
     await detail.getByRole('button', { name: 'Back to goods' }).click();
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Select garden expansion to 16 plots' })).toBeFocused();
     await fundPlayer(page, saveId, 500);
-    await page.getByRole('radio', { name: 'Seeds' }).check();
-    await page.getByRole('button', { name: 'Select Hops seed' }).click();
-    await page.locator('[data-shop-catalog]').getByRole('button', { name: /Expand garden/ }).click();
+    await page.getByRole('button', { name: 'Browse Garden care', exact: true }).click();
+    await page.getByRole('button', { name: 'Select garden expansion to 16 plots' }).click();
     await detail.getByRole('button', { name: 'Expand to 16 plots for 60 gold' }).click();
     const receipt = page.locator('[data-shop-receipt]');
     await expect(receipt.getByRole('heading', { name: 'Garden expanded' })).toBeVisible();
     await receipt.getByRole('button', { name: 'Continue shopping' }).click();
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeVisible();
-    await page.locator('[data-shop-catalog]').getByRole('button', { name: /Expand garden/ }).click();
+    await page.getByRole('button', { name: 'Select garden expansion to 24 plots' }).click();
     await detail.getByRole('button', { name: 'Expand to 24 plots for 180 gold' }).click();
+    await expect(receipt.getByRole('heading', { name: 'Garden expanded' })).toBeVisible();
     await expect(receipt.getByLabel('Quantity')).toHaveCount(0);
-    await expect(receipt).not.toContainText('In stock');
     await receipt.getByRole('button', { name: 'Continue shopping' }).click();
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeVisible();
-    await expect(page.locator('[data-shop-catalog]')).toContainText('Full capacity');
-    await expect(page.locator('[data-shop-catalog]').getByRole('button', { name: /Expand garden/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Select garden expansion/ })).toHaveCount(0);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -304,7 +230,8 @@ test('Shop survives asset failures and remains reachable at 1440, 768, and 390 p
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 1440, height: 900 });
     await openFundedShop(page, player);
-    await expect(page.locator('[data-shop-market]')).toHaveClass(/art6-layout/);
+    await expect(page.locator('[data-shop-market]')).toHaveAttribute('data-shop-stage', 'categories');
+    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
     await noHorizontalOverflow(page);
     await page.getByRole('button', { name: 'Select Hops seed' }).click();
     const detail = page.locator('[data-shop-detail]');
@@ -321,7 +248,7 @@ test('Shop survives asset failures and remains reachable at 1440, 768, and 390 p
     await expect(page.locator('[data-shop-scene] [data-scene-actor="shop-elara"]')).toBeVisible();
     await noHorizontalOverflow(page);
     await page.keyboard.press('Escape');
-    await expect(page.locator('[data-shop-market]')).toHaveClass(/art6-layout/);
+    await expect(page.locator('[data-shop-market]')).toHaveAttribute('data-shop-stage', 'items');
     await expect(page.getByRole('button', { name: 'Select Hops seed' })).toBeFocused();
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

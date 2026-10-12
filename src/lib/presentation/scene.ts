@@ -27,7 +27,6 @@ export interface GardenVisualPlot {
   harvestable: boolean;
   attention: {
     severity: 'warning' | 'critical';
-    causes: string[];
   } | null;
 }
 
@@ -104,16 +103,11 @@ export function deriveGardenVisualState(
       const symptoms = cell.plant?.symptoms ?? cell.hive?.colony?.symptoms ?? [];
       const nonInformational = symptoms.filter((symptom) => symptom.severity !== 'info');
       const colonyThreat = (cell.hive?.colony?.threatDays ?? 0) > 0;
-      const causes = [...new Set([
-        ...nonInformational.map((symptom) => symptom.label),
-        ...(colonyThreat ? ['Colony-loss warning'] : [])
-      ])];
-      const attention = causes.length
+      const attention = nonInformational.length || colonyThreat
         ? {
             severity: nonInformational.some((symptom) => symptom.severity === 'critical') || colonyThreat
               ? 'critical' as const
               : 'warning' as const,
-            causes
           }
         : null;
       return {

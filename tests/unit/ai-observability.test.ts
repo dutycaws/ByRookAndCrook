@@ -5,13 +5,20 @@ describe('AI observability boundary', () => {
   it('records versioned operational stage metrics with a correlation id', () => {
     const event = createAiObservabilityEvent({
       correlationId: '8e45d1e3-6e79-43c5-b73d-44b3a8d8bb2b', workflow: 'world_settlement', stage: 'proposer',
-      status: 'completed', attempt: 2, durationMs: 842, model: 'gpt-5.6-terra', tokenUsage: { input: 120, output: 44 }
+      status: 'completed', attempt: 2, durationMs: 842, model: 'gpt-6-luna', tokenUsage: { input: 120, output: 44, cachedInputTokens: 20, cacheWriteInputTokens: 10 }
     }, () => new Date('2026-09-14T12:00:00.000Z'));
     expect(event).toEqual({
       version: AI_OBSERVABILITY_VERSION, occurredAt: '2026-09-14T12:00:00.000Z',
       correlationId: '8e45d1e3-6e79-43c5-b73d-44b3a8d8bb2b', workflow: 'world_settlement', stage: 'proposer', status: 'completed', attempt: 2,
-      durationMs: 842, model: 'gpt-5.6-terra', tokenUsage: { input: 120, output: 44 }
+      durationMs: 842, model: 'gpt-6-luna', tokenUsage: { input: 120, output: 44, cachedInputTokens: 20, cacheWriteInputTokens: 10 }
     });
+  });
+
+  it('drops impossible cache counts independently while retaining aggregate usage', () => {
+    expect(createAiObservabilityEvent({
+      correlationId: 'settlement:cache:job:one', workflow: 'world_settlement', stage: 'proposer', status: 'completed', attempt: 1,
+      model: 'gpt-6-luna', tokenUsage: { input: 12, output: 3, cachedInputTokens: 13, cacheWriteInputTokens: 4 }
+    })).toMatchObject({ tokenUsage: { input: 12, output: 3, cacheWriteInputTokens: 4 } });
   });
 
   it('records only bounded, content-free memory-context measurements', () => {

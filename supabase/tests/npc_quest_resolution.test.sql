@@ -42,7 +42,7 @@ select is(private.world_quest_hospitality((select id from private.world_quests w
 select is(private.world_quest_hospitality((select id from private.world_quests where save_id='71000000-0000-4000-8000-000000000011' and instance_id=(select instance_id from pg_temp.other_resident)),4),-3,'other NPC hospitality stays in its own quest scope');
 
 create temporary table pg_temp.main_prepare as select * from private.world_resolve_quest_step((select id from private.world_quests where save_id='71000000-0000-4000-8000-000000000011' and instance_id=(select instance_id from pg_temp.main_resident)),4,null);
-select ok((select action='prepare' and preparation_before=0 and preparation_after=1 and hospitality=3 and readiness=15 and chance is null and draw is null and rules_version='quest-resolution-v1' from pg_temp.main_prepare),'prepare persists deterministic replay inputs');
+select ok((select action='prepare' and preparation_before=0 and preparation_after=1 and hospitality=3 and readiness=15 and chance is null and draw is null and rules_version='quest-resolution-v2' from pg_temp.main_prepare),'prepare persists deterministic replay inputs');
 select is((select current_step from private.world_quests where id=(select quest_id from pg_temp.main_prepare)),1,'prepare advances exactly one step');
 create temporary table pg_temp.main_prepare_replay as select * from private.world_resolve_quest_step((select quest_id from pg_temp.main_prepare),4,99);
 select is((select id from pg_temp.main_prepare_replay),(select id from pg_temp.main_prepare),'same-day replay returns the exact event');
@@ -67,8 +67,8 @@ select throws_ok($$update private.world_quest_events set narration='rewrite' whe
 
 create temporary table pg_temp.failure_prepare as select * from private.world_resolve_quest_step((select id from private.world_quests where save_id='71000000-0000-4000-8000-000000000012'),4,null);
 create temporary table pg_temp.failure_attempt as select * from private.world_resolve_quest_step((select quest_id from pg_temp.failure_prepare),5,99);
-select ok((select outcome='failed' and draw=99 from pg_temp.failure_attempt),'high deterministic draw produces failure');
-select is((select state from private.world_quests where id=(select quest_id from pg_temp.failure_attempt)),'failed','failed attempt terminalizes the quest');
+select ok((select outcome='setback' and draw=99 from pg_temp.failure_attempt),'high deterministic draw produces a recoverable authored setback without a loss condition');
+select is((select state from private.world_quests where id=(select quest_id from pg_temp.failure_attempt)),'active','authored attempt without a loss condition remains active');
 
 update private.world_quests set current_plan='[{"action":"wait","approach":"scouting"},{"action":"attempt","approach":"scouting"}]'::jsonb,plan_revision=2 where save_id='71000000-0000-4000-8000-000000000013';
 create temporary table pg_temp.wait_event as select * from private.world_resolve_quest_step((select id from private.world_quests where save_id='71000000-0000-4000-8000-000000000013'),4,null);

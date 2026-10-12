@@ -79,7 +79,7 @@ describe('scene presentation contracts', () => {
       ]
     };
     expect(deriveGardenVisualState(game, null, false, null).plots[0].attention).toEqual({
-      severity: 'critical', causes: ['Dry soil', 'Leaf blight']
+      severity: 'critical'
     });
 
     game.cells[0] = {
@@ -95,7 +95,7 @@ describe('scene presentation contracts', () => {
       }
     };
     expect(deriveGardenVisualState(game, null, false, null).plots[0].attention).toEqual({
-      severity: 'critical', causes: ['Colony-loss warning']
+      severity: 'critical'
     });
   });
 

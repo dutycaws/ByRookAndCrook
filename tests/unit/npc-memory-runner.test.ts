@@ -13,6 +13,16 @@ describe('npc memory summary runner', () => {
     expect(info).toHaveBeenCalledWith('[npc-memory:worker] processed 1 summary job(s): completed.');
   });
 
+  it('runs a selected job once without entering the global queue drain', async () => {
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const drain = vi.fn(async () => [{ status: 'completed' as const, artifacts: 1, fallback: false }]);
+    const delay = vi.fn(async () => {});
+    await runNpcMemorySummaryWorker({ jobId, drain, deadlineMs: 1000, delay, log: { info: vi.fn(), warn: vi.fn() } });
+    expect(drain).toHaveBeenCalledTimes(1);
+    expect(drain).toHaveBeenCalledWith(1, expect.any(AbortSignal), jobId);
+    expect(delay).not.toHaveBeenCalled();
+  });
+
   it('loops serially, creates fresh pass signals, and exits when the caller aborts', async () => {
     const controller = new AbortController();
     const signals: AbortSignal[] = [];
@@ -55,14 +65,26 @@ describe('npc memory summary runner', () => {
     const drain = createNpcMemorySummaryDrain(client as any, { SUPABASE_SERVICE_ROLE_KEY: 'service', OPENAI_API_KEY: 'key', NPC_CONTEXT_MODEL: 'model', NPC_MODEL_INPUT_CAPACITY: '90000' }, registry, async (_limit, _client, runtime) => {
       const pinned = await (runtime.resolvePinnedPrompt as (releaseId: string) => Promise<any>)(prompt.releaseId);
       expect(pinned).toMatchObject({ releaseId: prompt.releaseId, revisionId: prompt.revisionId, key: prompt.key, contractId: prompt.contractId, contractHash: prompt.contractHash });
-      await (runtime.recordTelemetry as (event: any) => Promise<void>)({ jobId: '11111111-1111-4111-8111-111111111111', batchOrdinal: 3, planHash: 'secret-plan', promptReleaseId: prompt.releaseId, promptRevisionId: prompt.revisionId, promptKey: prompt.key, status: 'failed', model: 'model', durationMs: 2, inputTokens: 3, outputTokens: 4, errorCode: 'worker_failed', promptBody: prompt.body, result: 'secret result', quote: 'secret quote' });
+      await (runtime.recordTelemetry as (event: any) => Promise<void>)({ jobId: '11111111-1111-4111-8111-111111111111', batchOrdinal: 3, planHash: 'secret-plan', promptReleaseId: prompt.releaseId, promptRevisionId: prompt.revisionId, promptKey: prompt.key, status: 'failed', model: 'model', durationMs: 2, inputTokens: 3, outputTokens: 4, cachedInputTokens: 0, cacheWriteInputTokens: 2, errorCode: 'worker_failed', promptBody: prompt.body, result: 'secret result', quote: 'secret quote' });
       return [];
     });
     await drain?.(4, new AbortController().signal);
     expect(client.rpc.mock.calls.filter(([name]) => name === 'prompt_registry_service_resolve')).toHaveLength(1);
     const record = client.rpc.mock.calls.find(([name]) => name === 'prompt_registry_service_record_run')?.[1];
-    expect(record).toMatchObject({ p_execution_id: '11111111-1111-4111-8111-111111111111', p_attempt: 3, p_workflow: 'npc_memory_summary', p_node_key: prompt.key, p_prompt_key: prompt.key, p_release_id: prompt.releaseId, p_revision_id: prompt.revisionId, p_status: 'failed', p_model: 'model', p_duration_ms: 2, p_input_tokens: 3, p_output_tokens: 4, p_error_code: null });
+    expect(record).toMatchObject({ p_execution_id: '11111111-1111-4111-8111-111111111111', p_attempt: 3, p_workflow: 'npc_memory_summary', p_node_key: prompt.key, p_prompt_key: prompt.key, p_release_id: prompt.releaseId, p_revision_id: prompt.revisionId, p_status: 'failed', p_model: 'model', p_duration_ms: 2, p_input_tokens: 3, p_output_tokens: 4, p_cached_input_tokens: 0, p_cache_write_input_tokens: 2, p_error_code: null });
     const serialized = JSON.stringify(record);
     expect(serialized).not.toContain('secret-plan'); expect(serialized).not.toContain(prompt.body); expect(serialized).not.toContain('secret result'); expect(serialized).not.toContain('secret quote');
+  });
+
+  it('routes a selected job through the ID-scoped RPC instead of the global drainer', async () => {
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const client = { rpc: vi.fn(async () => ({ data: { status: 'idle' }, error: null })) };
+    const globalDrain = vi.fn(async () => []);
+    const selectedDrain = createNpcMemorySummaryDrain(client as any, {
+      SUPABASE_SERVICE_ROLE_KEY: 'service', OPENAI_API_KEY: 'key', NPC_CONTEXT_MODEL: 'model', NPC_MODEL_INPUT_CAPACITY: '90000'
+    }, undefined, globalDrain);
+    await expect(selectedDrain?.(4, new AbortController().signal, jobId)).resolves.toEqual([{ status: 'idle' }]);
+    expect(client.rpc).toHaveBeenCalledWith('world_npc_memory_claim_selected', { p_job_id: jobId });
+    expect(globalDrain).not.toHaveBeenCalled();
   });
 });

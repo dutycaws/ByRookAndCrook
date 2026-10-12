@@ -13,6 +13,7 @@ async function loadBar(search='') {
     calls.push({name,args});
     if(name==='npc_bar_summary')return {data:{save:{id:'66666666-6666-4666-8666-666666666666',revision:22,gold:25,currentDay:3},roster:[],offerings:{beverages:[],foods:[],intentCards:[]},recent:{hospitality:[],news:[],latestArrival:null}},error:null};
     if(name==='world_settlement_status')return {data:null,error:null};
+    if(name==='npc_archived_roster'||name==='npc_hospitality_history')return {data:[],error:null};
     if(name==='npc_roster')return {data:roster,error:null};
     if(name==='npc_journals')return {data:{[torvin]:{npcId:torvin,status:'active',questLifecycleStatus:'active',turns:[]},[lira]:{npcId:lira,status:'active',questLifecycleStatus:'active',turns:[],pending}},error:null};
     if(name==='npc_quest_history_archive')return {data:{items:args?.p_instance_id===lira?[failedScout]:[],nextCursor:null},error:null};

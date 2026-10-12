@@ -8,15 +8,17 @@ import {
   SHOP_COMMAND_KINDS
 } from '$lib/server/garden-form-actions';
 import type { Actions, PageServerLoad } from './$types';
+import { profileBurnStyle } from '$lib/card-effects';
 
 export const load: PageServerLoad = async ({ locals, setHeaders }) => {
-  await requireGameUser(locals);
+  const user = await requireGameUser(locals);
+  const cardBurnStyle = profileBurnStyle(user.user_metadata);
   setHeaders({ 'cache-control': 'private, no-store' });
 
   try {
     const snapshot = await getSnapshot(locals.supabase);
-    if (!snapshot) return { snapshot, supplies: null };
-    return { snapshot, supplies: await getGeneratedSupplies(locals.supabase, snapshot.save.id) };
+    if (!snapshot) return { snapshot, supplies: null, cardBurnStyle };
+    return { snapshot, supplies: await getGeneratedSupplies(locals.supabase, snapshot.save.id), cardBurnStyle };
   } catch (cause) {
     console.error('get_tavern_snapshot failed', cause);
     error(500, 'The shop ledger is unavailable. Please try again.');

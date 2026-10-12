@@ -22,7 +22,11 @@ select (snapshot#>>'{save,id}')::uuid as save_id,
 from (select public.npc_bar_snapshot() snapshot) source;
 reset role;
 
-select is((select count(*)::integer from private.npc_version_resident_packages where source_kind='first_party'),2,'exactly two first-party V2 packages are installed');
+select is((select count(*)::integer
+  from private.npc_version_resident_packages package
+  join private.npc_identities identity on identity.id=package.npc_id
+    and identity.current_published_version_id=package.version_id
+  where package.source_kind='first_party'),2,'two current first-party V2 packages are installed alongside immutable older releases');
 select is((select count(*)::integer from private.world_resident_package_pins pin join pg_temp.fixture f on f.lira=pin.instance_id or f.torvin=pin.instance_id),2,'seeded roster residents each have one immutable package pin');
 select ok((select count(*)=2 from private.world_resident_profiles p join pg_temp.fixture f on p.instance_id in (f.lira,f.torvin) where p.profile_schema_version='personality-schema-v1'),'materialized packages create typed resident profiles');
 select ok((select capability_envelope->'allowedWorldEffects' ? 'adjust_relationship' and personality_schema->'dimensions' @> '[{"key":"duty","initialValue":85}]'::jsonb from private.npc_version_resident_packages where version_id='18181818-1818-4181-8181-181818181819'),'Lira package preserves its authored V2 personality and resolved capability');

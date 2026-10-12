@@ -1,5 +1,6 @@
 import type { NpcSheet } from '$lib/game/npc-sheet';
 import { releaseTextPrompt, type PromptReleaseSnapshot } from '$lib/server/prompt-registry';
+import { npcTextModel } from '$lib/server/npc-model-routing';
 
 export type AuthoringProviderAvailability =
   | { available: true }
@@ -110,7 +111,7 @@ export function createAuthoringProvider(config: Record<string, string | undefine
       async sandbox() { throw new AuthoringProviderError('provider_unavailable', availability.reason); }
     };
   }
-  const model = config.NPC_AUTHORING_MODEL ?? config.NPC_CHARACTER_MODEL ?? 'gpt-5.6-terra';
+  const model = npcTextModel(config,'authoring');
   if (!release) return {
     async assist() { throw new AuthoringProviderError('provider_unavailable', 'The pinned authoring prompt is unavailable.'); },
     async sandbox() { throw new AuthoringProviderError('provider_unavailable', 'The pinned authoring prompt is unavailable.'); }

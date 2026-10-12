@@ -11,6 +11,7 @@ import {
 } from '../../src/lib/server/evolving-world';
 import { SETTLEMENT_PROMPT_KEY } from '../../src/lib/server/prompt-registry';
 import { fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+import { captureMockedNpcProviderRequests } from '../helpers/capture-npc-provider-payloads';
 
 const promptRelease=fixturePromptRelease;
 function createSettlementProvider(config: Record<string,string|undefined>) {
@@ -36,7 +37,13 @@ function completed(value: unknown) {
   }]}),{status:200,headers:{'content-type':'application/json'}});
 }
 
-afterEach(() => vi.unstubAllGlobals());
+function completedWithUsage(value: unknown, usage?: unknown) {
+  return new Response(JSON.stringify({status:'completed',...(usage === undefined ? {} : {usage}),output:[{
+    type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]
+  }]}),{status:200,headers:{'content-type':'application/json'}});
+}
+
+afterEach(() => { captureMockedNpcProviderRequests('world-canon-provider.test.ts'); vi.unstubAllGlobals(); });
 
 describe('world canon event provider stages',()=>{
   it('freezes canon provider names onto the existing durable checkpoint names and prompt versions',()=>{
@@ -75,8 +82,8 @@ describe('world canon event provider stages',()=>{
     const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'});
     const proposed=await provider.generate('canon_proposer',payload(),new AbortController().signal);
     const repaired=await provider.generate('canon_repair',payload(),new AbortController().signal);
-    expect(proposed).toMatchObject({value:event(),model:'gpt-5.6-terra',promptVersion:'world-canon-event-v1',usage:{input:13,output:5}});
-    expect(repaired).toMatchObject({value:event(),model:'gpt-5.6-terra',promptVersion:'world-canon-event-v1'});
+    expect(proposed).toMatchObject({value:event(),model:'gpt-6-luna',promptVersion:'world-canon-event-v1',usage:{input:13,output:5}});
+    expect(repaired).toMatchObject({value:event(),model:'gpt-6-luna',promptVersion:'world-canon-event-v1'});
     expect(requests.map((request) => request.text.format.name)).toEqual(['world_canon_proposer','world_canon_repair']);
     for (const request of requests) {
       expect(request.text.format.schema).toEqual(expect.objectContaining({
@@ -96,8 +103,8 @@ describe('world canon event provider stages',()=>{
     const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'});
     const critic=await provider.generate('canon_critic',payload(),new AbortController().signal);
     const final=await provider.generate('canon_final_critic',payload(),new AbortController().signal);
-    expect(critic).toMatchObject({value:{outcome:'accept',rationale:'Frozen inputs match.',instructions:[]},model:'gpt-5.6-luna',promptVersion:'world-canon-event-v1'});
-    expect(final).toMatchObject({model:'gpt-5.6-luna'});
+    expect(critic).toMatchObject({value:{outcome:'accept',rationale:'Frozen inputs match.',instructions:[]},model:'gpt-6-luna',promptVersion:'world-canon-event-v1'});
+    expect(final).toMatchObject({model:'gpt-6-luna'});
     expect(requests.map((request) => request.text.format.name)).toEqual(['world_canon_critic','world_canon_final_critic']);
     expect(requests.every((request) => request.reasoning.effort==='none')).toBe(true);
   });
@@ -110,5 +117,32 @@ describe('world canon event provider stages',()=>{
     vi.stubGlobal('fetch',vi.fn(async () => completed({eventJson:JSON.stringify({...event(),participantEntityIds:['unknown'],payload:{template:'market-day',participants:['unknown'],visibility:'public'}})})));
     await expect(provider.generate('canon_proposer',payload(),new AbortController().signal)).rejects.toMatchObject({code:'provider_malformed'});
     await expect(createSettlementProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test-key'}).generate('canon_proposer',payload(),new AbortController().signal)).rejects.toMatchObject({code:'provider_unavailable'});
+  });
+
+  it('retains reported provider usage when the HTTP response is complete but canon output is semantically invalid',async()=>{
+    vi.stubGlobal('fetch',vi.fn(async (url) => String(url).endsWith('/input_tokens')
+      ? new Response(JSON.stringify({input_tokens:13}),{status:200})
+      : completedWithUsage({eventJson:JSON.stringify({...event(),participantEntityIds:[],payload:{...event().payload,participants:[]}})}, {
+        input_tokens:47,output_tokens:9,input_tokens_details:{cached_tokens:5,cache_write_tokens:12}
+      })));
+    const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'});
+    await expect(provider.generate('canon_proposer',payload(),new AbortController().signal)).rejects.toMatchObject({
+      code:'provider_malformed',diagnosticReason:'provider_output_semantic_invalid',model:'gpt-6-luna',
+      usage:{input:47,output:9,cachedInputTokens:5,cacheWriteInputTokens:12},durationMs:expect.any(Number)
+    });
+  });
+
+  it.each([
+    ['missing usage',undefined,undefined],
+    ['partial usage',{input_tokens:19},{input:19}],
+    ['inconsistent cache breakdown',{input_tokens:19,output_tokens:4,input_tokens_details:{cached_tokens:15,cache_write_tokens:8}},{input:19,output:4}]
+  ] as const)('keeps %s unknown rather than inventing zero counts on malformed provider output',async (_label,usage,expectedUsage)=>{
+    vi.stubGlobal('fetch',vi.fn(async (url) => String(url).endsWith('/input_tokens')
+      ? new Response(JSON.stringify({input_tokens:13}),{status:200})
+      : completedWithUsage({eventJson:JSON.stringify({...event(),participantEntityIds:[],payload:{...event().payload,participants:[]}})},usage)));
+    const provider=createSettlementProvider({OPENAI_API_KEY:'test-key'});
+    await expect(provider.generate('canon_proposer',payload(),new AbortController().signal)).rejects.toMatchObject({
+      code:'provider_malformed',usage:expectedUsage
+    });
   });
 });

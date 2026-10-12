@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type SettlementWorkerClient } from '$lib/server/evolving-world/settlement-worker';
 import { drainWorldSettlementQueue as drainWorldSettlementQueueBase, runSettlementClaim as runSettlementClaimBase, startWorldSettlementWorker } from '$lib/server/evolving-world/settlement-worker';
 import { parseSettlementClaim, SettlementProviderError } from '$lib/server/evolving-world/settlement-contracts';
@@ -6,9 +6,11 @@ import { canonicalizeProceduralWorldProposal, fingerprintMutationProposal, finge
 import { createSettlementProvider } from '$lib/server/evolving-world/provider';
 import { fixtureProvider } from '../helpers/world-settlement-provider';
 import { fixturePromptRegistry, fixturePromptRelease } from '../helpers/prompt-registry-fixture';
+import { captureMockedNpcProviderRequests } from '../helpers/capture-npc-provider-payloads';
 
 const promptRelease = fixturePromptRelease;
 const promptRegistry = fixturePromptRegistry();
+afterEach(() => { captureMockedNpcProviderRequests('world-settlement-worker.test.ts'); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const runSettlementClaim = (...args: Parameters<typeof runSettlementClaimBase>) => {
   const [client, claim, runtime = {}] = args;
   return runSettlementClaimBase(client, claim, { ...runtime, promptRegistry });
@@ -42,6 +44,38 @@ async function proceduralFingerprint(proposal:unknown) { const context=parseFroz
 async function proceduralReceipt(args: Record<string,unknown>, replayed=false) { return {data:{status:'completed',rulesVersion:'procedural-world-v1',settlementId:args.p_settlement_id,jobId:args.p_job_id,proposalFingerprint:await proceduralFingerprint(args.p_proposal),replayed},error:null}; }
 
 describe('world settlement worker', () => {
+  it('captures the five resident stages through the production provider and worker path', async () => {
+    const outputs: Record<string, unknown> = {
+      world_proposer: { proposalJson: JSON.stringify(proposal) },
+      world_critic: { outcome: 'repair', rationale: 'Clarify the proposal.', instructions: ['Keep the outcome grounded in evidence.'] },
+      world_repair: { proposalJson: JSON.stringify(proposal) },
+      world_final_critic: { outcome: 'accept', rationale: 'The repair is bounded.', instructions: [] },
+      world_digest: digest
+    };
+    const requests: any[] = [];
+    const events: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      if (String(url).endsWith('/input_tokens')) return new Response(JSON.stringify({ input_tokens: 5 }), { status: 200 });
+      requests.push(body);
+      const output = outputs[body.text.format.name];
+      if (!output) throw new Error(`Unexpected provider stage ${body.text.format.name}`);
+      return new Response(JSON.stringify({ status: 'completed', usage: { input_tokens: 5, output_tokens: 3, input_tokens_details: { cached_tokens: 2, cache_write_tokens: 1 } }, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(output) }] }] }), { status: 200 });
+    }));
+    const mock = client({ world_settlement_commit_mutation: (args: Record<string, unknown>) => committedReceipt(args) });
+    const provider = createSettlementProvider({ OPENAI_API_KEY: 'test-key', NPC_MODEL_INPUT_CAPACITY: '100000' });
+
+    await expect(runSettlementClaim(mock.api, claim(), { provider, heartbeatMs: 99_999, observability: (event) => { events.push(event); } }))
+      .resolves.toMatchObject({ status: 'completed', kind: 'pressure_only' });
+    expect(requests.map((request) => request.text.format.name)).toEqual([
+      'world_proposer', 'world_critic', 'world_repair', 'world_final_critic', 'world_digest'
+    ]);
+    expect(requests.every((request) => request.model === 'gpt-6-luna' && request.store === false)).toBe(true);
+    expect(events.find((event) => event.stage === 'proposer' && event.status === 'completed')?.tokenUsage).toEqual({ input: 5, output: 3, cachedInputTokens: 2, cacheWriteInputTokens: 1 });
+    expect(mock.calls.find((call) => call.name === 'world_settlement_checkpoint')?.args.p_usage)
+      .toMatchObject({ input: 5, output: 3, cachedInputTokens: 2, cacheWriteInputTokens: 1 });
+  });
+
   it('fails a claimed job when prompt release resolution is unavailable', async () => {
     vi.useFakeTimers();
     const mock=client();
@@ -487,6 +521,35 @@ describe('world settlement worker', () => {
     expect(names.lastIndexOf('world_quest_transition_claim_next')).toBeGreaterThan(firstSettlement);
     expect(settlementClaims).toBe(2);
   });
+  it('records provider-reported usage and cache breakdown when a completed response fails contract parsing', async () => {
+    const runRecords: unknown[]=[];
+    vi.spyOn(promptRegistry,'recordSafeRun').mockImplementation(async (entry) => { runRecords.push(entry); });
+    const providerError=new SettlementProviderError('provider_malformed','Invalid canon event.','provider_output_semantic_invalid',
+      {input:47,output:9,cachedInputTokens:5,cacheWriteInputTokens:12},'gpt-6-luna',23);
+    const mock=client(); const provider=fixtureProvider({canon_proposer:providerError});
+    const events:unknown[]=[];
+    expect(await runSettlementClaim(mock.api,canonClaim(),{provider,heartbeatMs:99_999,observability:(event)=>{events.push(event);}}))
+      .toMatchObject({status:'failed',errorCode:'provider_malformed'});
+    expect(runRecords.find((entry:any)=>entry.status==='failed')).toMatchObject({
+      status:'failed',model:'gpt-6-luna',durationMs:23,inputTokens:47,outputTokens:9,
+      cachedInputTokens:5,cacheWriteInputTokens:12,errorCode:'provider_failed'
+    });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({stage:'canon_proposer',status:'failed',durationMs:23,errorCode:'provider_malformed'})
+    ]));
+  });
+
+  it('leaves failed provider usage null when the response did not report token counts', async () => {
+    const runRecords: unknown[]=[];
+    vi.spyOn(promptRegistry,'recordSafeRun').mockImplementation(async (entry) => { runRecords.push(entry); });
+    const mock=client(); const provider=fixtureProvider({canon_proposer:new SettlementProviderError('provider_malformed','Invalid canon event.')});
+    expect(await runSettlementClaim(mock.api,canonClaim(),{provider,heartbeatMs:99_999})).toMatchObject({status:'failed',errorCode:'provider_malformed'});
+    const failedRun=runRecords.find((entry:any)=>entry.status==='failed') as Record<string,unknown>;
+    expect(failedRun).toMatchObject({status:'failed',errorCode:'provider_failed'});
+    expect(failedRun).not.toHaveProperty('inputTokens');
+    expect(failedRun).not.toHaveProperty('outputTokens');
+  });
+
   it('classifies a missing or local provider as unavailable without a network call', async () => {
     await expect(createSettlementProvider({}).generate('proposer',{},new AbortController().signal,promptRelease.prompts['resident.proposer'])).rejects.toMatchObject({code:'provider_unavailable'});
     await expect(createSettlementProvider({NPC_PROVIDER:'local',OPENAI_API_KEY:'test'}).generate('digest',{},new AbortController().signal,promptRelease.prompts['resident.digest'])).rejects.toMatchObject({code:'provider_unavailable'});

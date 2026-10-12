@@ -1,8 +1,6 @@
 # Delivery plan for the relationship and garden prototype
 
-This plan maps the [approved gameplay specification](../design/relationship-garden-prototype-spec.md) to the current implementation and defines a bounded path to a playable result. The audit is read-only and source-based; no tests were run for this planning pass and no gameplay code was changed.
-
-Tracking issue: [Complete the relationship and garden prototype with quest trinkets and visible progression](https://github.com/dutycaws/ByRookAndCrook/issues/35). The [agent handoff](relationship-garden-agent-handoff.md) contains the ready-to-use goal-mode prompt.
+This plan maps the approved gameplay specification included below to the current implementation and defines a bounded path to a playable result. The audit is read-only and source-based; no tests were run for this planning pass and no gameplay code was changed.
 
 Baseline: local commit `53b5caa` plus substantial pre-existing uncommitted work, inspected October 4, 2026. This is not a newly fetched remote pull-request snapshot. Recheck the matrix at implementation start. Preserve existing work rather than redoing or reverting it.
 
@@ -26,7 +24,7 @@ Baseline: local commit `53b5caa` plus substantial pre-existing uncommitted work,
 | Qualitative seed descriptions | Numeric species profiles exist but qualitative seed guidance is absent | Add consistent sun/moisture and relevant flowering/bee descriptions, available before planting |
 | Per-plot care history | Care command input/results and resolved daily plot states exist; UI projects latest report only. Logs are not complete before/after observation pairs | Add a bounded history projection and persist observation snapshots where existing logs cannot reconstruct the required clues |
 | Time advances only on explicit end-day | Bar close action explicitly calls day advance; no ticking close found | Retain and verify with other actions and repeated end-day requests |
-| Lower-cost models without behavior regression | Prompt trimming exists locally; pinned release adoption and live comparison remain separate | Audit active release, prepare exact scenarios, measure actual usage after authorized evaluation |
+| Lower-cost text calls with behavior records | Prompt trimming is separate; actual routing and usage need checking | Try GPT-6 Luna only with current prompts/stages; track spend and issues without a spending cutoff or new fixture suite |
 
 ## Evidence map
 
@@ -83,13 +81,13 @@ This work can proceed in parallel with relationships once ownership of shared sn
 
 Run focused rules/persistence checks and the small integrated journeys below, then required repository checks. Inspect the rendered bar and garden with keyboard and touch-sized controls as applicable. Test Lira's quest flow using deterministic responses first.
 
-Keep the live model comparison a separately reported evaluation: inspect pinned prompt adoption, prepare exact payloads, resolve applicable export approval and set a bounded run estimate before API calls. Report quality and actual usage; no live calls occurred during this planning pass. Do not hold offline feature work idle while approval is pending, and do not claim the live comparison passed when it was not run.
+Run the simple Luna-only trial separately from feature verification. Keep the current prompt release, context limits and stages, use ordinary gameplay or existing paths, and record actual usage, cumulative spend, errors/retries and notable behavior. No spending cap, model comparison, automatic fallback or new efficiency fixture suite. Respect any applicable unresolved payload-export restriction; report an unrun trial honestly and continue unaffected work.
 
 Exit: all gameplay acceptance criteria demonstrated, model evaluation either evidenced or explicitly identified as a remaining required workstream rather than silently omitted.
 
 ## Proposed implementation defaults
 
-These values and semantics were not selected by the user. They are starting proposals for a rapidly iterated prototype. The implementing agent may make reversible adjustments with evidence and record the choice; changes to approved product boundaries require clarification.
+These numerical values are starting proposals, not user-selected balance values. The user authorizes the implementing agent to choose, adjust and document reversible tuning defaults autonomously, with evidence and reasoning. No further approval is required for ordinary tuning; changes to approved product behavior still require clarification.
 
 | Decision | Proposed starting rule |
 | --- | --- |
@@ -112,7 +110,7 @@ Unsettled future design: reward cadence beyond the initial authored quest and re
 - Gardening: existing attention marker retained; free clue inspection, seed guidance, chronological plot history, ordinary quantities still clear, no explicit diagnosis/cure or living-state statistics in expanded inspection.
 - Day clock: reading/talking/crafting/care do not advance the day; explicit end-day advances once even with duplicate commands.
 - Browser journeys: combine relationship offense/recovery and plan persuasion; quest reward/four-slot overflow/swap; garden experiment over two days; warned failure/departure/replacement. Reuse existing garden, serving, harvest and lifecycle fixtures rather than a large new live-model suite.
-- Model evaluation: refusal, plan changes, promise attribution, hidden motives and continuity on the same saved scenarios; collect token/cached-token counts, repairs, latency and cost. Use exact reviewed payloads and report any unmet approval separately.
+- Luna trial records: model actually used, token/cached-token usage where available, cumulative spend, errors/retries and noticeable character or quest behavior issues. Use existing paths; no new efficiency fixtures, Sol comparison or spending cutoff.
 
 Useful existing test surfaces include `tests/unit/dialogue.test.ts`, `tests/unit/garden-feedback.test.ts`, `tests/unit/scene-composition.test.ts`, `tests/e2e/garden-journey.test.ts`, `tests/e2e/garden-expanded-layout.test.ts`, `tests/e2e/npc-quest-lifecycle-journey.test.ts`, `tests/integration/serving-rpc.test.ts`, `tests/integration/harvest-rpc.test.ts`, and their SQL counterparts. This planning pass did not rerun them or claim they cover new behavior.
 
@@ -123,4 +121,8 @@ Useful existing test surfaces include `tests/unit/dialogue.test.ts`, `tests/unit
 - [Finish NPC quest lifecycle integration](https://github.com/dutycaws/ByRookAndCrook/issues/32): reuse opening-day timing, recovery and history work. For this prototype, departed NPC returns remain deferred.
 - [NPC Memory system](https://github.com/dutycaws/ByRookAndCrook/issues/33): preserve attributable memories and relationship history; avoid duplicating the memory pipeline.
 
-The tracking issue carries the complete requirements and this plan so a separate agent can proceed even before local documentation is committed. It should not automatically close the related issues or claim their acceptance criteria were tested here.
+This umbrella issue carries the complete requirements and plan. Do not automatically close related issues or claim their criteria were tested during planning.
+
+## Current implementation record
+
+The issue is authoritative; this plan is synchronized with its October 4 clarification. See [issue-35-progress.md](issue-35-progress.md) for current checkout evidence, adopted defaults, checks, and remaining work. Historical gap rows above describe the planning audit, not a claim about completed implementation.

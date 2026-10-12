@@ -36,6 +36,9 @@ describe('local Shop runtime asset fixture uploader', () => {
     expect(shopRuntimeAssetPublicUrl('elara-counter-hero', undefined)).toBeNull();
     expect(shopRuntimeAssetPublicUrl('elara-counter-hero', 'https://example.supabase.co')).toBeNull();
     expect(shopRuntimeAssetPublicUrl('elara-counter-hero', 'http://127.0.0.1:57321')).toBe(`http://127.0.0.1:57321/storage/v1/object/public/${LOCAL_SHOP_RUNTIME_ASSET_BUCKET}/${SHOP_RUNTIME_ASSETS[0].key}`);
+    expect(shopRuntimeAssetPublicUrl('elara-counter-hero', 'http://127.0.0.1:58321')).toBe(`http://127.0.0.1:58321/storage/v1/object/public/${LOCAL_SHOP_RUNTIME_ASSET_BUCKET}/${SHOP_RUNTIME_ASSETS[0].key}`);
+    expect(shopRuntimeAssetPublicUrl('elara-counter-hero', 'http://example.com:58321')).toBeNull();
+    expect(shopRuntimeAssetPublicUrl('elara-counter-hero', 'ftp://127.0.0.1:58321')).toBeNull();
     expect(shopItemAssetPublicUrl('seed_clover', 'http://127.0.0.1:57321')).toContain(`/storage/v1/object/public/${LOCAL_SHOP_RUNTIME_ASSET_BUCKET}/shop/v1/sha256/62/`);
     expect(shopItemAssetPublicUrl('seed_hops', undefined)).toBe('/assets/scenes/garden/garden-crop-hops-stage-3.webp');
     expect(shopItemAssetPublicUrl('hive_equipment', undefined)).toBe('/assets/scenes/garden/garden-beehive.webp');

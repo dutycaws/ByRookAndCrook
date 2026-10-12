@@ -1,5 +1,7 @@
 import type { PromptSnapshot } from '$lib/server/prompt-registry';
-import { parseFrozenCanonEventProposal, promptVersionForProviderStage, SettlementProviderError, type ProviderResult, type ProviderStage, type SettlementProvider, type SettlementProviderDiagnosticReason } from './settlement-contracts';
+import { npcTextModel } from '$lib/server/npc-model-routing';
+import { parseTextProviderUsage } from '$lib/server/provider-usage';
+import { parseFrozenCanonEventProposal, promptVersionForProviderStage, SettlementProviderError, type ProviderResult, type ProviderStage, type ProviderUsage, type SettlementProvider, type SettlementProviderDiagnosticReason } from './settlement-contracts';
 import { parseFrozenSocialEncounterContext, parseSocialEncounterCriticDecision, parseSocialEncounterProposal, type FrozenSocialEncounterContext } from '$lib/game/evolving-world/social-encounter-contracts';
 import { parseFrozenProceduralWorldContext, parseProceduralWorldCriticDecision, parseProceduralWorldProposal, PROCEDURAL_WORLD_CRITIC_CODES, PROCEDURAL_WORLD_CRITIC_PATHS, type FrozenProceduralWorldContext } from '$lib/game/evolving-world/procedural-world-contracts';
 import { parseQuestTransitionCriticDecision, parseQuestTransitionProposal, QUEST_TRANSITION_CRITIC_CODES, QUEST_TRANSITION_CRITIC_PATHS, type QuestTransitionValidationContext } from '$lib/game/evolving-world/quest-transition-contracts';
@@ -98,6 +100,20 @@ function exactPayload(value: unknown, keys: string[]): value is Record<string, u
 }
 function plainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
+function responseUsage(value: unknown): Partial<ProviderUsage> | undefined {
+  if (!plainObject(value)) return undefined;
+  const parsed = parseTextProviderUsage(value);
+  const inputReported = Number.isSafeInteger(value.input_tokens) && (value.input_tokens as number) >= 0;
+  const outputReported = Number.isSafeInteger(value.output_tokens) && (value.output_tokens as number) >= 0;
+  const cacheBreakdownFits = parsed.cachedInputTokens === undefined || parsed.cacheWriteInputTokens === undefined
+    || parsed.cachedInputTokens + parsed.cacheWriteInputTokens <= parsed.input;
+  const usage: Partial<ProviderUsage> = {};
+  if (inputReported) usage.input = parsed.input;
+  if (outputReported) usage.output = parsed.output;
+  if (inputReported && cacheBreakdownFits && parsed.cachedInputTokens !== undefined) usage.cachedInputTokens = parsed.cachedInputTokens;
+  if (inputReported && cacheBreakdownFits && parsed.cacheWriteInputTokens !== undefined) usage.cacheWriteInputTokens = parsed.cacheWriteInputTokens;
+  return Object.keys(usage).length ? usage : undefined;
 }
 function parseSocialPayload(stage: ProviderStage, payload: unknown): FrozenSocialEncounterContext | null {
   if (stage === 'social_encounter_proposer') return parseFrozenSocialEncounterContext(payload);
@@ -206,7 +222,7 @@ export function createSettlementProvider(config: Record<string, string | undefin
   if (provider !== 'openai' || !config.OPENAI_API_KEY) return { async generate() { throw new SettlementProviderError('provider_unavailable', 'OpenAI is not configured.'); } };
   return {
   async countMemoryContext(canonicalContext, signal) {
-    const model=config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna';
+    const model=npcTextModel(config,'context');
     const capacity=Number(config.NPC_MODEL_INPUT_CAPACITY);
     if (!Number.isSafeInteger(capacity) || capacity<1) throw new SettlementProviderError('provider_unavailable','The transition context model capacity is not configured.');
     const started=performance.now(); let response: Response;
@@ -219,7 +235,7 @@ export function createSettlementProvider(config: Record<string, string | undefin
   },
   async generate(stage, payload, signal, prompt: PromptSnapshot): Promise<ProviderResult> {
     const started = performance.now();
-    const model = creativeStages.has(stage) ? config.NPC_CHARACTER_MODEL ?? 'gpt-5.6-terra' : config.NPC_CONTEXT_MODEL ?? 'gpt-5.6-luna';
+    const model = npcTextModel(config,creativeStages.has(stage) ? 'character' : 'context');
     if (!prompt || prompt.promptType !== 'text_system') throw new SettlementProviderError('provider_unavailable', 'The pinned settlement prompt is unavailable.');
     const socialContext=(socialProposalStages.has(stage) || socialCriticStages.has(stage)) ? parseSocialPayload(stage, payload) : null;
     if ((socialProposalStages.has(stage) || socialCriticStages.has(stage)) && !socialContext) {
@@ -252,14 +268,18 @@ export function createSettlementProvider(config: Record<string, string | undefin
     try { response=await fetch('https://api.openai.com/v1/responses',{method:'POST',signal,headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body)}); }
     catch (cause) { if(signal.aborted) throw new SettlementProviderError('provider_timeout','The settlement provider timed out.'); throw new SettlementProviderError('provider_failed',cause instanceof Error?cause.message:'The settlement provider failed.'); }
     if (!response.ok) throw new SettlementProviderError(response.status === 401 || response.status === 403 ? 'provider_unavailable' : 'provider_failed', `The settlement provider failed (${response.status}).`, 'provider_response_http_error');
-    let result:any; try { result = await response.json(); } catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned unreadable output.','provider_response_json_invalid'); }
-    if (result?.status !== 'completed') throw new SettlementProviderError('provider_failed','The settlement provider did not complete.', result?.status === 'incomplete' ? 'provider_response_incomplete' : 'provider_response_unexpected_status');
+    let reportedUsage: Partial<ProviderUsage> | undefined;
+    const responseError = (code: 'provider_malformed' | 'provider_failed', message: string, reason: SettlementProviderDiagnosticReason) =>
+      new SettlementProviderError(code,message,reason,reportedUsage,model,Math.round(performance.now()-started));
+    let result:any; try { result = await response.json(); } catch { throw responseError('provider_malformed','The settlement provider returned unreadable output.','provider_response_json_invalid'); }
+    reportedUsage = responseUsage(result?.usage);
+    if (result?.status !== 'completed') throw responseError('provider_failed','The settlement provider did not complete.', result?.status === 'incomplete' ? 'provider_response_incomplete' : 'provider_response_unexpected_status');
     const refused=hasRefusal(result);
     const text = outputText(result);
-    if (!text.trim()) throw new SettlementProviderError('provider_malformed',refused ? 'The settlement provider refused the structured output.' : 'The settlement provider returned no structured output.',refused ? 'provider_response_refusal' : 'provider_output_missing');
+    if (!text.trim()) throw responseError('provider_malformed',refused ? 'The settlement provider refused the structured output.' : 'The settlement provider returned no structured output.',refused ? 'provider_response_refusal' : 'provider_output_missing');
     let structured: any;
     try { structured = JSON.parse(text); }
-    catch { throw new SettlementProviderError('provider_malformed','The settlement provider returned malformed structured output.','provider_output_outer_json_invalid'); }
+    catch { throw responseError('provider_malformed','The settlement provider returned malformed structured output.','provider_output_outer_json_invalid'); }
     const schemaValid=matchesSchema(structured,schema(stage));
     const nestedJsonKey=canonProposalStages.has(stage) ? 'eventJson'
       : socialProposalStages.has(stage)||proceduralProposalStages.has(stage)||questTransitionProposalStages.has(stage)||stage==='proposer'||stage==='repair' ? 'proposalJson' : null;
@@ -268,7 +288,7 @@ export function createSettlementProvider(config: Record<string, string | undefin
       try { nestedPayload=JSON.parse(structured?.[nestedJsonKey]); }
       catch {
         const hasExpectedString=plainObject(structured) && typeof structured[nestedJsonKey] === 'string';
-        throw new SettlementProviderError('provider_malformed',hasExpectedString ? 'The settlement provider returned invalid JSON inside its structured output.' : 'The settlement provider output did not match its declared schema.',hasExpectedString ? 'provider_output_inner_json_invalid' : 'provider_output_schema_invalid');
+        throw responseError('provider_malformed',hasExpectedString ? 'The settlement provider returned invalid JSON inside its structured output.' : 'The settlement provider output did not match its declared schema.',hasExpectedString ? 'provider_output_inner_json_invalid' : 'provider_output_schema_invalid');
       }
     }
     let value: unknown;
@@ -311,12 +331,12 @@ export function createSettlementProvider(config: Record<string, string | undefin
           ? nestedPayload
           : structured;
     } catch {
-      throw new SettlementProviderError('provider_malformed','The settlement provider output failed world-contract validation.',schemaValid ? 'provider_output_semantic_invalid' : 'provider_output_schema_invalid');
+      throw responseError('provider_malformed','The settlement provider output failed world-contract validation.',schemaValid ? 'provider_output_semantic_invalid' : 'provider_output_schema_invalid');
     }
-    if (value === null) throw new SettlementProviderError('provider_malformed', 'The provider output did not match the frozen world contract.',semanticDiagnosticReason ?? (schemaValid ? 'provider_output_semantic_invalid' : 'provider_output_schema_invalid'));
+    if (value === null) throw responseError('provider_malformed', 'The provider output did not match the frozen world contract.',semanticDiagnosticReason ?? (schemaValid ? 'provider_output_semantic_invalid' : 'provider_output_schema_invalid'));
       // Durable checkpoints retain their established semantic version. The
       // immutable release/revision provenance is recorded separately in the
       // registry ledger, so old replay readers remain compatible.
-    return { value, model, usage:{input:result.usage?.input_tokens ?? 0, output:result.usage?.output_tokens ?? 0}, durationMs:Math.round(performance.now()-started), promptVersion:promptVersionForProviderStage(stage) };
+    return { value, model, usage:parseTextProviderUsage(result.usage), durationMs:Math.round(performance.now()-started), promptVersion:promptVersionForProviderStage(stage) };
   } };
 }

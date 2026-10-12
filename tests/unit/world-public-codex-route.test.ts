@@ -5,6 +5,9 @@ const resolvePublicRuntimeArtPreviews = vi.fn();
 vi.mock('$lib/server/game', () => ({ getSnapshot }));
 vi.mock('$lib/server/evolving-world-art/public-preview', () => ({ resolvePublicRuntimeArtPreviews }));
 
+vi.mock('$lib/server/npc-history',()=>({getNpcHistory:vi.fn(async()=>({residents:[],journals:{},hospitality:[]}))}));
+vi.mock('$lib/server/tavern-reports',()=>({getTavernReports:vi.fn(async()=>[])}));
+
 const saveId = '33333333-3333-4333-8333-333333333333';
 const entityId = '44444444-4444-4444-8444-444444444444';
 const secondEntityId = '55555555-5555-4555-8555-555555555555';
@@ -25,12 +28,12 @@ describe('world codex page load', () => {
       .mockResolvedValueOnce({ data: projection, error: null })
       .mockResolvedValueOnce({ data: [{ entityId, appearanceVersion: 'world-v1', status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, render: { renderId: saveId, mimeType: 'image/png' } }], error: null });
     const headers = vi.fn();
-    const result = await load({ locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: headers } as any);
+    const result = await load({ url:new URL('http://localhost/codex'), locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: headers } as any);
     expect(headers).toHaveBeenCalledWith({ 'cache-control': 'private, no-store' });
     expect(rpc).toHaveBeenNthCalledWith(1, 'world_public_codex', { p_save_id: saveId });
     expect(rpc).toHaveBeenNthCalledWith(2, 'world_runtime_art_projection', { p_save_id: saveId });
     expect(resolvePublicRuntimeArtPreviews).toHaveBeenCalledWith(expect.anything(), saveId, [{ entityId, appearanceVersion: 'world-v1', status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, renderId: saveId, mimeType: 'image/png' }]);
-    expect(result).toEqual({ snapshot: { save: { id: saveId } }, codex: { ...projection, entities: [{ ...projection.entities[0], art: { status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, mimeType: 'image/png', previewUrl: 'https://signed.test/opaque' } }] } });
+    expect(result).toEqual({ snapshot: { save: { id: saveId } }, residents:[],journals:{},hospitality:[],tavernReports:[],codex: { ...projection, entities: [{ ...projection.entities[0], art: { status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, mimeType: 'image/png', previewUrl: 'https://signed.test/opaque' } }] } });
     expect(JSON.stringify(result)).not.toContain('payload');
     expect(JSON.stringify(result)).not.toContain('renderId');
   });
@@ -42,7 +45,7 @@ describe('world codex page load', () => {
     const rpc = vi.fn()
       .mockResolvedValueOnce({ data: projection, error: null })
       .mockResolvedValueOnce({ data: [{ entityId, status: 'accepted', promptHash: 'private' }], error: null });
-    const result = await load({ locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: vi.fn() } as any) as any;
+    const result = await load({ url:new URL('http://localhost/codex'), locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: vi.fn() } as any) as any;
     expect(result.codex.entities[0].art).toEqual({ status: 'placeholder', placeholder: { style: 'world-runtime-art-v1' } });
     expect(resolvePublicRuntimeArtPreviews).toHaveBeenCalledWith(expect.anything(), saveId, []);
   });
@@ -64,7 +67,7 @@ describe('world codex page load', () => {
       .mockResolvedValueOnce({ data: orderedProjection, error: null })
       .mockResolvedValueOnce({ data: [secondArt, firstArt], error: null });
 
-    await load({ locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: vi.fn() } as any);
+    await load({ url:new URL('http://localhost/codex'), locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: vi.fn() } as any);
 
     expect(resolvePublicRuntimeArtPreviews).toHaveBeenCalledWith(expect.anything(), saveId, [
       { entityId, appearanceVersion: 'world-v1', status: 'accepted', placeholder: { style: 'world-runtime-art-v1' }, renderId: saveId, mimeType: 'image/png' },
@@ -76,8 +79,8 @@ describe('world codex page load', () => {
     getSnapshot.mockResolvedValue(null);
     const { load } = await import('../../src/routes/(game)/codex/+page.server');
     const rpc = vi.fn();
-    await expect(load({ locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: vi.fn() } as any))
-      .resolves.toEqual({ snapshot: null, codex: null });
+    await expect(load({ url:new URL('http://localhost/codex'), locals: { getVerifiedUser: async () => ({ id: 'keeper' }), supabase: { rpc } }, setHeaders: vi.fn() } as any))
+      .resolves.toEqual({ snapshot: null, codex: null,residents:[],journals:{},hospitality:[],tavernReports:[] });
     expect(rpc).not.toHaveBeenCalled();
   });
 });

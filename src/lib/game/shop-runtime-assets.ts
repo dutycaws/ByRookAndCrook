@@ -33,7 +33,7 @@ export function shopRuntimeAssetPublicUrl(id: ShopRuntimeAssetId, supabaseUrl: s
   if (!asset || !supabaseUrl) return null;
   try {
     const base = new URL(supabaseUrl);
-    if (!['http:', 'https:'].includes(base.protocol) || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.port !== '57321') return null;
+    if (!['http:', 'https:'].includes(base.protocol) || !['127.0.0.1', 'localhost'].includes(base.hostname)) return null;
     return new URL(`/storage/v1/object/public/${LOCAL_SHOP_RUNTIME_ASSET_BUCKET}/${asset.key}`, base).toString();
   } catch {
     return null;
