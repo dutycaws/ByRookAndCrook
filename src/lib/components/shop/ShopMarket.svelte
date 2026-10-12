@@ -9,10 +9,12 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
   import WorkflowHand from '$lib/components/ui/WorkflowHand.svelte';
   import CardWorkflowFrame from '$lib/components/ui/CardWorkflowFrame.svelte';
   import WorkflowInspection from '$lib/components/ui/WorkflowInspection.svelte';
+  import AcquisitionReveal from '$lib/components/ui/AcquisitionReveal.svelte';
   import QuantityStepper from '$lib/components/ui/QuantityStepper.svelte';
   import GeneratedSupplies from './GeneratedSupplies.svelte';
   import ShopGoodCard from './ShopGoodCard.svelte';
   import { shopItemAssetPublicUrl } from '$lib/game/shop-runtime-assets';
+  import { claimAcquisitionEvent, claimAcquisitionReceipt, type AcquisitionCard } from '$lib/game/acquisition';
   import { sceneRuntimeAssetPublicUrl, type SceneRuntimeAssetId } from '$lib/game/scene-runtime-assets';
   import { resolveBurnAction, waitForBurn, type BurnStyle, type ResolvedBurnAction } from '$lib/card-effects';
   import type { GeneratedSupplies as GeneratedSupplyCatalog, GeneratedSupplyCatalogItem } from '$lib/server/evolving-world/generated-supplies';
@@ -66,6 +68,8 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
   let receiptSequence = 0;
   let provisionsBusy = $state(false);
   let handFocusId = $state<string | null>(null);
+  let acquisitionCard = $state<AcquisitionCard | null>(null);
+  const seenAcquisitionEvents = new Set<string>();
 
   let garden = $derived(snapshot.garden);
   let goods = $derived(garden?.shop ?? []);
@@ -431,6 +435,21 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
     return { name: item?.name ?? payload.itemKey, quantity: payload.quantity, held, after: held + payload.quantity };
   }
 
+  function onProvisionAcquired(event: { actionId: string; item: GeneratedSupplyCatalogItem }) {
+    const eventId = claimAcquisitionEvent('purchase', event.actionId, true, seenAcquisitionEvents);
+    if (!eventId) return;
+    acquisitionCard = {
+      id: eventId,
+      eyebrow: 'Provision acquired',
+      title: event.item.name,
+      description: 'Added to your tavern pantry.',
+      quantityLabel: '1 provision',
+      icon: '✧',
+      artKind: 'item',
+      details: [{ label: 'Cost', value: `${event.item.price} gold` }]
+    };
+  }
+
   function effectDescription(item: ShopItem) {
     if (item.kind === 'seed' && typeof item.effect.species === 'string') return `Plant ${item.effect.species} in an empty garden plot.`;
     if (item.kind === 'amendment') {
@@ -650,7 +669,7 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
     pending = true;
     message = null;
     return async ({ result, update }) => {
-      const data = 'data' in result ? result.data as { message?: string; conflict?: boolean; pendingAction?: object; receipt?: { result?: Record<string, unknown> } } | undefined : undefined;
+      const data = 'data' in result ? result.data as { message?: string; conflict?: boolean; pendingAction?: object; receipt?: { actionId?: string; result?: Record<string, unknown> } } | undefined : undefined;
       if (result.type === 'error') {
         pending = false;
         message = 'The order outcome is unknown. Retry to recover the same order.';
@@ -660,6 +679,7 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
       if (result.type === 'success') {
         const resultData = data?.receipt?.result;
         let resolvedOrder: CompletedOrder | null = null;
+        let completedAcquisition: AcquisitionCard | null = null;
         if (committedPreview.commandKind === 'purchase' && resultData && typeof resultData === 'object') {
           const order = purchaseSummary(committedPayload);
           resolvedOrder = {
@@ -669,6 +689,21 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
             goldBalance: Number(resultData.goldBalance ?? 0)
           };
           message = 'Purchase complete.';
+          const eventId = claimAcquisitionReceipt('purchase', committedPreview.commandKind, frozenAction.actionId, data?.receipt?.actionId, seenAcquisitionEvents);
+          const purchasedItem = goods.find((candidate) => candidate.itemKey === ('itemKey' in committedPayload ? committedPayload.itemKey : ''));
+          if (eventId && purchasedItem) {
+            completedAcquisition = {
+              id: eventId,
+              eyebrow: 'Item acquired',
+              title: order?.name ?? purchasedItem.name,
+              description: effectDescription(purchasedItem),
+              quantityLabel: `${Number(resultData.quantity ?? order?.quantity ?? 1)} acquired`,
+              imageSrc: itemArt(purchasedItem),
+              icon: itemIcon(purchasedItem),
+              artKind: 'item',
+              details: [{ label: 'Cost', value: `${Number(resultData.goldSpent ?? 0)} gold` }]
+            };
+          }
         } else if (committedPreview.commandKind === 'expand') {
           resolvedOrder = {
             kind: 'expand', name: 'Garden expanded', capacity: Number(resultData?.plotCount ?? 0),
@@ -676,6 +711,19 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
             goldBalance: Number(resultData?.goldBalance ?? 0)
           };
           message = 'Garden expanded.';
+          const eventId = claimAcquisitionReceipt('purchase', committedPreview.commandKind, frozenAction.actionId, data?.receipt?.actionId, seenAcquisitionEvents);
+          if (eventId) {
+            completedAcquisition = {
+              id: eventId,
+              eyebrow: 'Garden expanded',
+              title: 'New ground opened',
+              description: 'Elara has made more room for your garden.',
+              quantityLabel: `${resolvedOrder.capacity ?? 0} plots available`,
+              icon: '⌂',
+              artKind: 'item',
+              details: [{ label: 'Cost', value: `${resolvedOrder.cost} gold` }]
+            };
+          }
         }
         messageError = false;
         preview = null;
@@ -693,6 +741,7 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
           await showReceiptAfterBurn();
           message = null;
         }
+        if (completedAcquisition) acquisitionCard = completedAcquisition;
         return;
       }
       if (data?.pendingAction) {
@@ -916,6 +965,7 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
       {burnStyle}
       oncancel={closeDetail}
       onbusychange={(busy) => provisionsBusy = busy}
+      onacquired={onProvisionAcquired}
     />
   {/if}
 {/snippet}
@@ -931,9 +981,12 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
     scene={marketScene}
     status={marketStatus}
     controls={marketControls}
-    folio={stage === 'inspection' ? shopFolio : undefined}
+    folio={stage === 'inspection' && !acquisitionCard ? shopFolio : undefined}
     hand={marketHand}
   />
+  {#if acquisitionCard}
+    <AcquisitionReveal open {...acquisitionCard} ondismiss={() => acquisitionCard = null} />
+  {/if}
 
   {#if message && !preview && !completedOrder && !detailMode}
     <p class="shop-message" class:error={messageError} role={messageError ? 'alert' : 'status'} aria-live="polite">{message}</p>

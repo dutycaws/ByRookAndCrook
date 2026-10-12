@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTestPlayer } from '../helpers/local-supabase';
 import { createBrewedTavern } from '../helpers/brewed-tavern';
 import { runDialogue } from '../../src/lib/server/dialogue/orchestrator';
+import { ProviderStructuredOutputError } from '../../src/lib/server/dialogue/provider';
 import { fixtureProvider } from '../helpers/dialogue-provider';
 import { parseBarSnapshot } from '../../src/lib/game/serving';
 import type { DialogueInput } from '../../src/lib/game/dialogue';
@@ -312,6 +313,76 @@ describe('UUID community NPC dialogue runtime', () => {
     expect(after.beverages).toHaveLength(0);
     expect(after.intentCards).toHaveLength(before.intentCards.length);
     expect(after.history).toHaveLength(1);
+  });
+
+  it('saves a served Torvin reply and exact memory quote from the approved rewrite', async () => {
+    const person = await createBrewedTavern('uuid-dialogue-torvin-rewrite');
+    players.push(person);
+    const before = await bar(person);
+    const torvin = before.roster.find((resident) => resident.name === 'Torvin Ashbeard')!;
+    const command = {
+      ...input(torvin.npcId, torvin.sequence, 'I thank you for keeping watch. Please enjoy this mead.'),
+      offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
+    };
+    const originalReply = 'I already cleared the old road.';
+    const approvedReply = 'I will scout the old road tomorrow.';
+    const provider = fixtureProvider({ rewrite: true });
+    const generate = provider.generate.bind(provider);
+    let speeches = 0;
+    provider.generate = async (stage, payload, signal, prompt) => {
+      const result = await generate(stage, payload, signal, prompt);
+      if (stage === 'speak') result.value = { text: ++speeches === 1 ? originalReply : approvedReply };
+      if (stage === 'remember') result.value = { memories: [{
+        kind: 'npc_statement', text: approvedReply, quote: approvedReply,
+        speaker: 'npc', priorCommitmentId: null, commitmentStatus: null
+      }] };
+      return result;
+    };
+    const committed = await runDialogue(person.admin, person.userId, command, provider, { promptRegistry });
+    expect((committed.result as any).reply).toBe(approvedReply);
+    expect((committed.result as any).serving.itemName).toBe(before.beverages[0].name);
+    const repeated = await runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'investigate' }), { promptRegistry });
+    expect(repeated.result).toEqual(committed.result);
+    const after = await bar(person);
+    expect(after.beverages).toHaveLength(0);
+    expect(after.history).toHaveLength(1);
+  });
+
+  it('bounds malformed memory repair across serving retries and consumes the mead only once', async () => {
+    const person = await createBrewedTavern('uuid-dialogue-memory-repair');
+    players.push(person);
+    const before = await bar(person);
+    const lira = before.roster.find((resident) => resident.name === 'Lira Nightwind')!;
+    const command = {
+      ...input(lira.npcId, lira.sequence, 'I thank you. Please accept this mead.'),
+      offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
+    };
+    let memoryCalls = 0;
+    const malformed = fixtureProvider();
+    const generate = malformed.generate.bind(malformed);
+    malformed.generate = async (stage, payload, signal, prompt) => {
+      if (stage === 'remember') {
+        memoryCalls++;
+        throw new ProviderStructuredOutputError('OpenAI returned an incomplete structured response.');
+      }
+      return generate(stage, payload, signal, prompt);
+    };
+    await expect(runDialogue(person.admin, person.userId, command, malformed, { promptRegistry })).rejects.toThrow('incomplete structured response');
+    expect(memoryCalls).toBe(2);
+    expect((await bar(person)).beverages).toHaveLength(1);
+    // The automatic repair allowance is durable, not reset by a UI retry.
+    await expect(runDialogue(person.admin, person.userId, command, malformed, { promptRegistry })).rejects.toThrow('incomplete structured response');
+    expect(memoryCalls).toBe(3);
+    const recovery = fixtureProvider();
+    const committed = await runDialogue(person.admin, person.userId, command, recovery, { promptRegistry });
+    expect(recovery.stages).toEqual(['remember']);
+    expect((committed.result as any).serving.itemName).toBe(before.beverages[0].name);
+    const repeated = await runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'investigate' }), { promptRegistry });
+    expect(repeated.result).toEqual(committed.result);
+    const after = await bar(person);
+    expect(after.beverages).toHaveLength(0);
+    expect(after.history).toHaveLength(1);
+    expect(after.intentCards).toHaveLength(before.intentCards.length);
   });
 
   it('isolates UUID turns, journals, and transcripts between taverns', async () => {

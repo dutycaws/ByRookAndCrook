@@ -256,8 +256,14 @@ export function gardenSuccessFeedback(
       return targetsCopy('Watered', receipt, options);
     case 'amend':
       return targetsCopy('Fertilized', receipt, options);
-    case 'incorporate_clover':
-      return target ? `Incorporated clover in ${target}` : 'Clover incorporated';
+    case 'incorporate_clover': {
+      const firstReleaseDay = count(receipt.result, 'firstReleaseDay');
+      const releases = count(receipt.result, 'releases');
+      const result = target ? `Incorporated clover in ${target}` : 'Clover incorporated';
+      return firstReleaseDay !== undefined && releases !== undefined
+        ? `${result}; ${plural(releases, 'soil release')} begin on Day ${firstReleaseDay}.`
+        : result;
+    }
     case 'compost_ingredient': {
       const quantity = count(receipt.result, 'quantityConsumed');
       return quantity !== undefined && target

@@ -255,6 +255,7 @@
 				description: choice.detail,
 				eyebrow: choice.eyebrow,
 				icon: choice.kind === 'food' ? '✦' : choice.kind === 'beverage' ? '♨' : '✧',
+				artwork: { kind: choice.kind, seed: choice.key },
 				meta: choice.quantity > 1 ? `${choice.quantity} in hand` : undefined,
 				actionLabel: choice.kind === 'food' || choice.kind === 'beverage' ? 'Offer' : 'Use'
 			}))
@@ -269,6 +270,7 @@
 				description: choice.detail,
 				eyebrow: choice.eyebrow,
 				icon: choice.kind === 'food' ? '✦' : choice.kind === 'beverage' ? '♨' : '✧',
+				artwork: { kind: choice.kind, seed: choice.key },
 				meta: choice.quantity > 1 ? `${choice.quantity} in hand` : undefined,
 				actionLabel: choice.kind === 'food' || choice.kind === 'beverage' ? 'Offer' : 'Use'
 			});

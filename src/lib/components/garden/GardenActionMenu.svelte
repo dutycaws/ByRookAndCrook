@@ -18,6 +18,7 @@ import { resolveBurnAction, waitForBurn } from '$lib/card-effects';
   import CropDetails from './CropDetails.svelte';
   import GardenOverview from './GardenOverview.svelte';
   import GardenProvisionPanel, { type ApiaryWorkflowHand } from './GardenProvisionPanel.svelte';
+  import { finishCommittedGardenAction } from './committed-action-lifecycle';
 
   type BatchKind = 'water' | 'amend';
   type Section = 'root' | 'crop' | 'soil' | 'apiary' | 'move';
@@ -384,9 +385,9 @@ let canPreview = $derived(!!preview && !!previewPayload
     messageError = false;
 
     return async ({ result, update }) => {
-      pending = null;
       const body = 'data' in result ? result.data as { message?: string; pendingAction?: object; conflict?: boolean } | undefined : undefined;
       if (result.type === 'error' || body?.pendingAction) {
+        pending = null;
         message = body?.message ?? 'The outcome is unknown. Retry this exact action.';
         messageError = true;
         return;
@@ -395,17 +396,32 @@ let canPreview = $derived(!!preview && !!previewPayload
       if (result.type === 'success') {
         message = body?.message ?? `${label(commandAction.kind)} complete.`;
         messageError = false;
-        await animateAcceptedCommand(commandAction.burnAction);
-        pendingAction = null;
-        clearPreview();
-        pane = null;
-        previewReturnPane = null;
-        restoredFocusChoiceId = null;
-        lastAutoPreviewKey = '';
-        if (batchMode) await oncancelbatch();
-        if (moveSourceId) await oncancelmove();
-        await update({ reset: false, invalidateAll: true });
+        try {
+          await finishCommittedGardenAction({
+            playBurn: () => animateAcceptedCommand(commandAction.burnAction),
+            refreshSnapshot: async () => {
+              if (batchMode) await oncancelbatch();
+              if (moveSourceId) await oncancelmove();
+              await update({ reset: false, invalidateAll: true });
+            },
+            returnToUpdatedPlot: () => {
+              pendingAction = null;
+              clearPreview();
+              pane = null;
+              section = 'root';
+              previewReturnPane = null;
+              restoredFocusChoiceId = null;
+              lastAutoPreviewKey = '';
+              pending = null;
+            }
+          });
+        } catch {
+          pending = null;
+          message = 'The action was accepted, but the garden could not refresh. Retry this exact action to recover its receipt.';
+          messageError = true;
+        }
       } else {
+        pending = null;
         message = body?.conflict
           ? 'The garden changed before this action was accepted. Review the new state and preview again.'
           : body?.message ?? 'The action was rejected. Review the inputs and preview again.';
@@ -755,6 +771,9 @@ let canPreview = $derived(!!preview && !!previewPayload
     if (actionPane === 'compost_ingredient') return compostBatchId ? `compost-batch:${compostBatchId}` : null;
     return pane ?? (section === 'root' ? null : section);
   });
+  let selectedGreenManureJob = $derived(selected
+    ? snapshot.garden?.compostJobs.find((job) => job.cellId === selected.id && job.sourceKind === 'green_manure') ?? null
+    : null);
   let hasFolio = $derived(Boolean(selected || recordsOpen));
   let hasHand = $derived(Boolean(selected && !recordsOpen && !(pane === 'apiary' && apiaryHand?.previewOpen)));
   let frameFocusKey = $derived(selected?.id ?? (recordsOpen ? 'garden-ledger' : null));
@@ -910,6 +929,12 @@ let canPreview = $derived(!!preview && !!previewPayload
     <GardenOverview {snapshot} />
   {:else if selected}
     <div class="plot-folio" data-garden-plot-folio>
+      {#if selectedGreenManureJob}
+        <p class="garden-job-status" role="status" data-garden-green-manure-job>
+          <strong>Clover is enriching this plot.</strong>
+          <span>Next soil release: Day {selectedGreenManureJob.readyDay} · {selectedGreenManureJob.releasesRemaining} remaining</span>
+        </p>
+      {/if}
       {#if pane !== 'plant' && pane !== 'apiary'}<CropDetails cell={selected} />{/if}
       {#if selected.kind === 'plant' && selected.harvestable && harvest}
         <div hidden>
@@ -1103,6 +1128,8 @@ let canPreview = $derived(!!preview && !!previewPayload
   .preview-options { display: grid; gap: .35rem; }
   .preview-detail, .preview-warning { margin: 0; padding: .4rem .5rem; border-left: 2px solid #7f642e; color: #d6c493; font-family: Georgia,serif; font-size: .74rem; line-height: 1.4; }
   .preview-warning { border-color: #b17832; color: #f0cb84; }
+  .garden-job-status { display: grid; gap: .2rem; margin: 0; padding: .55rem .65rem; border-left: 2px solid #a8ad54; color: #e0d7a7; background: rgb(28 31 16 / 62%); font-size: .73rem; line-height: 1.4; }
+  .garden-job-status span { color: #bdc08e; }
   .error { color: #ffd0ba; }
   .hidden-submit-form { display: none; }
 </style>

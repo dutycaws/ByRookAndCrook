@@ -26,9 +26,10 @@
     form?: { message?: string; error?: boolean } | null;
     oncancel?: () => void;
     onbusychange?: (busy: boolean) => void;
+    onacquired?: (event: { actionId: string; item: GeneratedSupplyCatalogItem }) => void;
   };
 
-  let { supplies, item, saveId, revision, burnStyle = 'drip', form, oncancel, onbusychange }: Props = $props();
+  let { supplies, item, saveId, revision, burnStyle = 'drip', form, oncancel, onbusychange, onacquired }: Props = $props();
   let purchaseForm: HTMLFormElement | undefined = $state();
   let pendingCommand = $state<PurchaseCommand | null>(null);
   let pending = $state(false);
@@ -120,7 +121,8 @@
               try { await update({ reset: false, invalidateAll: true }); }
               catch { message = 'Provision purchased, but updated stock could not be loaded. Refresh the shop to check your pantry.'; messageError = true; }
               if (pendingCommand?.actionId === command.actionId) pendingCommand = null;
-              void startSuccessBurn(command);
+              await startSuccessBurn(command);
+              onacquired?.({ actionId: command.actionId, item: command.item });
             } else if (pendingCommand?.actionId === command.actionId) {
               pendingCommand = null;
             }

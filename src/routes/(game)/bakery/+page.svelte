@@ -4,10 +4,12 @@
   import CardWorkflowFrame from '$lib/components/ui/CardWorkflowFrame.svelte';
   import WorkflowHand from '$lib/components/ui/WorkflowHand.svelte';
   import WorkflowInspection from '$lib/components/ui/WorkflowInspection.svelte';
+  import AcquisitionReveal from '$lib/components/ui/AcquisitionReveal.svelte';
   import type { WorkflowChoice } from '$lib/components/ui/workflow';
   import { resolveBurnAction, waitForBurn, type ResolvedBurnAction } from '$lib/card-effects';
   import BakeryScene from '$lib/components/scenes/BakeryScene.svelte';
-  import { qualityLabel } from '$lib/game/contracts';
+  import { qualityLabel, type CompleteBakeReceipt } from '$lib/game/contracts';
+  import { bakeAcquisitionCard, claimAcquisitionReceipt, type AcquisitionCard } from '$lib/game/acquisition';
   import { deriveBakeVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
 
@@ -42,6 +44,8 @@
   let hydrated = $state(false);
   let startBurning = $state(false);
   let startBurnAction = $state<ResolvedBurnAction | undefined>();
+  let acquisitionCard = $state<AcquisitionCard | null>(null);
+  const seenAcquisitionEvents = new Set<string>();
 
   onMount(() => { hydrated = true; });
 
@@ -207,11 +211,18 @@
           selectedIngredientId = null;
           focusReturnId = null;
         }
+        let completedAcquisition: AcquisitionCard | null = null;
+        if (kind === 'complete' && result.type === 'success' && 'data' in result) {
+          const receipt = (result.data as { receipt?: CompleteBakeReceipt } | undefined)?.receipt;
+          const eventId = claimAcquisitionReceipt('bake', kind, command.actionId, receipt?.actionId, seenAcquisitionEvents);
+          if (eventId && receipt) completedAcquisition = bakeAcquisitionCard(eventId, receipt);
+        }
         unresolved = null;
         try {
           await update({ reset: false, invalidateAll: true });
         } finally {
           pending = false;
+          if (completedAcquisition) acquisitionCard = completedAcquisition;
         }
       };
     };
@@ -429,6 +440,9 @@
       <input type="hidden" name="actionId" value="" />
       <input type="hidden" name="expectedRevision" value={snapshot.save.revision} />
     </form>
+    {#if acquisitionCard}
+      <AcquisitionReveal open {...acquisitionCard} ondismiss={() => acquisitionCard = null} />
+    {/if}
   {/if}
 </main>
 

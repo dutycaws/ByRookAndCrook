@@ -5,6 +5,7 @@
   import CardHand from './CardHand.svelte';
   import CardHandCard from './CardHandCard.svelte';
   import CardBurnSurface from './CardBurnSurface.svelte';
+  import TavernCardArt from '$lib/components/tavern/TavernCardArt.svelte';
   import type { WorkflowChoice } from './workflow';
 
   let { items, label, selectedId = null, focusId = null, burnStyle = 'drip', burningId = null, burnAction, pending = false, muted = false, onchoose, card: renderCard }: {
@@ -59,7 +60,13 @@
         <CardHandCard label={item.title} aria-describedby={`${handId}-${index}-details`} selected={selectedId === null ? undefined : item.id === selectedId} disabled={pending || !!activeId || !!burningId || item.disabled} shimmer data-workflow-choice={item.id} onclick={() => choose(item)}>
           <span id={`${handId}-${index}-details`} class="sr-only">{[item.description, item.meta, item.actionLabel].filter(Boolean).join(' · ')}</span>
           {#if renderCard}{@render renderCard(item, index)}{:else}
-            <div class="choice-art" aria-hidden="true">{item.icon ?? '✧'}</div>
+            <div class="choice-art" aria-hidden="true">
+              {#if item.artwork}
+                <TavernCardArt kind={item.artwork.kind} seed={item.artwork.seed} />
+              {:else}
+                {item.icon ?? '✧'}
+              {/if}
+            </div>
             <div class="choice-copy">
               {#if item.eyebrow}<p class="eyebrow">{item.eyebrow}</p>{/if}
               <h3>{item.title}</h3>
@@ -78,6 +85,7 @@
   .workflow-hand { min-width: 0; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .choice-art { min-height: 4.7rem; display: grid; place-items: center; border-bottom: 1px solid #9d793f55; border-radius: .4rem; background: radial-gradient(ellipse at center,#86602e66,transparent 70%); color: #e0bb73; font-size: 2.7rem; }
+  .choice-art :global(svg) { display: block; width: 4.7rem; height: 4.7rem; }
   .choice-copy { display: grid; align-content: start; gap: .35rem; }
   .choice-copy h3, .choice-copy p { margin: 0; }
   .choice-copy h3 { font-size: 1rem; }

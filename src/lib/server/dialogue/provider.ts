@@ -11,6 +11,10 @@ export interface DialogueProvider { contextIdentity?: string; countContext?(cano
 export class ProviderUnavailable extends Error {
   constructor(message: string) { super(message); this.name = 'ProviderUnavailable'; }
 }
+/** A completed, non-refusal response that cannot be checkpointed safely. */
+export class ProviderStructuredOutputError extends ProviderUnavailable {
+  constructor(message: string) { super(message); }
+}
 export class ProviderContextBudgetError extends Error {
   constructor(message: string) { super(message); this.name = 'ProviderContextBudgetError'; }
 }
@@ -72,10 +76,13 @@ export function createProvider(config: Record<string,string | undefined>): Dialo
     if(!response.ok) throw new ProviderUnavailable(`OpenAI request failed (${response.status}).`);
     const result=await response.json();
     if(result.status!=='completed') throw new ProviderUnavailable('OpenAI did not complete the generation.');
+    if(result.output?.some((item:any)=>item.type==='message' && item.content?.some((part:any)=>part.type==='refusal'))) {
+      throw new ProviderUnavailable('The model declined this conversation request. Please rephrase it.');
+    }
     const raw=stage==='investigate' ? result.output?.find((o:any)=>o.type==='function_call'&&o.name==='request_context')?.arguments
       : result.output?.filter((o:any)=>o.type==='message').flatMap((o:any)=>o.content).filter((o:any)=>o.type==='output_text').map((o:any)=>o.text).join('');
-    let value; try {value=JSON.parse(raw);} catch {throw new ProviderUnavailable('OpenAI returned an incomplete structured response.');}
-    if(!matchesSchema(value,schemas[stage])) throw new ProviderUnavailable('OpenAI returned an invalid structured response.');
+    let value; try {value=JSON.parse(raw);} catch {throw new ProviderStructuredOutputError('OpenAI returned an incomplete structured response.');}
+    if(!matchesSchema(value,schemas[stage])) throw new ProviderStructuredOutputError('OpenAI returned an invalid structured response.');
     // Preserve the checkpoint-compatible semantic version; the safe ledger
     // carries the pinned revision and content hash separately.
     return {value,usage:parseTextProviderUsage(result.usage),model,durationMs:Math.round(performance.now()-started),promptVersion:PROMPT_VERSION,preflight};

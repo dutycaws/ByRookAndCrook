@@ -4,10 +4,12 @@
   import CardWorkflowFrame from '$lib/components/ui/CardWorkflowFrame.svelte';
   import WorkflowHand from '$lib/components/ui/WorkflowHand.svelte';
   import WorkflowInspection from '$lib/components/ui/WorkflowInspection.svelte';
+  import AcquisitionReveal from '$lib/components/ui/AcquisitionReveal.svelte';
   import type { WorkflowChoice } from '$lib/components/ui/workflow';
   import { resolveBurnAction, waitForBurn, type ResolvedBurnAction } from '$lib/card-effects';
   import BreweryScene from '$lib/components/scenes/BreweryScene.svelte';
-  import { qualityLabel } from '$lib/game/contracts';
+  import { qualityLabel, type CompleteBrewReceipt } from '$lib/game/contracts';
+  import { brewAcquisitionCard, claimAcquisitionReceipt, type AcquisitionCard } from '$lib/game/acquisition';
   import {
     clamp,
     shortestAngleDelta,
@@ -38,6 +40,8 @@
   let startBurning = $state(false);
   let startBurnAction = $state<ResolvedBurnAction | undefined>();
   let hydrated = $state(false);
+  let acquisitionCard = $state<AcquisitionCard | null>(null);
+  const seenAcquisitionEvents = new Set<string>();
   let stirring = $state<GuidedStirTelemetry>({
     phase: 'countdown', inputKind: 'none', direction: null, performance: 'ready',
     remainingMs: 17_000, perfectTicks: 0, goodTicks: 0, totalTicks: 0,
@@ -200,11 +204,18 @@
           selectedIngredientId = null;
           focusReturnId = null;
         }
+        let completedAcquisition: AcquisitionCard | null = null;
+        if (kind === 'complete' && result.type === 'success' && 'data' in result) {
+          const receipt = (result.data as { receipt?: CompleteBrewReceipt } | undefined)?.receipt;
+          const eventId = claimAcquisitionReceipt('brew', kind, command.actionId, receipt?.actionId, seenAcquisitionEvents);
+          if (eventId && receipt) completedAcquisition = brewAcquisitionCard(eventId, receipt);
+        }
         unresolved = null;
         try {
           await update({ reset: false, invalidateAll: true });
         } finally {
           pending = false;
+          if (completedAcquisition) acquisitionCard = completedAcquisition;
         }
       };
     };
@@ -390,6 +401,9 @@
       <input type="hidden" name="actionId" value="" />
       <input type="hidden" name="expectedRevision" value={snapshot.save.revision} />
     </form>
+    {#if acquisitionCard}
+      <AcquisitionReveal open {...acquisitionCard} ondismiss={() => acquisitionCard = null} />
+    {/if}
   {/if}
 </main>
 

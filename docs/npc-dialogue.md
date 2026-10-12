@@ -112,6 +112,8 @@ OpenAI uses the Responses API: investigation is a strict controlled function cal
 
 References: [function calling](https://developers.openai.com/api/docs/guides/function-calling), [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
+A completed response with missing, malformed, or schema-invalid structured output gets one automatic retry for that stage, within the existing deadline and call budget. The repair allowance is checkpointed so retrying the same turn cannot reset it. Refusals, incomplete generations, and transport errors do not trigger this repair. Valid stages stay checkpointed, and failed generation never consumes an offering.
+
 ## Implementation and verification map
 
 - First-party content: one editable, canonical JSON catalog per identity in `supabase/content/first-party-npcs/*.json`. Each active release uses `npc-sheet-v2` and declares only server-issued capability option IDs.

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database, Json } from '$lib/database.types';
 import { hasExecutableSteps, type Decision, type DialogueInput } from '$lib/game/dialogue';
-import { ProviderContextBudgetError, type DialogueProvider } from './provider';
+import { ProviderContextBudgetError, ProviderStructuredOutputError, type DialogueProvider } from './provider';
 import { ContextBudgetError, describePayload, evidenceKey, isDuplicateMemoryEvidence, prepareContext, requirePayloadBudget, stagePayload, utf8Bytes, type ContextWindow } from './context';
 import { assembleNpcMemoryContext, canonicalNpcMemoryContextPayload, dialogueContextTier, sha256Hex, utf8Bytes as artifactUtf8Bytes, ContextAssemblyConfigurationError, InsufficientNpcMemoryContextError, type NpcMemoryContextArtifact } from '$lib/server/npc-memory/context';
 import { getProjectionArtifact, invalidateProjectionInstance, putProjectionArtifact } from '$lib/server/npc-memory/projection-cache';
@@ -199,6 +199,7 @@ export function validateDecision(raw:unknown,base:any,message:string): Decision 
 }
 function observabilityErrorCode(cause: unknown): string {
   if (cause instanceof ProviderContextBudgetError) return 'context_budget';
+  if (cause instanceof ProviderStructuredOutputError) return 'provider_malformed';
   if (cause instanceof DialogueError) return cause.code;
   if (cause instanceof Error && cause.name === 'ProviderUnavailable') return 'provider_unavailable';
   return 'provider_failed';
@@ -240,7 +241,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   let cacheHit=false;
   let frozenTelemetry: FrozenDialogueArtifact | null=null;
   async function generate(name:string,stage:Stage,payload:unknown,rememberRetry?:{previousOutput:unknown;issues:RememberQuoteIssue[]}):Promise<any> {
-    if(checkpoints[name] && (name.startsWith('investigate') || checkpoints[name].artifactHash===frozenTelemetry?.hash)) {
+    if(checkpoints[name] && Object.hasOwn(checkpoints[name],'value') && (name.startsWith('investigate') || checkpoints[name].artifactHash===frozenTelemetry?.hash)) {
       const priorCheckpoint=checkpoints[name];
       const value=priorCheckpoint.value;
       if(stage==='remember') {
@@ -252,7 +253,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
             if(priorCheckpoint.quoteRepairAttempted===true) {
               throw new DialogueError('The conversation could not be saved accurately. Please rephrase and try again.',503,'STRUCTURE');
             }
-            const marker={quoteRepairAttempted:true,quoteValidationFeedback:issues,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
+            const marker={providerRepairAttempted:priorCheckpoint.providerRepairAttempted===true,quoteRepairAttempted:true,quoteValidationFeedback:issues,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
             await checkpoint(name,marker);
             checkpoints[name]=marker;
             return generate(name,stage,payload,{previousOutput:normalized,issues});
@@ -301,8 +302,17 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
       out=await provider.generate(stage,retryPayload,signal,prompt);
     }
     catch (cause) {
-      await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_failed' }).catch(()=>{});
+      await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:cause instanceof ProviderStructuredOutputError?'provider_malformed':'provider_failed' }).catch(()=>{});
       await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:signal.aborted?'provider_timeout':observabilityErrorCode(cause)});
+      if(cause instanceof ProviderStructuredOutputError && checkpoints[name]?.providerRepairAttempted!==true
+        && !signal.aborted && calls<Math.min(8,options.maxCalls??8)) {
+        // Reserve the repair durably before another charged request. Reuse the
+        // pinned prompt and payload; game effects still commit only once.
+        const marker={...checkpoints[name],providerRepairAttempted:true,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
+        await checkpoint(name,marker);
+        checkpoints[name]=marker;
+        return generate(name,stage,payload,rememberRetry);
+      }
       throw cause;
     }
     if(signal.aborted) {
@@ -322,7 +332,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
         await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'failed',errorCode:'provider_malformed' }).catch(()=>{});
         await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'failed',attempt:calls,errorCode:'structure'});
         if(rememberRetry) throw new DialogueError('The conversation could not be saved accurately. Please rephrase and try again.',503,'STRUCTURE');
-        const marker={quoteRepairAttempted:true,quoteValidationFeedback:issues,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
+        const marker={providerRepairAttempted:checkpoints[name]?.providerRepairAttempted===true,quoteRepairAttempted:true,quoteValidationFeedback:issues,...(frozenTelemetry?{artifactHash:frozenTelemetry.hash}:{})};
         await checkpoint(name,marker);
         checkpoints[name]=marker;
         return generate(name,stage,payload,{previousOutput:out.value,issues});
@@ -330,7 +340,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     }
     await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'completed',model:out.model,durationMs:out.durationMs,inputTokens:out.usage.input,outputTokens:out.usage.output }).catch(()=>{});
       await emitAiObservability(options.observability,{correlationId:input.turnId,workflow:'dialogue',stage:name,status:'completed',attempt:calls,durationMs:out.durationMs,model:out.model,tokenUsage:out.usage,memoryContext:memoryContextMeasurements(retryPayload,contextWasReplayed?'replayed':cacheHit?'cache_hit':'fresh',out.preflight,frozenTelemetry)});
-    const recorded={...out,inputContext:describePayload(retryPayload),...(frozenTelemetry?{artifactRevision:frozenTelemetry.revision,artifactHash:frozenTelemetry.hash}:{}),...(rememberRetry?{quoteRepairAttempted:true,quoteValidationFeedback:rememberRetry.issues}:{})};
+    const recorded={...out,inputContext:describePayload(retryPayload),...(frozenTelemetry?{artifactRevision:frozenTelemetry.revision,artifactHash:frozenTelemetry.hash}:{}),...(checkpoints[name]?.providerRepairAttempted===true?{providerRepairAttempted:true}:{}),...(rememberRetry?{quoteRepairAttempted:true,quoteValidationFeedback:rememberRetry.issues}:{})};
     await checkpoint(name,recorded); checkpoints[name]=recorded;
     return out.value;
   }

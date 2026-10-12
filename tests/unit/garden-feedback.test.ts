@@ -101,8 +101,9 @@ describe('confirmed Garden feedback', () => {
       normalizedPayload: { cellIds: ['cell-3', 'cell-5'] }, result: { targetCount: 2 }
     }, options)).toBe('Fertilized 2 plots');
     expect(gardenSuccessFeedback('incorporate_clover', {
-      normalizedPayload: { cellId: 'cell-11' }, result: { cellId: 'cell-11' }
-    }, options)).toBe('Incorporated clover in C11');
+      normalizedPayload: { cellId: 'cell-11' },
+      result: { cellId: 'cell-11', firstReleaseDay: 4, releases: 3 }
+    }, options)).toBe('Incorporated clover in C11; 3 soil releases begin on Day 4.');
     expect(gardenSuccessFeedback('compost_ingredient', {
       normalizedPayload: { cellId: 'cell-11' }, result: { cellId: 'cell-11', quantityConsumed: 2 }
     }, options)).toBe('Composted 2 ingredient units in C11');
