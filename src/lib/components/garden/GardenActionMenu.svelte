@@ -887,6 +887,7 @@ let canPreview = $derived(!!preview && !!previewPayload
               {:else}
                 The occupant at Plot {selected?.layoutKey ?? 'the source plot'} will move to the selected destination.
               {/if}
+              Soil remains with its original plot.
             </p>
           {:else if currentPreview.commandKind === 'remove'}
             <p class="preview-detail">

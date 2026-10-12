@@ -62,6 +62,11 @@
   .inspection-back:disabled { cursor: not-allowed; opacity: .6; }
   .inspection-error { margin: 0; padding: .65rem; color: #ffe2cc; background: #5d261ce6; border-radius: .4rem; font-size: .85rem; }
   @keyframes inspect-arrive { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
+  @media (min-width: 701px) and (max-height: 800px) {
+    .workflow-inspection { gap: .55rem; }
+    .workflow-inspection :global(.workflow-inspection-card) { min-height: 17rem; }
+    .inspection-art { min-height: 4.25rem; font-size: 3.25rem; }
+  }
   @media (max-width: 700px) { .workflow-inspection :global(.workflow-inspection-card) { min-height: 19rem; } .inspection-art { min-height: 5.5rem; font-size: 3.5rem; } .inspection-copy h2 { font-size: 1.2rem; } .inspection-copy p { font-size: .85rem; } }
   @media (prefers-reduced-motion: reduce) { .workflow-inspection { animation: none; } }
 </style>

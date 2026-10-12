@@ -59,6 +59,9 @@
   @keyframes folio-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes hand-arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
   @media (min-width: 1001px) { .card-workflow-frame.native-aspect { height: auto; min-height: 0; max-height: none; aspect-ratio: var(--workflow-scene-aspect); } }
+  @media (min-width: 701px) and (max-height: 800px) {
+    .card-workflow-frame.centered .workflow-folio { max-height: min(calc(100% - 8rem), calc(100dvh - 15rem)); }
+  }
   @media (max-width: 700px) {
     .card-workflow-frame { display: flex; flex-direction: column; min-height: 340px; height: auto; max-height: none; padding-top: 340px; }
     .workflow-scene { bottom: auto; height: 340px; }
