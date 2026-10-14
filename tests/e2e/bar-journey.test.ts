@@ -12,26 +12,55 @@ async function motionBeat(page: Page) { if (process.env.ISSUE37_CAPTURE) await p
 async function capture(page: Page, label: string) {
  if (process.env.ISSUE37_CAPTURE) await page.screenshot({path:`/tmp/rook-right-folio/${test.info().project.name}-${label}.png`,fullPage:true});
 }
-async function openBar(page:Page,player:Pick<Awaited<ReturnType<typeof createBrewedTavern>>,'email'|'password'>){
+async function openBar(page:Page,player:Pick<Awaited<ReturnType<typeof createBrewedTavern>>,'email'|'password'>,openService=true){
  await page.goto('/login');await page.getByLabel('Email').fill(player.email);await page.getByLabel('Password').fill(player.password);await page.getByRole('button',{name:'Open the ledger'}).click();await expect(page).toHaveURL(/\/garden$/);await expect(page.locator('.game-shell')).toHaveAttribute('data-hydrated','true');await page.goto('/bar');
  await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready','true');
+	if (openService) { await page.getByRole('button',{name:'Open the tavern',exact:true}).click(); await expect(page.getByRole('button',{name:'Open the tavern',exact:true})).toHaveCount(0); }
 }
 function residents(page:Page){return page.getByRole('group',{name:'Scene characters'}).getByRole('button');}
 async function nameOf(actor:Locator){const label=await actor.getAttribute('aria-label');const name=label?.match(/Speak with (.+?): /)?.[1]??label?.replace(/^Speak with /,'');if(!name)throw Error('Resident label missing');return name;}
 
-test('overview, focus, transient Escape and drafts connect without unrelated panels',async({page})=>{
- const player=await createBrewedTavern('bar-scene-focus');try{
-  await openBar(page,player);await expect(residents(page)).toHaveCount(2);for(const actor of await residents(page).all())await expect(actor).toHaveAttribute('aria-pressed','false');await expect(page.getByRole('button',{name:'Talk',exact:true})).toHaveCount(0);
-  const first=residents(page).first();await first.focus();await first.press('ArrowRight');await expect(residents(page).last()).toBeFocused();await residents(page).last().press('ArrowLeft');await expect(first).toBeFocused();const name=await nameOf(first);await first.click();await motionBeat(page);
-  await expect(page.getByRole('button',{name:'Return to the tavern room',exact:true})).toBeVisible();await expect(page.getByRole('toolbar',{name:'Your intent and hospitality cards'})).toBeVisible();await expect(page.getByRole('tablist',{name:/Actions for/})).toHaveCount(0);await capture(page,'hand');
-  await page.locator('[data-card-index="0"]').click();await motionBeat(page);const composer=page.getByRole('textbox',{name:`Your message to ${name}`});await composer.fill('A draft for this resident.');
-  await page.locator('[data-bar-control="journal"]').click();await expect(composer).toBeHidden();await expect(page.locator('[data-bar-control="journal-close"]')).toBeFocused();await expect(page.getByRole('region',{name:`${name} journal entries`})).toBeVisible();await motionBeat(page);await capture(page,'journal');
-  await page.locator('[data-bar-control="journal-close"]').press('Escape');await expect(composer).toHaveValue('A draft for this resident.');await expect(page.locator('[data-bar-control="journal"]')).toBeFocused();await composer.press('Escape');await expect(composer).toBeHidden();await expect(page.locator('[data-card-index][aria-pressed="true"]')).toBeFocused();
-  await page.keyboard.press('Escape');await expect(first).toBeFocused();await expect(residents(page)).toHaveCount(2);await expect(page.getByRole('group',{name:'Keepsake display slots'})).toBeVisible();
-  await residents(page).last().click();await page.locator('[data-card-index="0"]').click();await motionBeat(page);await expect(page.getByRole('textbox')).toHaveValue('');await page.getByRole('button',{name:'Close conversation'}).click();await page.locator('[data-bar-control="back"]').click();
-  await page.getByRole('button',{name:new RegExp(`Speak with ${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`)}).click();await page.locator('[data-card-index="0"]').click();await motionBeat(page);await expect(page.getByRole('textbox')).toHaveValue('A draft for this resident.');
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+test('known guests are visible during preparation and opening creates the daily hand',async({page})=>{
+ const player=await createTestPlayer('bar-daily-prep');try{
+	const created=await player.client.rpc('create_tavern');expect(created.error).toBeNull();
+	await openBar(page,player,false);await expect(residents(page)).toHaveCount(2);
+	await expect(page.getByText('Prepare the common room',{exact:true})).toBeVisible();
+	const preparationPlaces=page.getByRole('navigation',{name:'Preparation places'});
+	for (const place of ['Garden','Shop','Bakery','Brewery']) await expect(preparationPlaces.getByRole('link',{name:place,exact:true})).toBeVisible();
+	await page.getByRole('button',{name:'Open the tavern',exact:true}).click();
+	await expect(page.getByRole('button',{name:'Open the tavern',exact:true})).toHaveCount(0);
+	await residents(page).first().click();await page.getByRole('button',{name:'Talk',exact:true}).click();
+	const hand=page.locator('.workflow-hand');await expect(hand).toBeVisible();
+	await expect(hand.locator('[data-workflow-choice]')).toHaveCount(5);
  }finally{await player.admin.auth.admin.deleteUser(player.userId);}
+});
+
+
+test('keyboard navigation moves between guests and through the physical service hand',async({page})=>{
+ const player=await createTestPlayer('bar-keyboard-daily'); try {
+  const created=await player.client.rpc('create_tavern'); expect(created.error).toBeNull();
+  await openBar(page,player); const guests=residents(page); await expect(guests).toHaveCount(2);
+  await guests.first().focus(); await guests.first().press('ArrowRight'); await expect(guests.last()).toBeFocused();
+  await guests.last().press('ArrowLeft'); await expect(guests.first()).toBeFocused();
+  await guests.first().click(); await page.getByRole('button',{name:'Talk',exact:true}).click();
+  const cards=page.locator('.workflow-hand [data-workflow-choice]'); await expect(cards).toHaveCount(5);
+  await cards.first().focus(); await cards.first().press('End'); await expect(cards.last()).toBeFocused();
+  await cards.last().press('Home'); await expect(cards.first()).toBeFocused();
+ } finally { await player.admin.auth.admin.deleteUser(player.userId); }
+});
+
+test('the scene folio opens the resident journal without losing a physical-card draft',async({page})=>{
+ const player=await createTestPlayer('bar-journal-daily'); try {
+  const created=await player.client.rpc('create_tavern'); expect(created.error).toBeNull();
+  await openBar(page,player); const guest=residents(page).first(); const guestName=await nameOf(guest);
+  await guest.click(); await page.getByRole('button',{name:'Talk',exact:true}).click();
+  await page.locator('.workflow-hand [data-workflow-choice]').first().click();
+  const composer=page.getByRole('textbox',{name:`Your message to ${guestName}`}); await composer.fill('A draft survives a look at the journal.');
+  const journal=page.locator('[data-bar-control="journal"]'); await journal.click();
+  await expect(composer).toBeHidden(); await expect(page.getByRole('region',{name:`${guestName} journal entries`})).toBeVisible();
+  await journal.click(); await expect(composer).toHaveValue('A draft survives a look at the journal.');
+  await page.screenshot({path:'/tmp/brac-issue39-bar.png',fullPage:true});
+ } finally { await player.admin.auth.admin.deleteUser(player.userId); }
 });
 
 test('an inventory card opens Talk directly and retries the same concrete serving exactly once',async({page})=>{
@@ -54,13 +83,16 @@ test('an inventory card opens Talk directly and retries the same concrete servin
  }finally{await player.admin.auth.admin.deleteUser(player.userId);}
 });
 
-test('reduced motion preserves card dismissal, overview return and contextual empty keepsake slots',async({page})=>{
- await page.emulateMedia({reducedMotion:'reduce'});const player=await createBrewedTavern('bar-reduced-motion');try{
-  await openBar(page,player);await residents(page).first().click();await motionBeat(page);await page.getByRole('toolbar',{name:'Your intent and hospitality cards'}).getByRole('button',{name:/From the cellar\. Fennel Mead/}).click();
-  await motionBeat(page);expect(await page.locator('[data-card-index][aria-pressed="true"]').evaluate(el=>getComputedStyle(el).transform)).toBe('none');await capture(page,'reduced-motion-chat');await page.getByRole('button',{name:'Close conversation'}).click();await page.locator('[data-bar-control="back"]').click();
-  const slot=page.getByRole('button',{name:/Keepsake slot 1, empty/});await slot.click();await expect(page.locator('#keepsake-manager')).toBeVisible();await page.locator('[aria-label="Close keepsake details"]').press('Escape');await expect(page.locator('#keepsake-manager')).toHaveCount(0);await expect(slot).toBeFocused();
-  const snapshot=await player.client.rpc('npc_bar_summary');expect((snapshot.data as any).offerings.beverages).toHaveLength(1);expect((snapshot.data as any).recent.hospitality).toHaveLength(0);
- }finally{await player.admin.auth.admin.deleteUser(player.userId);}
+test('reduced motion opens a physical daily card without card motion',async({page})=>{
+ await page.emulateMedia({reducedMotion:'reduce'}); const player=await createTestPlayer('bar-reduced-motion'); try {
+  const created=await player.client.rpc('create_tavern'); expect(created.error).toBeNull();
+  await openBar(page,player); await residents(page).first().click();
+  await page.getByRole('button',{name:'Talk',exact:true}).click();
+  const cards=page.locator('.workflow-hand [data-workflow-choice]'); await expect(cards).toHaveCount(5);
+  expect(parseFloat(await cards.first().evaluate(card => getComputedStyle(card).transitionDuration))).toBeLessThanOrEqual(0.00001);
+  await cards.first().click(); await expect(page.getByRole('textbox')).toBeVisible();
+  await page.getByRole('button',{name:'Close conversation',exact:true}).click();
+ } finally { await player.admin.auth.admin.deleteUser(player.userId); }
 });
 
 test('an empty hand keeps crafting destinations, journal, and room return available', async ({page}) => {

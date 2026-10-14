@@ -144,9 +144,13 @@ select is((select consumed_quantity from public.ingredient_batches), 1, 'complet
 select is(jsonb_array_length(public.get_tavern_snapshot() #> '{ingredients}'), 0,
   'snapshot omits the exhausted fennel batch');
 select is((select count(*) from public.social_cards), 0::bigint, 'a new brew creates no legacy Pour Ale entitlement');
-select is((select count(*) from public.intent_cards where source_kind='brew'), 1::bigint, 'a qualifying brew creates one intent card');
-select is((select tier from public.intent_cards where source_kind='brew'), 'exceptional', 'Resplendent brew earns an exceptional intent card');
-select is((select card_key from public.intent_cards where source_kind='brew'), 'flirt', 'a Resplendent brew rewards Flirt');
+select is((select count(*) from public.intent_cards where source_kind='brew'), 0::bigint, 'a qualifying brew creates no social intent card');
+select ok(not exists(select 1 from public.craft_actions where result ? 'intentCardId'),
+  'Resplendent brew completion writes no social reward receipt');
+select is((select count(*) from jsonb_array_elements(
+  public.get_tavern_snapshot() #> '{brewery,intentCards}'
+) card where card->>'sourceBeverageId' is not null), 0::bigint,
+  'the brewery snapshot retains baseline starters but exposes no craft-generated reward');
 select is((select revision from public.tavern_saves), 3::bigint, 'completion advances revision once');
 select is((select day_minigame_completed from public.tavern_saves), true, 'completion records that a craft finished today');
 select ok((public.get_tavern_snapshot() #>> '{brewery,activeSession}') is null, 'completed brew is no longer active');
@@ -255,7 +259,7 @@ select throws_ok(
       '52000000-0000-4000-8000-000000000005', 5
     )
   $$,
-  'PT404', 'Tavern or ingredient not found',
+  'PT404', 'Tavern or craft not found',
   'another player cannot start a brew against the first save'
 );
 select is((select count(*) from public.brew_sessions), 0::bigint, 'RLS hides the first player brew sessions');

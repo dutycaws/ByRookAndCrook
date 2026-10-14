@@ -167,12 +167,12 @@ export function parseInput(value:unknown): DialogueInput {
   const v=value as DialogueInput;
   if(!v || typeof v!=='object' || !uuid.test(v.turnId??'') || !uuid.test(v.npcId??'') || typeof v.message!=='string'
     || !v.message.trim() || v.message.length>2000 || !Number.isSafeInteger(v.expectedConversationSequence) || v.expectedConversationSequence<0
-    || v.interactionVersion!=='dialogue-v2' || v.intentCardId!=null&&!uuid.test(v.intentCardId)
+    || v.interactionVersion!=='dialogue-v2' || v.intentCardId!=null&&!uuid.test(v.intentCardId) || v.dailyCardId!=null&&!uuid.test(v.dailyCardId)
     || v.intentCardId!=null&&v.offering!=null
     || v.offering!=null&&(!['food','beverage'].includes(v.offering.kind)||!uuid.test(v.offering.itemId)))
     throw new DialogueError('Enter a message and choose an available intent card or offering.',400,'INVALID_INPUT');
   return {turnId:v.turnId,npcId:v.npcId,message:v.message,expectedConversationSequence:v.expectedConversationSequence,
-    interactionVersion:'dialogue-v2',intentCardId:v.intentCardId??null,offering:v.offering??null};
+    interactionVersion:'dialogue-v2',intentCardId:v.intentCardId??null,...(v.dailyCardId==null?{}:{dailyCardId:v.dailyCardId}),offering:v.offering??null};
 }
 export function databaseError(e:{message:string;code:string}): DialogueError {
   const status=Number(e.code.match(/^PT(\d{3})$/)?.[1]??500);
@@ -204,13 +204,15 @@ function observabilityErrorCode(cause: unknown): string {
   if (cause instanceof Error && cause.name === 'ProviderUnavailable') return 'provider_unavailable';
   return 'provider_failed';
 }
+type NpcDialogueStage = Exclude<Stage, 'player_suggestions'>;
+
 export async function runDialogue(client:SupabaseClient<Database>,actor:string,input:DialogueInput,provider:DialogueProvider,
   options:DialogueRuntimeOptions={}) {
   const npcId = input.npcId;
   const started=performance.now();
   const signal=AbortSignal.timeout(Math.min(90000,Math.max(1000,options.deadlineMs??90000)));
   const begun=await client.rpc('npc_dialogue_begin',{p_actor:actor,p_turn_id:input.turnId,p_npc_id:npcId,p_message:input.message,
-    p_expected_sequence:input.expectedConversationSequence,p_intent_card_id:input.intentCardId??undefined,
+    p_expected_sequence:input.expectedConversationSequence,p_intent_card_id:input.intentCardId??undefined,p_daily_card_id:input.dailyCardId??undefined,
     p_offering_kind:input.offering?.kind,p_offering_item_id:input.offering?.itemId}).abortSignal(signal);
   if(begun.error) throw databaseError(begun.error);
   const turn=begun.data as any;
@@ -240,7 +242,7 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
   let contextWasReplayed=false;
   let cacheHit=false;
   let frozenTelemetry: FrozenDialogueArtifact | null=null;
-  async function generate(name:string,stage:Stage,payload:unknown,rememberRetry?:{previousOutput:unknown;issues:RememberQuoteIssue[]}):Promise<any> {
+  async function generate(name:string,stage:NpcDialogueStage,payload:unknown,rememberRetry?:{previousOutput:unknown;issues:RememberQuoteIssue[]}):Promise<any> {
     if(checkpoints[name] && Object.hasOwn(checkpoints[name],'value') && (name.startsWith('investigate') || checkpoints[name].artifactHash===frozenTelemetry?.hash)) {
       const priorCheckpoint=checkpoints[name];
       const value=priorCheckpoint.value;
@@ -296,7 +298,9 @@ export async function runDialogue(client:SupabaseClient<Database>,actor:string,i
     requirePayloadBudget(retryPayload);
     await checkpoint('reserve',null); calls++;
     let out: Awaited<ReturnType<DialogueProvider['generate']>>;
-    const prompt = releaseTextPrompt(promptRelease, DIALOGUE_PROMPT_KEY[stage]);
+    const promptKey = DIALOGUE_PROMPT_KEY[stage];
+    if (!promptKey) throw new DialogueError('The requested dialogue stage is unavailable.', 500, 'PROMPT');
+    const prompt = releaseTextPrompt(promptRelease, promptKey);
     try {
       await options.promptRegistry?.recordSafeRun({ executionId:input.turnId,attempt:calls,workflow:'dialogue',nodeKey:name,prompt,status:'started' });
       out=await provider.generate(stage,retryPayload,signal,prompt);

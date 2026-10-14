@@ -15,14 +15,9 @@ async function harvestFromGarden(page: Page) {
   if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await fennel.tap(); else await fennel.click();
   await expect(fennel).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
-  // Plot selection opens the current contextual action menu. Waiting for it
-  // also ensures the interactive Svelte scene has hydrated before submitting.
-  await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Harvest crop' }).click();
+  // The selected plot exposes its harvest action in the workflow hand.
+  await page.locator('[data-workflow-choice="harvest"]').click();
   await expect(page.getByRole('status')).toContainText('Harvested 1 ingredient');
-  const close = page.getByRole('button', { name: 'Close plot actions' });
-  if (await close.isVisible()) await close.click();
-  await expect(page.locator('[data-garden-action-menu]')).toHaveCount(0);
 }
 
 test('harvested ingredients become persistent food through the reload-safe bakery', async ({ page }) => {
@@ -37,9 +32,10 @@ test('harvested ingredients become persistent food through the reload-safe baker
 
     await page.getByRole('link', { name: 'Bakery', exact: true }).click();
     await expect(page).toHaveURL(/\/bakery$/);
-    await expect(page.getByRole('heading', { name: 'Mix an herb loaf' })).toBeVisible();
-    await expect(page.getByText('Legendary · 1 unit · Bake +4')).toBeVisible();
-    await page.getByRole('button', { name: 'Begin today’s loaf' }).click();
+    const ingredient = page.locator('[data-workflow-choice]').filter({ hasText: 'Fennel' });
+    await expect(ingredient).toContainText('Legendary');
+    await ingredient.click();
+    await page.locator('[data-workflow-confirm]').click();
 
     await expect(page.getByRole('heading', { name: 'Fold the dough' })).toBeVisible();
     await page.reload();
@@ -79,31 +75,27 @@ test('harvested ingredients become persistent food through the reload-safe baker
     await expect(page.locator('[data-motion-proof="bakery"]')).toHaveAttribute('data-loaf-appearance', 'ideal');
     await page.getByRole('button', { name: 'Take out bread' }).click();
     await expect(page.getByRole('status')).toContainText('Resplendent Hearth Loaf finished at 7 of 7 quality');
-    await expect(page.getByRole('region', { name: 'The pantry is empty' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'The pantry is empty' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Visit the garden' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Close tavern for today' })).toBeVisible();
 
     await page.route('**/assets/scenes/bakery-environment.webp', (route) => route.abort());
     await page.reload();
     await expect(page.getByText('Resplendent Hearth Loaf', { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('img', { name: 'Bakery environment artwork could not be loaded' })).toBeVisible();
-    await page.getByRole('link', { name: 'Offer it at the bar' }).click();
+    await page.goto('/bar');
     await expect(page.locator('[data-area-scene="bar"]')).toHaveAttribute('data-scene-ready', 'true');
-    const lira = page
-      .getByRole('group', { name: 'Scene characters' })
-      .getByRole('button', { name: 'Speak with Lira Nightwind: Lira Nightwind' });
-    await lira.click();
-    await expect(lira).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('radio', { name: 'Resplendent Hearth Loaf Resplendent' })).toBeChecked();
-    const intentCards = page.getByRole('group', { name: 'Choose your intent' });
-    await expect(intentCards).toContainText('Insight');
-    await expect(page.getByLabel('Offer hospitality')).toContainText('Food · Resplendent Hearth Loaf');
-    await expect(intentCards.getByRole('button', { name: /Plain No added intent/ })).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByLabel('Offer hospitality')).toHaveValue('');
-    await page.getByRole('button', { name: 'Serve to Lira Nightwind' }).click();
-    await expect(page.getByRole('status')).toContainText('Earned');
-    await expect(page.getByRole('heading', { name: 'No hospitality ready to serve' })).toBeVisible();
-    await expect(intentCards).toContainText('Insight');
+    const opened = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().includes('/bar?/open'));
+    await page.getByRole('button', { name: 'Open the tavern', exact: true }).click();
+    await opened;
+    await expect(page.getByRole('button', { name: 'Open the tavern', exact: true })).toHaveCount(0);
+    const opening = await player.client.rpc('get_tavern_snapshot');
+    expect(opening.error).toBeNull();
+    const prepared = opening.data as any;
+    expect(prepared.dailyDeck.cards.filter((card: any) => card.kind === 'social')).toHaveLength(6);
+    expect(prepared.dailyDeck.cards).toContainEqual(expect.objectContaining({
+      kind: 'food', sourceId: prepared.bakery.foods[0].id
+    }));
+    expect(prepared.dailyDeck.handIds).toHaveLength(5);
     expect(errors).toEqual([]);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);

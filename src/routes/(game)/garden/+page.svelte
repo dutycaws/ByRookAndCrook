@@ -4,13 +4,17 @@
   import GardenActionMenu from '$lib/components/garden/GardenActionMenu.svelte';
   import GardenScene from '$lib/components/scenes/GardenScene.svelte';
   import { resolveBurnAction, waitForBurn, type ResolvedBurnAction } from '$lib/card-effects';
-  import type { HarvestCommand } from '$lib/game/contracts';
+  import type { HarvestCommand, HarvestReceipt } from '$lib/game/contracts';
+  import AcquisitionReveal from '$lib/components/ui/AcquisitionReveal.svelte';
+  import { claimAcquisitionReceipt, harvestAcquisitionCard, type AcquisitionCard } from '$lib/game/acquisition';
   import { deriveGardenVisualState } from '$lib/presentation/scene';
   import type { PageProps, SubmitFunction } from './$types';
 
   let { data, form }: PageProps = $props();
   let selectedId = $state<string | null>(null);
   let pending = $state(false);
+  let acquisitionCard = $state<AcquisitionCard | null>(null);
+  const seenAcquisitionEvents = new Set<string>();
   let pendingCommand = $state<HarvestCommand | null>(null);
   let harvestForm = $state<HTMLFormElement>();
   let harvestBurnAction = $state<ResolvedBurnAction | null>(null);
@@ -157,8 +161,11 @@
     formData.set('expectedRevision', String(pendingCommand.expectedRevision));
     pending = true;
     transportError = null;
+    const command = pendingCommand;
+    const plant = { name: selected.plantName ?? 'Garden harvest', icon: selected.icon };
 
     return async ({ result, update }) => {
+      let acquired: AcquisitionCard | null = null;
       if (result.type === 'error') {
         pending = false;
         transportError = 'The harvest outcome is unknown. Retry the same harvest to check its result.';
@@ -166,6 +173,9 @@
       }
 
       if (result.type === 'success') {
+        const receipt = (result.data as { receipt?: HarvestReceipt } | undefined)?.receipt;
+        const eventId = claimAcquisitionReceipt('harvest', 'harvest_crop', command.actionId, receipt?.actionId, seenAcquisitionEvents);
+        if (eventId && receipt) acquired = harvestAcquisitionCard(eventId, receipt, plant);
         harvestBurnController?.abort();
         harvestBurnController = new AbortController();
         harvestBurnAction = resolveBurnAction(data.cardBurnStyle);
@@ -182,7 +192,8 @@
         pendingHarvestVisual = null;
       }
       pending = false;
-      await update({ reset: false, invalidateAll: true });
+      try { await update({ reset: false, invalidateAll: true }); }
+      finally { if (acquired) acquisitionCard = acquired; }
     };
   };
 
@@ -242,6 +253,7 @@
       formMessage={form?.message ?? null}
       formError={form?.success === false}
       formConflict={!!form?.conflict}
+      onacquired={(card) => { acquisitionCard = card; }}
     >
       {#snippet scene()}
         <GardenScene
@@ -262,6 +274,9 @@
         {/if}
       {/snippet}
     </GardenActionMenu>
+    {#if acquisitionCard}
+      <AcquisitionReveal open {...acquisitionCard} ondismiss={() => { acquisitionCard = null; }} />
+    {/if}
   {/if}
 </main>
 

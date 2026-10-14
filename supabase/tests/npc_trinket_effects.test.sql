@@ -2,6 +2,31 @@ begin;
 create extension if not exists pgtap with schema extensions;
 select plan(32);
 
+create function pg_temp.drain_world_settlement(p_save_id uuid,p_settlement_id uuid)
+returns void language plpgsql security definer as $$
+declare claim jsonb; processed integer:=0;
+  request_role text:=current_setting('request.jwt.claim.role',true);
+begin
+  perform set_config('request.jwt.claim.role','service_role',true);
+  loop
+    claim:=public.world_settlement_claim(p_settlement_id);
+    exit when not (claim ? 'jobId');
+    perform public.world_settlement_safe_result(
+      p_settlement_id,(claim->>'jobId')::uuid,(claim->>'fence')::uuid,
+      'no_changes','Fixture worker completed settlement.'
+    );
+    processed:=processed+1;
+    if processed>64 then raise exception 'fixture worker exceeded settlement bound'; end if;
+  end loop;
+  perform set_config('request.jwt.claim.role',coalesce(request_role,'authenticated'),true);
+  if claim->>'status'<>'completed'
+    or public.world_settlement_status(p_save_id,p_settlement_id)->>'status'<>'completed'
+    or (select world_phase from public.tavern_saves where id=p_save_id)<>'open' then
+    raise exception 'fixture worker did not terminalize and reopen settlement';
+  end if;
+end;
+$$;
+
 insert into auth.users(id,email,role,aud)
 values('76000000-0000-4000-8000-000000000001','trinket-effects@example.test','authenticated','authenticated');
 set local role authenticated;
@@ -110,36 +135,78 @@ insert into public.foods(id,save_id,name,recipe_key,quality_index,day_number,sou
 select '76000000-0000-4000-8000-000000000101',save_id,'Fine garden supper','trinket-effect-fixture',5,1,
   '76000000-0000-4000-8000-000000000102'
 from pg_temp.save_fixture;
-create temporary table pg_temp.food_hospitality(result jsonb);
-grant select on pg_temp.save_fixture,pg_temp.lira_resident,pg_temp.food_hospitality to authenticated;
-grant insert on pg_temp.food_hospitality to authenticated;
+-- Leave four social copies with the food so opening the five-card hand always
+-- contains the physical food card used by this service dialogue.
+select private.ensure_intent_cards((select save_id from pg_temp.save_fixture));
+select private.daily_deck_prepare((select save_id from pg_temp.save_fixture));
+update public.daily_deck_cards set pile='consumed',updated_at=now()
+where id in (
+  select card.id from public.daily_deck_cards card
+  where card.save_id=(select save_id from pg_temp.save_fixture)
+    and card.source_kind='social' and card.pile='draw'
+  order by card.id offset 4
+);
+create temporary table pg_temp.food_deck_open(result jsonb);
+grant select,insert on pg_temp.food_deck_open to authenticated;
+grant select on pg_temp.save_fixture,pg_temp.lira_resident to authenticated;
 reset role;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
-insert into pg_temp.food_hospitality
-select public.npc_serve_hospitality(
-  (select save_id from pg_temp.save_fixture),(select instance_id from pg_temp.lira_resident),
-  'food','76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000103',
-  (select initial_revision from pg_temp.save_fixture)
+insert into pg_temp.food_deck_open
+select public.daily_deck_open((select initial_revision from pg_temp.save_fixture));
+create temporary table pg_temp.food_daily_card as
+select id as daily_card_id from public.daily_deck_cards
+where save_id=(select save_id from pg_temp.save_fixture)
+  and source_kind='food' and source_id='76000000-0000-4000-8000-000000000101' and pile='hand';
+reset role;
+set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.food_dialogue_begin as
+select public.npc_dialogue_begin(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103',
+  (select npc_id from pg_temp.lira_identity),'A supper for our guest.',0,null,'food',
+  '76000000-0000-4000-8000-000000000101',(select daily_card_id from pg_temp.food_daily_card)
+) as value;
+create temporary table pg_temp.food_dialogue_base as
+select public.npc_dialogue_context(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103','base',''
+) as value;
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103',
+  (select (value->>'fence')::uuid from pg_temp.food_dialogue_begin),'base',
+  jsonb_build_object('value',(select value from pg_temp.food_dialogue_base))
 );
-select is((select result->>'baseGoldEarned' from pg_temp.food_hospitality),'25',
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103',
+  (select (value->>'fence')::uuid from pg_temp.food_dialogue_begin),'decision',
+  '{"value":{"stance":"respond","reaction":0,"subject":"hospitality","evidence":"","intention":null},"validated":true}'::jsonb
+);
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103',
+  (select (value->>'fence')::uuid from pg_temp.food_dialogue_begin),'speak',
+  '{"value":{"text":"The garden supper is a generous welcome."}}'::jsonb
+);
+create temporary table pg_temp.food_hospitality as
+select public.npc_dialogue_complete(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103',
+  (select (value->>'fence')::uuid from pg_temp.food_dialogue_begin)
+) as result;
+select is((select result#>>'{serving,baseGoldEarned}' from pg_temp.food_hospitality),'25',
   'food quality five uses the existing 25-gold base curve');
-select is((select result->>'trinketRevenueBonusBasisPoints' from pg_temp.food_hospitality),'1500',
+select is((select result#>>'{serving,trinketRevenueBonusBasisPoints}' from pg_temp.food_hospitality),'1500',
   'hospitality snapshots all three active revenue effects');
-select is((select result->>'goldEarned' from pg_temp.food_hospitality),'29',
+select is((select result#>>'{serving,goldEarned}' from pg_temp.food_hospitality),'29',
   'three five-percent effects apply once and round 25 times 1.15 to 29');
-select is(public.npc_serve_hospitality(
-  (select save_id from pg_temp.save_fixture),(select instance_id from pg_temp.lira_resident),
-  'food','76000000-0000-4000-8000-000000000101','76000000-0000-4000-8000-000000000103',
-  (select initial_revision from pg_temp.save_fixture)
+select is(public.npc_dialogue_complete(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000103',
+  (select (value->>'fence')::uuid from pg_temp.food_dialogue_begin)
 ), (select result from pg_temp.food_hospitality),
   'exact hospitality action replay returns the trinket-aware committed receipt');
 reset role;
 select is((select save.gold-fixture.initial_gold from public.tavern_saves save
   cross join pg_temp.save_fixture fixture where save.id=fixture.save_id),29::bigint,
   'the save balance commits the rounded food revenue exactly once');
-select is((select result->>'rulesVersion' from pg_temp.food_hospitality),'world-hospitality-v2',
+select is((select result#>>'{serving,rulesVersion}' from pg_temp.food_hospitality),'world-hospitality-v2',
   'the authoritative hospitality receipt is versioned');
 
 insert into public.garden_inventory(save_id,item_key,quantity)
@@ -155,7 +222,7 @@ set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
 select lives_ok($$select public.garden_command(
   (select save_id from pg_temp.save_fixture),'76000000-0000-4000-8000-000000000104',
-  (select initial_revision+1 from pg_temp.save_fixture),'plant',
+  (select initial_revision+2 from pg_temp.save_fixture),'plant',
   jsonb_build_object('cellId',(select cell_id from pg_temp.first_plant_target),'seedItemKey','seed_clover'))$$,
   'plant command creates the crop through the public garden path');
 reset role;
@@ -173,7 +240,7 @@ set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
 insert into pg_temp.first_harvest
 select public.harvest_crop((select save_id from pg_temp.save_fixture),
   (select cell_id from pg_temp.first_plant_target),'76000000-0000-4000-8000-000000000105',
-  (select initial_revision+2 from pg_temp.save_fixture));
+  (select initial_revision+3 from pg_temp.save_fixture));
 select is((select jsonb_build_object('base',result->'baseQualityIndex','bonus',result->'trinketQualityBonus','final',result->'qualityIndex')
   from pg_temp.first_harvest),'{"base":5,"bonus":1,"final":6}'::jsonb,
   'Lira''s earned trinket raises a real harvested batch from quality five to six');
@@ -182,7 +249,7 @@ select is((select batch.quality_index from public.ingredient_batches batch
   'the trinket-adjusted harvest quality is persisted on the ingredient batch');
 select is(public.harvest_crop((select save_id from pg_temp.save_fixture),
   (select cell_id from pg_temp.first_plant_target),'76000000-0000-4000-8000-000000000105',
-  (select initial_revision+2 from pg_temp.save_fixture)),(select result from pg_temp.first_harvest),
+  (select initial_revision+3 from pg_temp.save_fixture)),(select result from pg_temp.first_harvest),
   'exact harvest replay returns its original effect-aware receipt');
 select is((select result->>'trinketRulesVersion' from pg_temp.first_harvest),'trinket-effects-v1',
   'the persisted harvest receipt identifies its trinket rules version');
@@ -199,7 +266,7 @@ set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
 select lives_ok($$select public.garden_command(
   (select save_id from pg_temp.save_fixture),'76000000-0000-4000-8000-000000000106',
-  (select initial_revision+3 from pg_temp.save_fixture),'plant',
+  (select initial_revision+4 from pg_temp.save_fixture),'plant',
   jsonb_build_object('cellId',(select cell_id from pg_temp.second_plant_target),'seedItemKey','seed_clover'))$$,
   'a second crop can be planted for the quality-cap check');
 reset role;
@@ -217,7 +284,7 @@ set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
 insert into pg_temp.second_harvest
 select public.harvest_crop((select save_id from pg_temp.save_fixture),
   (select cell_id from pg_temp.second_plant_target),'76000000-0000-4000-8000-000000000107',
-  (select initial_revision+4 from pg_temp.save_fixture));
+  (select initial_revision+5 from pg_temp.save_fixture));
 select is((select jsonb_build_object('base',result->'baseQualityIndex','bonus',result->'trinketQualityBonus','final',result->'qualityIndex')
   from pg_temp.second_harvest),'{"base":6,"bonus":1,"final":6}'::jsonb,
   'harvest quality clamps at six when the trinket bonus exceeds the base cap');
@@ -284,22 +351,86 @@ grant select on pg_temp.drink_beverages to authenticated;
 
 select is((select drink_revenue_basis_points from private.trinket_effect_totals(
   (select save_id from pg_temp.save_fixture))),0,'an unequipped drink trinket contributes no drink revenue');
-create temporary table pg_temp.stored_drink_hospitality(result jsonb);
-grant select,insert on pg_temp.stored_drink_hospitality to authenticated;
+create temporary table pg_temp.beverage_day_advance(result jsonb);
+grant select,insert on pg_temp.beverage_day_advance to authenticated;
 create temporary table pg_temp.drink_swap(result jsonb);
 grant select,insert on pg_temp.drink_swap to authenticated;
 set local role authenticated;
 set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
-insert into pg_temp.stored_drink_hospitality
-select public.npc_serve_hospitality(
-  (select save_id from pg_temp.save_fixture),(select instance_id from pg_temp.lira_resident),
-  'beverage','76000000-0000-4000-8000-000000000203','76000000-0000-4000-8000-000000000205',
-  (select revision from public.tavern_saves where id=(select save_id from pg_temp.save_fixture)));
-select is((select result->>'trinketRevenueBonusBasisPoints' from pg_temp.stored_drink_hospitality),'0',
-  'direct beverage hospitality snapshots zero bonus while the drink trinket is unequipped');
-select is((select result->>'goldEarned' from pg_temp.stored_drink_hospitality),'25',
+insert into pg_temp.beverage_day_advance select public.advance_tavern_day(
+  (select save_id from pg_temp.save_fixture),'76000000-0000-4000-8000-000000000208',
+  (select revision from public.tavern_saves where id=(select save_id from pg_temp.save_fixture))
+);
+select pg_temp.drain_world_settlement(
+  (select save_id from pg_temp.save_fixture),
+  (select (result#>>'{worldSettlement,settlementId}')::uuid from pg_temp.beverage_day_advance)
+);
+reset role;
+set local request.jwt.claim.role='service_role';
+update public.daily_deck_cards set pile='consumed',updated_at=now()
+where id in (
+  select card.id from public.daily_deck_cards card
+  join public.daily_decks deck on deck.id=card.deck_id
+  where card.save_id=(select save_id from pg_temp.save_fixture)
+    and deck.day_number=(select current_day from public.tavern_saves where id=card.save_id)
+    and card.source_kind='social' and card.pile='draw'
+  order by card.id offset 3
+);
+create temporary table pg_temp.beverage_deck_open(result jsonb);
+grant select,insert on pg_temp.beverage_deck_open to authenticated;
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
+insert into pg_temp.beverage_deck_open
+select public.daily_deck_open((select revision from public.tavern_saves where id=(select save_id from pg_temp.save_fixture)));
+create temporary table pg_temp.stored_drink_daily_card as
+select id as daily_card_id from public.daily_deck_cards
+where save_id=(select save_id from pg_temp.save_fixture)
+  and source_kind='beverage' and source_id='76000000-0000-4000-8000-000000000203' and pile='hand';
+create temporary table pg_temp.equipped_drink_daily_card as
+select id as daily_card_id from public.daily_deck_cards
+where save_id=(select save_id from pg_temp.save_fixture)
+  and source_kind='beverage' and source_id='76000000-0000-4000-8000-000000000204' and pile='hand';
+reset role;
+set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.stored_drink_dialogue_begin as
+select public.npc_dialogue_begin(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000205',
+  (select npc_id from pg_temp.lira_identity),'A toast to a quiet evening.',1,null,'beverage',
+  '76000000-0000-4000-8000-000000000203',(select daily_card_id from pg_temp.stored_drink_daily_card)
+) as value;
+create temporary table pg_temp.stored_drink_dialogue_base as
+select public.npc_dialogue_context(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000205','base',''
+) as value;
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000205',
+  (select (value->>'fence')::uuid from pg_temp.stored_drink_dialogue_begin),'base',
+  jsonb_build_object('value',(select value from pg_temp.stored_drink_dialogue_base))
+);
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000205',
+  (select (value->>'fence')::uuid from pg_temp.stored_drink_dialogue_begin),'decision',
+  '{"value":{"stance":"respond","reaction":0,"subject":"hospitality","evidence":"","intention":null},"validated":true}'::jsonb
+);
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000205',
+  (select (value->>'fence')::uuid from pg_temp.stored_drink_dialogue_begin),'speak',
+  '{"value":{"text":"A quiet evening deserves a good mead."}}'::jsonb
+);
+create temporary table pg_temp.stored_drink_hospitality as
+select public.npc_dialogue_complete(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000205',
+  (select (value->>'fence')::uuid from pg_temp.stored_drink_dialogue_begin)
+) as result;
+select is((select result#>>'{serving,trinketRevenueBonusBasisPoints}' from pg_temp.stored_drink_hospitality),'0',
+  'the unequipped drink trinket contributes no bonus through dialogue service');
+select is((select result#>>'{serving,goldEarned}' from pg_temp.stored_drink_hospitality),'25',
   'an unequipped drink trinket leaves the quality-five beverage payout at 25 gold');
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='76000000-0000-4000-8000-000000000001';
 insert into pg_temp.drink_swap
 select public.npc_swap_trinket(
   (select save_id from pg_temp.save_fixture),(select trinket_id from pg_temp.drink_trinket),
@@ -315,10 +446,19 @@ select is((select drink_revenue_basis_points from private.trinket_effect_totals(
 create temporary table pg_temp.drink_dialogue_begin as
 select public.npc_dialogue_begin(
   '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000207',
-  (select npc_id from pg_temp.lira_identity),'A toast to honest trade.',0,null,'beverage',
-  '76000000-0000-4000-8000-000000000204') as value;
+  (select npc_id from pg_temp.lira_identity),'A toast to honest trade.',2,null,'beverage',
+  '76000000-0000-4000-8000-000000000204',(select daily_card_id from pg_temp.equipped_drink_daily_card)) as value;
 select is((select value->>'status' from pg_temp.drink_dialogue_begin),'processing',
   'the beverage journey begins through the server-orchestrated dialogue RPC');
+create temporary table pg_temp.drink_dialogue_base as
+select public.npc_dialogue_context(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000207','base',''
+) as value;
+select public.npc_dialogue_checkpoint(
+  '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000207',
+  (select (value->>'fence')::uuid from pg_temp.drink_dialogue_begin),'base',
+  jsonb_build_object('value',(select value from pg_temp.drink_dialogue_base))
+);
 select public.npc_dialogue_checkpoint(
   '76000000-0000-4000-8000-000000000001','76000000-0000-4000-8000-000000000207',
   (select (value->>'fence')::uuid from pg_temp.drink_dialogue_begin),'decision',

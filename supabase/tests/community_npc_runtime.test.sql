@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(21);
+select plan(22);
 
 insert into auth.users(id,email,role,aud) values
   ('18100000-0000-4000-8000-000000000011','runtime-one@example.test','authenticated','authenticated'),
@@ -13,6 +13,7 @@ select public.create_tavern();
 create temporary table pg_temp.runtime_state as
 select
   (snapshot#>>'{save,id}')::uuid save_id,
+  (snapshot#>>'{save,revision}')::bigint initial_revision,
   (snapshot#>>'{roster,0,instanceId}')::uuid instance_id,
   (snapshot#>>'{roster,0,npcId}')::uuid npc_id,
   (snapshot#>>'{roster,0,versionId}')::uuid version_id
@@ -23,12 +24,49 @@ select throws_ok(
   '42501',null,'authenticated clients cannot begin server-orchestrated dialogue');
 reset role;
 
+create temporary table pg_temp.food_id(id uuid);
+with inserted as (
+  insert into public.foods(save_id,name,quality_index,source_action_id,day_number,recipe_key,rules_version)
+  values((select save_id from pg_temp.runtime_state),'Golden hearth loaf',5,'18100000-2000-4000-8000-000000000001',1,'hearth-loaf','runtime-test-v1')
+  returning id
+)
+insert into pg_temp.food_id select id from inserted;
+grant select on pg_temp.food_id to authenticated;
+
+-- Keep four social copies and the fixture food eligible so this test can exercise
+-- cancellation, reply, failure, and serving with actual physical hand cards.
+select private.daily_deck_prepare((select save_id from pg_temp.runtime_state));
+with kept_social_cards as (
+  select id from public.daily_deck_cards
+  where save_id=(select save_id from pg_temp.runtime_state) and source_kind='social'
+  order by id
+  limit 4
+)
+update public.daily_deck_cards
+set pile='consumed'
+where save_id=(select save_id from pg_temp.runtime_state)
+  and source_kind='social'
+  and id not in (select id from kept_social_cards);
+
+set local role authenticated;
+set local request.jwt.claim.role='authenticated';
+set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000011';
+select public.daily_deck_open((select initial_revision from pg_temp.runtime_state));
+reset role;
+create temporary table pg_temp.runtime_cards as
+select id daily_card_id,source_kind,source_id,
+  row_number() over (partition by source_kind order by id) card_order
+from public.daily_deck_cards
+where save_id=(select save_id from pg_temp.runtime_state) and pile='hand';
+grant select on pg_temp.runtime_cards to service_role;
+
 set local request.jwt.claim.role='service_role';
 create temporary table pg_temp.cancelled_begin as
   select public.npc_dialogue_begin(
     '18100000-0000-4000-8000-000000000011',
     '18100000-1000-4000-8000-000000000002',
-    (select npc_id from pg_temp.runtime_state),'I may return to this thought.',0
+    (select npc_id from pg_temp.runtime_state),'I may return to this thought.',0,
+    null,null,null,(select daily_card_id from pg_temp.runtime_cards where source_kind='social' and card_order=1)
   ) value;
 select is((select value->>'status' from pg_temp.cancelled_begin),'processing','service orchestrator begins a UUID resident turn');
 reset request.jwt.claim.role;
@@ -44,7 +82,8 @@ create temporary table pg_temp.active_begin as
   select public.npc_dialogue_begin(
     '18100000-0000-4000-8000-000000000011',
     '18100000-1000-4000-8000-000000000003',
-    (select npc_id from pg_temp.runtime_state),'How is the road?',0
+    (select npc_id from pg_temp.runtime_state),'How is the road?',0,
+    null,null,null,(select daily_card_id from pg_temp.runtime_cards where source_kind='social' and card_order=2)
   ) value;
 select is((select value->>'input_sequence' from pg_temp.active_begin),'0','a cancelled sequence can be superseded safely');
 select public.npc_dialogue_checkpoint(
@@ -73,7 +112,8 @@ create temporary table pg_temp.expired_begin as
   select public.npc_dialogue_begin(
     '18100000-0000-4000-8000-000000000011',
     '18100000-1000-4000-8000-000000000004',
-    (select npc_id from pg_temp.runtime_state),'An expired message',1
+    (select npc_id from pg_temp.runtime_state),'An expired message',1,
+    null,null,null,(select daily_card_id from pg_temp.runtime_cards where source_kind='social' and card_order=3)
   ) value;
 update private.world_npc_dialogue_turns set lease_until=now()-interval '1 second'
 where id='18100000-1000-4000-8000-000000000004';
@@ -81,7 +121,8 @@ create temporary table pg_temp.recovered_begin as
   select public.npc_dialogue_begin(
     '18100000-0000-4000-8000-000000000011',
     '18100000-1000-4000-8000-000000000005',
-    (select npc_id from pg_temp.runtime_state),'A fresh message',1
+    (select npc_id from pg_temp.runtime_state),'A fresh message',1,
+    null,null,null,(select daily_card_id from pg_temp.runtime_cards where source_kind='social' and card_order=4)
   ) value;
 select is((select status from private.world_npc_dialogue_turns where id='18100000-1000-4000-8000-000000000004'),'failed','an expired lease is fenced off before a fresh turn');
 select is((select value->>'status' from pg_temp.recovered_begin),'processing','expired work does not block the next turn');
@@ -95,36 +136,63 @@ select is((public.npc_journals(array[(select instance_id from pg_temp.runtime_st
 select is(jsonb_array_length(public.npc_journals(array[(select instance_id from pg_temp.runtime_state)])#>array[(select instance_id::text from pg_temp.runtime_state),'turns']),1,'batched journal includes the completed visible transcript');
 reset role;
 
-create temporary table pg_temp.food_id(id uuid);
-with inserted as (
-  insert into public.foods(save_id,name,quality_index,source_action_id,day_number,recipe_key,rules_version)
-  values((select save_id from pg_temp.runtime_state),'Golden hearth loaf',5,'18100000-2000-4000-8000-000000000001',1,'hearth-loaf','runtime-test-v1')
-  returning id
-)
-insert into pg_temp.food_id select id from inserted;
-grant select on pg_temp.food_id to authenticated;
-
-set local role authenticated;
-set local request.jwt.claim.role='authenticated';
-set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000011';
-create temporary table pg_temp.served as
-select public.npc_serve_hospitality(
-  (select save_id from pg_temp.runtime_state),(select instance_id from pg_temp.runtime_state),'food',(select id from pg_temp.food_id),
-  '18100000-2000-4000-8000-000000000002',0
+set local request.jwt.claim.role='service_role';
+create temporary table pg_temp.served_claim as
+select public.npc_dialogue_begin(
+  '18100000-0000-4000-8000-000000000011',
+  '18100000-1000-4000-8000-000000000006',
+  (select npc_id from pg_temp.runtime_state),'Please enjoy this Golden hearth loaf.',1,
+  null,'food',(select id from pg_temp.food_id),
+  (select daily_card_id from pg_temp.runtime_cards where source_kind='food' and source_id=(select id from pg_temp.food_id))
 ) value;
+select public.npc_dialogue_checkpoint(
+  '18100000-0000-4000-8000-000000000011','18100000-1000-4000-8000-000000000006',
+  (select (value->>'fence')::uuid from pg_temp.served_claim),'decision',
+  '{"value":{"stance":"agree","subject":"hospitality","reaction":0,"evidence":"","intention":null}}'::jsonb
+);
+select public.npc_dialogue_checkpoint(
+  '18100000-0000-4000-8000-000000000011','18100000-1000-4000-8000-000000000006',
+  (select (value->>'fence')::uuid from pg_temp.served_claim),'speak',
+  '{"value":{"text":"The hearth loaf is a welcome comfort."},"model":"fixture"}'::jsonb
+);
+create temporary table pg_temp.served as
+select public.npc_dialogue_complete(
+  '18100000-0000-4000-8000-000000000011','18100000-1000-4000-8000-000000000006',
+  (select (value->>'fence')::uuid from pg_temp.served_claim)
+)->'serving' value;
 select is((select (value->>'goldEarned')::integer from pg_temp.served),25,'generic hospitality uses the conservative quality price curve');
-select is((public.npc_serve_hospitality(
-  (select save_id from pg_temp.runtime_state),(select instance_id from pg_temp.runtime_state),'food',(select id from pg_temp.food_id),
-  '18100000-2000-4000-8000-000000000002',0
-)->>'actionId'),'18100000-2000-4000-8000-000000000002','hospitality retry returns the exact receipt');
+select is((select value from pg_temp.served),public.npc_dialogue_complete(
+  '18100000-0000-4000-8000-000000000011','18100000-1000-4000-8000-000000000006',
+  (select (value->>'fence')::uuid from pg_temp.served_claim)
+)->'serving','hospitality retry returns the exact receipt');
 select is(jsonb_array_length(public.npc_bar_snapshot()#>'{offerings,foods}'),0,'served food is removed from the UUID Bar inventory');
 select is(jsonb_array_length(public.npc_bar_snapshot()#>'{recent,hospitality}'),1,'UUID hospitality appears in recent Bar history');
 select throws_ok(format(
-  'select public.npc_serve_hospitality(%L::uuid,%L::uuid,%L,%L::uuid,%L::uuid,%s)',
-  (select save_id from pg_temp.runtime_state),(select instance_id from pg_temp.runtime_state),'food',(select id from pg_temp.food_id),
-  '18100000-2000-4000-8000-000000000003',0
-),'PT409',null,'stale hospitality revision is rejected');
-select is(jsonb_array_length(public.npc_share_preview((select instance_id from pg_temp.runtime_state))->'transcript'),1,'share preview includes the complete visible dialogue transcript');
+  'select public.npc_dialogue_begin(%L::uuid,%L::uuid,%L::uuid,%L,%s,null,null,null,%L::uuid)',
+  '18100000-0000-4000-8000-000000000011','18100000-1000-4000-8000-000000000007',
+  (select npc_id from pg_temp.runtime_state),'A stale message',1,
+  (select daily_card_id from pg_temp.runtime_cards where source_kind='social' and card_order=1)
+),'PT409',null,'stale dialogue sequence is rejected');
+with preview as (
+  select public.npc_share_preview((select instance_id from pg_temp.runtime_state)) value
+)
+select ok(
+  jsonb_array_length(value->'transcript')=2
+  and value->'transcript' @> jsonb_build_array(
+    jsonb_build_object(
+      'kind','dialogue','turnId','18100000-1000-4000-8000-000000000003',
+      'keeper','How is the road?',
+      'npc','The old road is quiet today, though I am still watching it closely.'
+    ),
+    jsonb_build_object(
+      'kind','dialogue','turnId','18100000-1000-4000-8000-000000000006',
+      'keeper','Please enjoy this Golden hearth loaf.',
+      'npc','The hearth loaf is a welcome comfort.'
+    )
+  ),
+  'share preview includes both completed visible dialogue turns'
+)
+from preview;
 select lives_ok(format('select public.npc_report(%L::uuid,%L,%L)',(select version_id from pg_temp.runtime_state),'content','The visible reply needs review.'),'reports freeze the encountered UUID version and transcript');
 reset role;
 
@@ -133,11 +201,34 @@ set local request.jwt.claim.role='authenticated';
 set local request.jwt.claim.sub='18100000-0000-4000-8000-000000000012';
 select public.create_tavern();
 select throws_ok(format('select public.npc_dialogue_status(%L::uuid,false)','18100000-1000-4000-8000-000000000003'),'PT404',null,'another player cannot read a turn status');
+select public.daily_deck_open((select revision from public.tavern_saves where user_id='18100000-0000-4000-8000-000000000012'));
+reset role;
+create temporary table pg_temp.other_daily_card as
+select id from public.daily_deck_cards
+where save_id=(select id from public.tavern_saves where user_id='18100000-0000-4000-8000-000000000012')
+  and source_kind='social' and pile='hand'
+order by id
+limit 1;
+grant select on pg_temp.other_daily_card to service_role;
+set local request.jwt.claim.role='service_role';
 select throws_ok(format(
-  'select public.npc_serve_hospitality(%L::uuid,%L::uuid,%L,%L::uuid,%L::uuid,%s)',
-  (select save_id from pg_temp.runtime_state),(select instance_id from pg_temp.runtime_state),'food',(select id from pg_temp.food_id),
-  '18100000-2000-4000-8000-000000000004',1
-),'PT404',null,'another player cannot serve into a different world');
+  'select public.npc_dialogue_begin(%L::uuid,%L::uuid,%L::uuid,%L,%s,null,null,null,%L::uuid)',
+  '18100000-0000-4000-8000-000000000012','18100000-1000-4000-8000-000000000008',
+  (select npc_id from pg_temp.runtime_state),'A stranger spends another tavern card.',0,
+  (select daily_card_id from pg_temp.runtime_cards where source_kind='social' and card_order=1)
+),'PT409',null,'another player cannot spend this tavern physical card');
+create temporary table pg_temp.other_begin as
+select public.npc_dialogue_begin(
+  '18100000-0000-4000-8000-000000000012','18100000-1000-4000-8000-000000000008',
+  (select npc_id from pg_temp.runtime_state),'A stranger speaks.',0,
+  null,null,null,(select id from pg_temp.other_daily_card)
+) value;
+select is(
+  (select instance_id from private.world_npc_dialogue_turns where id='18100000-1000-4000-8000-000000000008'),
+  (select id from private.world_npc_instances
+   where save_id=(select id from public.tavern_saves where user_id='18100000-0000-4000-8000-000000000012')
+     and npc_id=(select npc_id from pg_temp.runtime_state)),
+  'shared catalog NPC dialogue is recorded against the second tavern resident');
 reset role;
 
 select * from finish();

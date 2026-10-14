@@ -2,6 +2,13 @@
   import type { GardenCell } from '$lib/game/contracts';
 
   let { cell }: { cell: GardenCell | null } = $props();
+
+  const socialSeedFlavor: Record<string, string> = {
+    charm_bloom: 'Charm',
+    insight_iris: 'Insight',
+    rumor_thyme: 'Rumor'
+  };
+  let socialFlavor = $derived(cell?.plantKey ? socialSeedFlavor[cell.plantKey] ?? null : null);
 </script>
 
 <section class="crop-detail-content" data-garden-inspector>
@@ -29,6 +36,13 @@
 
       {#if cell.harvestable}
         <div class="notice healthy"><strong>Ready for harvest</strong><span>The current crop can be gathered.</span></div>
+      {/if}
+
+      {#if socialFlavor}
+        <div class="notice social-seed-notice" data-social-seed-plant={cell.plantKey}>
+          <strong>{socialFlavor} social seed</strong>
+          <span>Harvest schedules one {socialFlavor} copy for tomorrow's deck. It never changes today's hand.</span>
+        </div>
       {/if}
 
       {#if cell.preview}
@@ -96,6 +110,7 @@
   .notice strong { color: #efd58e; font-family: 'Cinzel',serif; font-size: .76rem; }
   .notice span { font-size: .77rem; line-height: 1.4; }
   .notice.healthy { border-color: #55703c; background: #111a0b; }
+  .notice.social-seed-notice { border-color: #7960a5; background: #161024; }
   .muted, .not-ready { margin: 0; color: #a99671; font-size: .78rem; line-height: 1.4; }
   .harvest-preview > strong { color: #ebd89e; }
   .harvest-preview span { color: #b9a681; font-size: .74rem; line-height: 1.4; }

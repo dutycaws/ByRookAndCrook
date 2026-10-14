@@ -18,7 +18,7 @@
     "test:unit": "vitest run tests/unit",
     "test:db": "DO_NOT_TRACK=1 supabase test db",
     "test:db:isolated": "node --import tsx scripts/test-db-isolated.ts",
-    "test:integration": "vitest run tests/integration --reporter=default --reporter=junit --outputFile.junit=test-results/integration/junit.xml",
+    "test:integration": "vitest run tests/integration --no-file-parallelism --reporter=default --reporter=junit --outputFile.junit=test-results/integration/junit.xml",
     "test:e2e": "playwright test",
     "db:start": "DO_NOT_TRACK=1 supabase start",
     "db:stop": "DO_NOT_TRACK=1 supabase stop",

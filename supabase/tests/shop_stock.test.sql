@@ -44,13 +44,14 @@ select results_eq(
   $$ values
     ('amendment_k'::text,5),('amendment_n'::text,5),('amendment_p'::text,5),('bee_feed'::text,10),
     ('hive_equipment'::text,1),('replacement_colony'::text,1),
-    ('seed_chamomile'::text,10),('seed_clover'::text,10),('seed_fennel'::text,10),('seed_hops'::text,10),
-    ('seed_lavender'::text,10),('seed_pepper'::text,10),('seed_sage'::text,10),('seed_tomatoes'::text,10),
+    ('seed_chamomile'::text,10),('seed_charm_bloom'::text,10),('seed_clover'::text,10),('seed_fennel'::text,10),('seed_hops'::text,10),
+    ('seed_insight_iris'::text,10),
+    ('seed_lavender'::text,10),('seed_pepper'::text,10),('seed_rumor_thyme'::text,10),('seed_sage'::text,10),('seed_tomatoes'::text,10),
     ('soil_builder'::text,5),('treatment_chalkbrood'::text,3),('treatment_nosema'::text,3),('treatment_varroa'::text,3) $$,
   'every current purchasable SKU has its configured daily cap');
 select ok((public.get_tavern_snapshot()#>'{garden,shop}') @> jsonb_build_array(jsonb_build_object('itemKey','seed_hops','dailyCap',10,'remainingStock',10,'restockDay',1)),
   'snapshot includes stock fields for purchasable SKUs');
-select is(jsonb_array_length(public.get_tavern_snapshot()#>'{garden,shop}'),18,'snapshot includes every current purchasable SKU');
+select is(jsonb_array_length(public.get_tavern_snapshot()#>'{garden,shop}'),21,'snapshot includes every current purchasable SKU');
 select is((public.preview_garden_command('purchase','{"itemKey":"seed_hops","quantity":1}'::jsonb)->>'status'),'insufficient_gold',
   'preview distinguishes insufficient gold');
 select is((public.preview_garden_command('purchase','{"itemKey":"seed_hops","quantity":11}'::jsonb)->'blockingReasons'),

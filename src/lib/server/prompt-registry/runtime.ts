@@ -1,4 +1,5 @@
 import type { PromptKey, PromptReleaseSnapshot, PromptSnapshot } from './contracts';
+import type { Stage } from '$lib/server/dialogue/schemas';
 import { PROMPT_MANIFEST } from './manifest';
 import { renderPromptTemplate } from './template';
 
@@ -22,9 +23,10 @@ export function releaseImagePrompt(release: PromptReleaseSnapshot, key: PromptKe
   return { ...prompt, rendered: renderPromptTemplate(PROMPT_MANIFEST[key], prompt.body, values) };
 }
 
+/** Player suggestions use their fixed structured batch prompt, outside the NPC release registry. */
 export const DIALOGUE_PROMPT_KEY = {
-  investigate: 'dialogue.investigate', deliberate: 'dialogue.deliberate', speak: 'dialogue.speak', review: 'dialogue.review', remember: 'dialogue.remember'
-} as const satisfies Record<string, PromptKey>;
+  investigate: 'dialogue.investigate', deliberate: 'dialogue.deliberate', speak: 'dialogue.speak', review: 'dialogue.review', remember: 'dialogue.remember', player_suggestions: null
+} as const satisfies Record<Stage, PromptKey | null>;
 
 export const SETTLEMENT_PROMPT_KEY = {
   proposer: 'resident.proposer', critic: 'resident.critic', repair: 'resident.repair', final_critic: 'resident.final_critic', digest: 'resident.digest',

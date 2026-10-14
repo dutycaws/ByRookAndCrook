@@ -29,6 +29,9 @@
 
   let { data, form }: PageProps = $props();
   let snapshot = $derived(data.snapshot);
+  // A legacy snapshot has no daily deck while it is being upgraded. New
+  // snapshots must be in preparation before any brewery action is available.
+  let preparationOpen = $derived(!snapshot?.dailyDeck || snapshot.dailyDeck.phase === 'preparation');
   let selectedIngredientId = $state<string | null>(null);
   let focusReturnId = $state<string | null>(null);
   let archiveOpen = $state(false);
@@ -85,7 +88,7 @@
       : 0
   );
   let blockedByBakery = $derived(Boolean(!session && snapshot?.save.dailyCraftKind === 'bake'));
-  let canChooseIngredient = $derived(Boolean(snapshot && !session && !blockedByBakery && availableIngredients.length > 0));
+  let canChooseIngredient = $derived(Boolean(snapshot && preparationOpen && !session && !blockedByBakery && availableIngredients.length > 0));
 
   $effect(() => {
     const available = snapshot?.ingredients ?? [];
@@ -105,7 +108,7 @@
   }
 
   function inspectIngredient(id: string) {
-    if (pending || unresolved) return;
+    if (pending || unresolved || !preparationOpen) return;
     focusReturnId = null;
     selectedIngredientId = id;
     transportError = null;
@@ -135,13 +138,13 @@
   }
 
   function confirmStart() {
-    if (!selectedIngredientId || pending) return;
+    if (!selectedIngredientId || pending || !preparationOpen) return;
     startForm?.requestSubmit();
   }
 
   function commandEnhancer(kind: FrozenBreweryCommand['kind']): SubmitFunction {
     return ({ formData, cancel }) => {
-      if (!snapshot || pending) { cancel(); return; }
+      if (!snapshot || pending || !preparationOpen) { cancel(); return; }
       if (unresolved && unresolved.kind !== kind) { cancel(); return; }
 
       let command = unresolved;
@@ -263,6 +266,9 @@
           <div><dt>Cellar</dt><dd>{availableIngredients.length} batch{availableIngredients.length === 1 ? '' : 'es'}</dd></div>
           <div><dt>Bottled</dt><dd>{snapshot.brewery.beverages.length}</dd></div>
         </dl>
+        {#if !preparationOpen}
+          <p class="phase-lock" data-craft-phase-lock>Service is open. Brewing returns when tomorrow's preparation begins.</p>
+        {/if}
       {/snippet}
       {#snippet controls()}
         <div class="frame-links">
@@ -279,13 +285,11 @@
             {:else}
               <ul class="brew-history">
                 {#each snapshot.brewery.beverages as beverage (beverage.id)}
-                  {@const intentCard = snapshot.brewery.intentCards.find((card) => card.sourceBeverageId === beverage.id)}
                   <li>
                     <span aria-hidden="true">🍺</span>
                     <div>
                       <strong>{beverage.name}</strong>
                       <small>{qualityLabel(beverage.qualityIndex)} · Day {beverage.dayNumber}</small>
-                      {#if intentCard}<p class="earned-card"><span>Intent card · {intentCard.tier}</span><strong>{intentCard.displayName}</strong><small>{intentCard.description}</small></p>{/if}
                     </div>
                   </li>
                 {/each}
@@ -305,6 +309,13 @@
             burnAction={startBurnAction}
             error={visualError}
           />
+        {:else if !preparationOpen}
+          <section class="workflow-note" data-craft-phase-lock>
+            <p class="eyebrow">Service in progress</p>
+            <h2>The cellar rests during service</h2>
+            <p>Garden and shop errands remain available while guests are here. Finish service to prepare again tomorrow.</p>
+            <a class="secondary-link" href="/bar">Return to service <span aria-hidden="true">→</span></a>
+          </section>
         {:else if blockedByBakery}
           <section class="workflow-note">
             <p class="eyebrow">Today's craft</p>
@@ -427,10 +438,6 @@
   .brew-history > li > span { font-size: 1.4rem; }
   .brew-history strong, .brew-history small { display: block; }
   .brew-history small { color: #cbb894; font-size: .72rem; }
-  .earned-card { display: grid; gap: .2rem; margin: .45rem 0 0 !important; padding: .45rem; border-left: 2px solid #c9a65b; background: #20170a; }
-  .earned-card span { color: #d9b772; font-size: .62rem; text-transform: uppercase; }
-  .earned-card strong { color: #f0dfb8; font-size: .78rem; }
-  .earned-card small { color: #cbb894; font-size: .67rem; }
   .recent-craft { color: #e3cfaa; font-size: .8rem; }
   .close-tavern { display: grid; gap: .5rem; padding-top: .6rem; border-top: 1px solid #493719; }
   .close-tavern p { color: #cbb894; font-size: .75rem; }

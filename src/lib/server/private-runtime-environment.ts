@@ -11,6 +11,9 @@ export function privateRuntimeEnvironment(
   base: Record<string, string | undefined>,
   projectRoot = process.cwd()
 ): Record<string, string | undefined> {
+  // Disposable verification stacks supply their own credentials. Do not mix
+  // their public endpoint with the persistent app's private .env credentials.
+  if (base.LOCAL_TEST_SUPABASE_WORKDIR) return base;
   const file = resolve(projectRoot, '.env');
   if (!existsSync(file)) return base;
   try {

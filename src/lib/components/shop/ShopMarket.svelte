@@ -79,6 +79,10 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
   let activeGoods = $derived(goods.filter((item) => itemCategory(item) === category && (!affordableOnly || item.price <= (snapshot.save.gold ?? 0))));
   let selectedItem = $derived(detailMode === 'item' ? goods.find((item) => item.itemKey === selectedItemKey) ?? null : null);
   let selectedProvision = $derived(detailMode === 'provision' ? supplies?.catalog.find((item) => item.itemKey === selectedProvisionKey) ?? null : null);
+  let forgetfulnessStock = $derived(snapshot.dailyDeck?.provisions?.potionOfForgetfulness ?? 0);
+  let removableSocialCopies = $derived((snapshot.dailyDeck?.cards ?? []).filter((card: { id: string; kind: string; pile: string; displayName: string }) => (
+    card.kind === 'social' && card.pile !== 'consumed' && !snapshot.dailyDeck?.pending.removals.includes(card.id)
+  )));
   let handEntries = $derived.by(() => {
     if (category === 'provisions') return [] as ShopHandEntry[];
     const entries: ShopHandEntry[] = activeGoods.map((item) => ({ key: item.itemKey, kind: 'good', item }));
@@ -451,6 +455,8 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
   }
 
   function effectDescription(item: ShopItem) {
+    const socialFlavor = socialSeedFlavor(item.itemKey);
+    if (socialFlavor) return `Grow and harvest this seed to schedule one ${socialFlavor} social copy for tomorrow's deck.`;
     if (item.kind === 'seed' && typeof item.effect.species === 'string') return `Plant ${item.effect.species} in an empty garden plot.`;
     if (item.kind === 'amendment') {
       if (typeof item.effect.n === 'number') return `Adds ${item.effect.n} nitrogen to selected soil.`;
@@ -464,6 +470,63 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
     if (item.kind === 'colony') return 'Stocks an empty hive with a replacement bee colony.';
     return item.name;
   }
+
+  function socialSeedFlavor(itemKey: string) {
+    return ({
+      seed_charm_bloom: 'Charm',
+      seed_insight_iris: 'Insight',
+      seed_rumor_thyme: 'Rumor'
+    } as Record<string, string | undefined>)[itemKey] ?? null;
+  }
+
+  function prepareForgetfulness(event: SubmitEvent) {
+    const form = event.currentTarget;
+    if (!(form instanceof HTMLFormElement)) return;
+    const actionId = form.elements.namedItem('actionId');
+    if (actionId instanceof HTMLInputElement && !actionId.value) actionId.value = crypto.randomUUID();
+  }
+
+  const enhanceForgetfulness: SubmitFunction = ({ formData, formElement }) => {
+    const isPotionPurchase = formElement.hasAttribute('data-forgetfulness-purchase');
+    const input = formElement.elements.namedItem('actionId');
+    const actionId = input instanceof HTMLInputElement && input.value
+      ? input.value
+      : crypto.randomUUID();
+    if (input instanceof HTMLInputElement) input.value = actionId;
+    formData.set('actionId', actionId);
+    return async ({ result, update }) => {
+      const data = 'data' in result
+        ? result.data as { receipt?: { actionId?: string; price?: number } } | undefined
+        : undefined;
+      let completedAcquisition: AcquisitionCard | null = null;
+
+      if (result.type === 'success') {
+        const receiptMatchesSubmission = data?.receipt?.actionId === actionId;
+        if (receiptMatchesSubmission && input instanceof HTMLInputElement) input.value = '';
+
+        if (isPotionPurchase) {
+          const eventId = claimAcquisitionReceipt('purchase', 'purchase', actionId, data?.receipt?.actionId, seenAcquisitionEvents);
+          if (eventId) {
+            completedAcquisition = {
+              id: eventId,
+              eyebrow: 'Provision acquired',
+              title: 'Potion of Forgetfulness',
+              description: 'Schedule one social copy to leave tomorrow.',
+              quantityLabel: '1 potion',
+              icon: '✧',
+              artKind: 'item',
+              details: [{ label: 'Cost', value: `${data?.receipt?.price ?? 12} gold` }]
+            };
+          }
+        }
+        try { await update({ reset: false, invalidateAll: true }); }
+        finally { if (completedAcquisition) acquisitionCard = completedAcquisition; }
+        return;
+      }
+
+      await update({ reset: false, invalidateAll: false });
+    };
+  };
 
   function invalidatePreview() {
     previewRequest += 1;
@@ -804,10 +867,33 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
 {/snippet}
 
 {#snippet marketStatus()}
-  <div class="market-status" aria-label="Shop account">
+  <div class="market-status" aria-label="Shop account" data-shop-ready={hydrated}>
     <p class="gold-status"><span>Gold</span><strong>{snapshot.save.gold ?? 0}</strong></p>
     {#if category === 'provisions' && supplies?.inventory.length}
       <details class="pantry-inventory"><summary>Pantry · {supplies.inventory.length}</summary><ul>{#each supplies.inventory as pantryItem (pantryItem.entityId)}<li>{pantryItem.quantity} × {pantryItem.name}</li>{/each}</ul></details>
+    {/if}
+    {#if category === 'provisions'}
+      <form class="forgetfulness-purchase" method="POST" action="?/purchaseForgetfulness" onsubmit={prepareForgetfulness} use:enhance={enhanceForgetfulness} data-forgetfulness-purchase>
+        <input type="hidden" name="actionId" value="" />
+        <input type="hidden" name="expectedRevision" value={snapshot.save.revision} />
+        <span><strong>Potion of Forgetfulness</strong><small>Schedule one social copy to leave tomorrow.</small></span>
+        <button type="submit" disabled={(snapshot.save.gold ?? 0) < 12}>Buy · 12 gold</button>
+      </form>
+      <form class="forgetfulness-form" method="POST" action="?/forgetfulness" onsubmit={prepareForgetfulness} use:enhance={enhanceForgetfulness} data-forgetfulness-use>
+        <input type="hidden" name="actionId" value="" />
+        <input type="hidden" name="expectedRevision" value={snapshot.save.revision} />
+        <label>
+          <span>Potion of Forgetfulness · {forgetfulnessStock} held</span>
+          <select name="cardId" required disabled={removableSocialCopies.length === 0} aria-label="Choose a social copy to remove tomorrow">
+            {#each removableSocialCopies as card, index (card.id)}
+              <option value={card.id}>{card.displayName} copy {index + 1}</option>
+            {/each}
+          </select>
+        </label>
+        <button type="submit" disabled={forgetfulnessStock === 0 || removableSocialCopies.length === 0}>Schedule removal tomorrow</button>
+        {#if forgetfulnessStock === 0}<small>Buy a potion before scheduling a removal.</small>{:else if removableSocialCopies.length === 0}<small>No removable social copies remain.</small>{/if}
+        {#if form?.message}<small class:error={form.error}>{form.message}</small>{/if}
+      </form>
     {/if}
   </div>
 {/snippet}
@@ -1005,6 +1091,18 @@ import { onDestroy, onMount, tick, untrack } from 'svelte';
   .pantry-inventory { max-width: 15rem; padding: .35rem .5rem; border: 1px solid #957440; border-radius: .45rem; color: #ead9b4; background: #1a120be8; font-size: .7rem; }
   .pantry-inventory summary { cursor: pointer; }
   .pantry-inventory ul { display: grid; gap: .2rem; margin: .4rem 0 0; padding-left: 1rem; }
+  .forgetfulness-form { display: grid; grid-template-columns: minmax(10rem, 1fr) auto; gap: .3rem .45rem; max-width: 24rem; padding: .35rem .5rem; border: 1px solid #80609d; border-radius: .45rem; background: #170d22ed; color: #ead9f4; font-size: .68rem; }
+  .forgetfulness-purchase { display: grid; grid-template-columns: minmax(10rem, 1fr) auto; gap: .35rem; max-width: 24rem; padding: .4rem .5rem; border: 1px solid #80609d; border-radius: .45rem; background: #170d22ed; color: #ead9f4; font-size: .68rem; }
+  .forgetfulness-purchase span { display: grid; gap: .12rem; }
+  .forgetfulness-purchase small { color: #cab7d8; }
+  .forgetfulness-purchase button { min-height: 2rem; border: 1px solid #a880bd; border-radius: .3rem; color: #f3dcff; background: #321746; font: inherit; font-size: .68rem; cursor: pointer; }
+  .forgetfulness-purchase button:disabled { cursor: not-allowed; opacity: .62; }
+  .forgetfulness-form label { display: grid; gap: .2rem; }
+  .forgetfulness-form select { min-width: 0; border: 1px solid #9672af; border-radius: .25rem; color: #f1e4fc; background: #21122e; font: inherit; }
+  .forgetfulness-form button { align-self: end; min-height: 2rem; border: 1px solid #a880bd; border-radius: .3rem; color: #f3dcff; background: #321746; font: inherit; font-size: .68rem; cursor: pointer; }
+  .forgetfulness-form button:disabled { cursor: not-allowed; opacity: .62; }
+  .forgetfulness-form small { grid-column: 1 / -1; color: #cab7d8; }
+  .forgetfulness-form small.error { color: #f1a29a; }
   .market-control { min-height: 40px; padding: .45rem .65rem; border: 1px solid #a17c3c; border-radius: .4rem; color: #f0d58c; background: #20170bd9; font: inherit; font-size: .75rem; cursor: pointer; }
   .market-control:disabled { cursor: not-allowed; opacity: .58; }
   .market-control:focus-visible { outline: 2px solid #ffe49c; outline-offset: 2px; }

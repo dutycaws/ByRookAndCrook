@@ -44,7 +44,8 @@ test('the Codex past-resident destination updates the shared read-only journal a
     await expect(page.getByRole('button',{name:'Confirm dismissal'})).toHaveCount(0);
     await page.getByRole('link', { name: 'Bar', exact: true }).click();
     await expect(page.getByRole('group', { name: 'Scene characters' }).getByRole('button')).toHaveCount(0);
-    await expect(page.getByRole('status')).toContainText('The common room is quiet.');
+    await expect(page.getByText('The room is quiet today.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Prepare the common room', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /Keepsake slot 1, empty/ })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Past residents', exact: true })).toBeVisible();
   } finally {

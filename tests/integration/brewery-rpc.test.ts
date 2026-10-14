@@ -52,7 +52,7 @@ afterEach(async () => {
 });
 
 describe('brewery RPC', () => {
-  it('commits start, completion, reward, and day advance once across identical retries', async () => {
+  it('commits start, completion, and day advance once across identical retries', async () => {
     const player = await createTestPlayer('brew-replay');
     createdUsers.push(player);
     const { snapshot: harvested, ingredient } = await provisionFennel(player);
@@ -117,9 +117,9 @@ describe('brewery RPC', () => {
       expect.objectContaining({ name: 'Ambrosial Draught', qualityIndex: 6, dayNumber: 1 })
     ]);
     expect(finished.brewery.socialCards).toEqual([]);
-    expect(finished.brewery.intentCards).toContainEqual(
-      expect.objectContaining({ cardKey: 'flirt', tier: 'exceptional', sourceBeverageId: finished.brewery.beverages[0].id })
-    );
+    expect(finished.brewery.intentCards.filter((card) =>
+      card.sourceBeverageId === finished.brewery.beverages[0].id
+    )).toEqual([]);
 
     const advanceInput = {
       p_save_id: finished.save.id,
@@ -131,6 +131,12 @@ describe('brewery RPC', () => {
     expect(firstAdvance.error).toBeNull();
     expect(replayedAdvance.error).toBeNull();
     expect(firstAdvance.data).toEqual(replayedAdvance.data);
+    const openedNextDayDeck = firstAdvance.data as unknown as {
+      dailyDeck: { cards: Array<{ kind: string; sourceId: string; pile: string }> };
+    };
+    expect(openedNextDayDeck.dailyDeck.cards).toContainEqual(expect.objectContaining({
+      kind: 'beverage', sourceId: finished.brewery.beverages[0].id, pile: 'draw'
+    }));
 
     const nextDay = asSnapshot((await player.client.rpc('get_tavern_snapshot')).data);
     expect(nextDay.save).toEqual(

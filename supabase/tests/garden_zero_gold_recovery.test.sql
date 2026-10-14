@@ -142,14 +142,44 @@ select lives_ok($$ select public.complete_brew(
   '16700000-0000-4000-8000-000000000011',(select revision from public.tavern_saves),60,0,60) $$,
   'recovered ingredient completes a normal guided brew');
 select is((select count(*) from public.beverages),1::bigint,'recovery creates one sellable beverage');
-select lives_ok($$ select public.npc_serve_hospitality(
-  (select id from public.tavern_saves),
-  (select (resident->>'instanceId')::uuid
-    from jsonb_array_elements(public.npc_bar_snapshot()->'roster') resident
-    where resident->>'npcId'='18181818-1818-4181-8181-181818181818'),
-  'beverage',(select id from public.beverages),
-  '16700000-0000-4000-8000-000000000012',(select revision from public.tavern_saves)) $$,
-  'the recovered beverage completes the existing tavern sale');
+reset role;
+-- Guarantee the real recovery beverage is among the opening five cards.
+update public.daily_deck_cards set pile='consumed',updated_at=now()
+where id in (
+ select id from public.daily_deck_cards
+ where save_id=(select id from public.tavern_saves) and source_kind='social' and pile='draw'
+ order by id offset 4
+);
+set local role authenticated;
+select public.daily_deck_open((select revision from public.tavern_saves));
+reset role;
+set local request.jwt.claim.role='service_role';
+select lives_ok($sale$
+ do $body$
+ declare claim jsonb; fence uuid; card_id uuid; beverage_id uuid; sequence bigint;
+ begin
+  select id into beverage_id from public.beverages;
+  select id into card_id from public.daily_deck_cards
+   where source_kind='beverage' and source_id=beverage_id and pile='hand';
+  select conversation_sequence into sequence from private.world_npc_instances
+   where save_id=(select id from public.tavern_saves)
+   and npc_id='18181818-1818-4181-8181-181818181818';
+  claim:=public.npc_dialogue_begin(
+   '16700000-0000-4000-8000-000000000001','16700000-0000-4000-8000-000000000012',
+   '18181818-1818-4181-8181-181818181818','Please enjoy this garden-grown brew.',sequence,
+   null,'beverage',beverage_id,card_id);
+  fence:=(claim->>'fence')::uuid;
+  perform public.npc_dialogue_checkpoint(
+   '16700000-0000-4000-8000-000000000001','16700000-0000-4000-8000-000000000012',fence,
+   'decision','{"value":{"stance":"agree","subject":"hospitality","reaction":0,"evidence":"","intention":null}}'::jsonb);
+  perform public.npc_dialogue_checkpoint(
+   '16700000-0000-4000-8000-000000000001','16700000-0000-4000-8000-000000000012',fence,
+   'speak','{"value":{"text":"Thank you for the garden brew."}}'::jsonb);
+  perform public.npc_dialogue_complete(
+   '16700000-0000-4000-8000-000000000001','16700000-0000-4000-8000-000000000012',fence);
+ end
+ $body$
+$sale$, 'the recovered beverage completes a drawn-card dialogue sale');
 select ok((select gold from public.tavern_saves)>0,'the zero-gold recovery route returns to positive tavern income');
 
 select * from finish();

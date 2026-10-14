@@ -28,6 +28,9 @@
 
   let { data, form }: PageProps = $props();
   let snapshot = $derived(data.snapshot);
+  // The authoritative deck phase also gates the kitchen.  Keep the graceful
+  // legacy fallback while a pre-#39 save is being upgraded by the server.
+  let preparationOpen = $derived(!snapshot?.dailyDeck || snapshot.dailyDeck.phase === 'preparation');
   let selectedIngredientId = $state<string | null>(null);
   let focusReturnId = $state<string | null>(null);
   let archiveOpen = $state(false);
@@ -71,16 +74,13 @@
   let selectedIngredient = $derived(availableIngredients.find((ingredient) => ingredient.id === selectedIngredientId) ?? null);
   let selectedChoice = $derived(choices.find((choice) => choice.id === selectedIngredientId) ?? null);
   let latestFood = $derived(snapshot?.bakery.foods[0] ?? null);
-  let latestCard = $derived(
-    snapshot?.bakery.intentCards.find((card) => card.sourceFoodId === latestFood?.id) ?? null
-  );
   let bakedToday = $derived(latestFood?.dayNumber === snapshot?.save.currentDay);
   let ovenBand = $derived(classifyOven(elapsedMs));
   let ovenMarker = $derived(Math.min(100, elapsedMs / 500));
   let visualError = $derived(transportError ?? (form?.message && !form?.success ? form.message : null));
   let visual = $derived(deriveBakeVisualState(snapshot ?? null, { elapsedMs, ovenBand, pending, error: visualError }));
   let blockedByBrewery = $derived(Boolean(!session && snapshot?.save.dailyCraftKind === 'brew'));
-  let canChooseIngredient = $derived(Boolean(snapshot && !session && !blockedByBrewery && availableIngredients.length > 0));
+  let canChooseIngredient = $derived(Boolean(snapshot && preparationOpen && !session && !blockedByBrewery && availableIngredients.length > 0));
 
   $effect(() => {
     const currentIngredients = snapshot?.ingredients ?? [];
@@ -114,7 +114,7 @@
   function randomActionId() { return crypto.randomUUID(); }
 
   function inspectIngredient(id: string) {
-    if (pending || unresolved) return;
+    if (pending || unresolved || !preparationOpen) return;
     focusReturnId = null;
     selectedIngredientId = id;
     transportError = null;
@@ -144,7 +144,7 @@
   }
 
   function confirmStart() {
-    if (!selectedIngredientId || pending) return;
+    if (!selectedIngredientId || pending || !preparationOpen) return;
     startForm?.requestSubmit();
   }
 
@@ -166,7 +166,7 @@
 
   function commandEnhancer(kind: BakeryCommandKind): SubmitFunction {
     return ({ formData, cancel }) => {
-      if (!snapshot || pending) { cancel(); return; }
+      if (!snapshot || pending || !preparationOpen) { cancel(); return; }
       const active = session;
       if (unresolved && unresolved.kind !== kind) { cancel(); return; }
       if (!unresolved && kind !== 'start' && kind !== 'advance' && !active) { cancel(); return; }
@@ -267,6 +267,9 @@
           <div><dt>Pantry</dt><dd>{availableIngredients.length} batch{availableIngredients.length === 1 ? '' : 'es'}</dd></div>
           <div><dt>Finished</dt><dd>{snapshot.bakery.foods.length}</dd></div>
         </dl>
+        {#if !preparationOpen}
+          <p class="phase-lock" data-craft-phase-lock>Service is open. Baking returns when tomorrow's preparation begins.</p>
+        {/if}
       {/snippet}
       {#snippet controls()}
         <div class="frame-links">
@@ -283,10 +286,8 @@
             {:else}
               <ul class="bake-history">
                 {#each snapshot.bakery.foods as food (food.id)}
-                  {@const intentCard = snapshot.bakery.intentCards.find((card) => card.sourceFoodId === food.id)}
                   <li><span aria-hidden="true">🥖</span><div><strong>{food.name}</strong>
                     <small>{qualityLabel(food.qualityIndex)} · Day {food.dayNumber}</small>
-                    {#if intentCard}<p class="earned-card"><span>Intent card · {intentCard.tier}</span><strong>{intentCard.displayName}</strong><small>{intentCard.description}</small></p>{/if}
                   </div></li>
                 {/each}
               </ul>
@@ -317,6 +318,13 @@
               </label>
             {/snippet}
           </WorkflowInspection>
+        {:else if !preparationOpen}
+          <section class="workflow-note" data-craft-phase-lock>
+            <p class="eyebrow">Service in progress</p>
+            <h2>The oven rests during service</h2>
+            <p>Garden and shop errands remain available while guests are here. Finish service to prepare again tomorrow.</p>
+            <a class="secondary-link" href="/bar">Return to service <span aria-hidden="true">→</span></a>
+          </section>
         {:else if blockedByBrewery}
           <section class="workflow-note">
             <p class="eyebrow">Today's craft</p>
@@ -401,7 +409,6 @@
               <h2>Ready for a new loaf</h2>
               <p class="muted">Choose an ingredient card to inspect its quality and bake affinity.</p>
             {/if}
-            {#if latestCard}<p class="recent-card"><span>Intent card earned · {latestCard.tier}</span><strong>{latestCard.displayName}</strong><small>{latestCard.description}</small></p>{/if}
             {#if snapshot.save.dailyCraftKind === null}
               <form method="POST" action="?/advance" use:enhance={enhanceAdvance} class="rest-without-craft">
                 <p>{snapshot.save.dayMinigameCompleted ? 'Craft another batch or close the tavern for today.' : 'Crafting is optional. The tavern may close without brewing or baking.'}</p>
@@ -461,10 +468,6 @@
   .workflow-note p, .bakery-context p, .bakery-archive p, .bakery-workbench p { margin: 0; line-height: 1.45; }
   .workflow-note > p:not(.eyebrow), .bakery-context > p:not(.eyebrow), .bakery-archive > p:not(.eyebrow) { color: #cbb894; font-size: .82rem; }
   .workflow-note .eyebrow, .bakery-context .eyebrow, .bakery-archive .eyebrow, .bakery-workbench .eyebrow { margin: 0; color: #d9b772; font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; }
-  .recent-card { display: grid; gap: .2rem; margin: 0; padding: .55rem; border-left: 2px solid #c9a65b; background: #20170a; }
-  .recent-card span { color: #d9b772; font-size: .62rem; text-transform: uppercase; }
-  .recent-card strong { color: #f0dfb8; font-size: .78rem; }
-  .recent-card small { color: #cbb894; font-size: .67rem; }
   .recipe-picker { display: grid; gap: .35rem; padding: .6rem; border: 1px solid #493719; border-radius: .4rem; color: #d9b772; background: #140e08; font-size: .72rem; }
   .recipe-picker select { width: 100%; min-height: 44px; padding: .5rem; border: 1px solid #80602f; border-radius: .35rem; background: #100c07; color: #f0dfb8; font: inherit; }
   .recipe-picker select:focus-visible { outline: 2px solid #ffe49c; outline-offset: 2px; }
@@ -473,10 +476,6 @@
   .bake-history > li > span { font-size: 1.4rem; }
   .bake-history strong, .bake-history small { display: block; }
   .bake-history small { color: #cbb894; font-size: .72rem; }
-  .earned-card { display: grid; gap: .2rem; margin: .45rem 0 0 !important; padding: .45rem; border-left: 2px solid #c9a65b; background: #20170a; }
-  .earned-card span { color: #d9b772; font-size: .62rem; text-transform: uppercase; }
-  .earned-card strong { color: #f0dfb8; font-size: .78rem; }
-  .earned-card small { color: #cbb894; font-size: .67rem; }
   .recent-craft { color: #e3cfaa; font-size: .8rem; }
   .stage-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
   .stage-heading h2 { margin: 0; }

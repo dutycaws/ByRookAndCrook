@@ -10,6 +10,17 @@ afterEach(() => {
 });
 
 describe('private runtime environment', () => {
+  it('keeps disposable verification endpoints and credentials together', () => {
+    const root = mkdtempSync(join(tmpdir(), 'brac-private-env-'));
+    roots.push(root);
+    writeFileSync(join(root, '.env'), 'SUPABASE_SERVICE_ROLE_KEY=persistent-app-key\n');
+    const isolated = {
+      LOCAL_TEST_SUPABASE_WORKDIR: '/tmp/brac-fixture-stack',
+      PUBLIC_SUPABASE_URL: 'http://127.0.0.1:59321',
+      SUPABASE_SERVICE_ROLE_KEY: 'isolated-key'
+    };
+    expect(privateRuntimeEnvironment(isolated, root)).toEqual(isolated);
+  });
   it('lets the authoritative local file replace stale empty process values', () => {
     const root = mkdtempSync(join(tmpdir(), 'brac-private-env-'));
     roots.push(root);

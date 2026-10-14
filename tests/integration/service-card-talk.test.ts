@@ -6,6 +6,7 @@ import {fixturePromptRegistry} from '../helpers/prompt-registry-fixture';
 import {runDialogue} from '../../src/lib/server/dialogue/orchestrator';
 import {parseBarSnapshot} from '../../src/lib/game/serving';
 import {serviceCardStacks} from '../../src/lib/game/service-cards';
+import {openDailyDialogueCard} from '../helpers/daily-deck-fixture';
 const players:Array<Awaited<ReturnType<typeof createBrewedTavern>>|Awaited<ReturnType<typeof createBakedTavern>>>=[];
 afterEach(async()=>{await Promise.all(players.splice(0).map(player=>player.admin.auth.admin.deleteUser(player.userId)));});
 const promptRegistry=fixturePromptRegistry();
@@ -22,7 +23,8 @@ describe('inventory service-card Talk transaction',()=>{
   const [stack]=serviceCardStacks(kind==='beverage'?before.beverages:before.foods);
   expect(stack).toMatchObject({ingredientType:'fennel',quantity:1});
   expect(stack.name).toBe(kind==='food'?'Fennel Bread':'Fennel Mead');
-  const command={turnId:crypto.randomUUID(),npcId:resident.npcId,message:'Please accept this offering while we talk.',expectedConversationSequence:resident.sequence,interactionVersion:'dialogue-v2' as const,offering:{kind,itemId:stack.itemIds[0]}};
+  const daily=await openDailyDialogueCard(player,{offering:{kind,itemId:stack.itemIds[0]}});
+  const command={turnId:crypto.randomUUID(),npcId:resident.npcId,message:'Please accept this offering while we talk.',expectedConversationSequence:resident.sequence,interactionVersion:'dialogue-v2' as const,dailyCardId:daily.dailyCardId,offering:{kind,itemId:stack.itemIds[0]}};
   await expect(runDialogue(player.admin,player.userId,command,fixtureProvider({failStage:'speak'}),{promptRegistry})).rejects.toThrow();
   const context=await player.admin.rpc('npc_dialogue_context',{p_actor:player.userId,p_turn_id:command.turnId,p_category:'base'});
   expect(context.error).toBeNull();expect((context.data as any).hospitality).toMatchObject({itemId:stack.itemIds[0],itemName:stack.name,ingredientType:'fennel',ingredientName:'Fennel',qualityIndex:stack.qualityIndex,productKey:stack.productKey});
@@ -38,7 +40,9 @@ describe('inventory service-card Talk transaction',()=>{
  });
  it('rejects competing service and conversation cards before any resource is spent',async()=>{
   const player=await createBrewedTavern('service-conflicting-card');players.push(player);const before=await bar(player);
-  await expect(runDialogue(player.admin,player.userId,{turnId:crypto.randomUUID(),npcId:before.roster[0].npcId,message:'An offering.',expectedConversationSequence:0,interactionVersion:'dialogue-v2',intentCardId:before.intentCards[0].id,offering:{kind:'beverage',itemId:before.beverages[0].id}},fixtureProvider(),{promptRegistry})).rejects.toThrow();
-  const after=await bar(player);expect(after.save).toEqual(before.save);expect(after.beverages).toEqual(before.beverages);expect(after.intentCards).toEqual(before.intentCards);
+  const daily=await openDailyDialogueCard(player,{offering:{kind:'beverage',itemId:before.beverages[0].id}});
+  const admitted=await bar(player);
+  await expect(runDialogue(player.admin,player.userId,{turnId:crypto.randomUUID(),npcId:before.roster[0].npcId,message:'An offering.',expectedConversationSequence:0,interactionVersion:'dialogue-v2',dailyCardId:daily.dailyCardId,intentCardId:before.intentCards[0].id,offering:{kind:'beverage',itemId:before.beverages[0].id}},fixtureProvider(),{promptRegistry})).rejects.toThrow();
+  const after=await bar(player);expect(after.save).toEqual(admitted.save);expect(after.beverages).toEqual(admitted.beverages);expect(after.intentCards).toEqual(admitted.intentCards);
  });
 });

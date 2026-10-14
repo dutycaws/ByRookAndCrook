@@ -14,10 +14,14 @@ create temporary table pg_temp.resident as
   select * from private.world_materialize_resident_from_version('74000000-0000-4000-8000-000000000011','18181818-1818-4181-8181-181818181818','18181818-1818-4181-8181-181818181819',1);
 
 select is((select campaign_state from private.world_npc_instances where id=(select instance_id from pg_temp.resident)),'{}'::jsonb,'legacy campaign quest state is empty');
+insert into public.daily_decks(id,save_id,day_number,phase,guest_ids)
+values('74000000-0000-4000-8000-000000000030','74000000-0000-4000-8000-000000000011',3,'service',array[(select instance_id from pg_temp.resident)]);
+insert into public.daily_deck_cards(id,save_id,deck_id,source_kind,source_id,pile)
+values('74000000-0000-4000-8000-000000000031','74000000-0000-4000-8000-000000000011','74000000-0000-4000-8000-000000000030','social','74000000-0000-4000-8000-000000000032','hand');
 create temporary table pg_temp.registry_turn as
   select public.npc_dialogue_begin(
     '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
-    '18181818-1818-4181-8181-181818181818','The registry is temporarily unavailable.',0,null,null,null
+    '18181818-1818-4181-8181-181818181818','The registry is temporarily unavailable.',0,null,null,null,'74000000-0000-4000-8000-000000000031'
   ) result;
 select public.npc_dialogue_checkpoint(
   '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
@@ -29,7 +33,7 @@ select is((select error_code from private.world_npc_dialogue_attempts where fenc
 create temporary table pg_temp.registry_retry as
   select public.npc_dialogue_begin(
     '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000022',
-    '18181818-1818-4181-8181-181818181818','The registry is temporarily unavailable.',0,null,null,null
+    '18181818-1818-4181-8181-181818181818','The registry is temporarily unavailable.',0,null,null,null,'74000000-0000-4000-8000-000000000031'
   ) result;
 select is((select result->>'status' from pg_temp.registry_retry),'processing','the failed turn can be reclaimed immediately');
 select ok(not coalesce((select (result->>'busy')::boolean from pg_temp.registry_retry),false),'retry is not held behind the prior lease');
@@ -41,7 +45,7 @@ select public.npc_dialogue_checkpoint(
 create temporary table pg_temp.turn as
   select public.npc_dialogue_begin(
     '74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000021',
-    '18181818-1818-4181-8181-181818181818','Let us take a more direct route.',0,null,null,null
+    '18181818-1818-4181-8181-181818181818','Let us take a more direct route.',0,null,null,null,'74000000-0000-4000-8000-000000000031'
   ) result;
 create temporary table pg_temp.base as
   select public.npc_dialogue_context('74000000-0000-4000-8000-000000000001','74000000-0000-4000-8000-000000000021','base','') result;

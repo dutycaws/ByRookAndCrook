@@ -121,14 +121,16 @@ select is((select quality_index from public.bake_sessions), 6::smallint, 'ideal 
 select is((select status from public.bake_sessions), 'completed', 'the bake completes');
 select is((select consumed_quantity from public.ingredient_batches), 1, 'completion consumes one ingredient');
 select is((select count(*) from public.foods), 1::bigint, 'completion creates one food item');
-select is((select count(*) from public.intent_cards where source_kind = 'bake'), 1::bigint, 'completion creates one bake intent reward');
-select ok((select source_food_id = (select id from public.foods) from public.intent_cards where source_kind = 'bake'), 'the intent reward references its food source');
+select is((select count(*) from public.social_cards), 0::bigint, 'completion creates no legacy social card reward');
+select ok(not exists(select 1 from public.intent_cards where source_kind = 'bake')
+  and not exists(select 1 from public.bake_actions where result ? 'intentCardId'),
+  'completion writes no social intent reward or reward receipt');
 select lives_ok($$select public.complete_bake(
   (select id from public.tavern_saves), (select id from public.bake_sessions),
   '78000000-0000-4000-8000-000000000005', 12
 )$$, 'an identical completion retry returns the saved receipt');
 select is((select count(*) from public.foods), 1::bigint, 'completion replay creates no duplicate food');
-select is((select count(*) from public.intent_cards where source_kind = 'bake'), 1::bigint, 'completion replay creates no duplicate intent');
+select is((select count(*) from public.intent_cards where source_kind = 'bake'), 0::bigint, 'completion replay preserves the absence of a social intent reward');
 select throws_ok($$update public.bake_sessions set quality_index = 0$$,
   '42501', null, 'players cannot directly edit bake outcomes');
 select lives_ok($$select public.advance_tavern_day(

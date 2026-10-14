@@ -21,14 +21,16 @@ export class ProviderContextBudgetError extends Error {
 export const DIALOGUE_REQUEST_BYTE_LIMIT = 384 * 1024;
 export const DIALOGUE_REQUEST_TOKEN_LIMIT = 80_000;
 export const DIALOGUE_OUTPUT_TOKEN_RESERVE = 2_500;
+/** Whole-deck batches can contain hundreds of compact pairings in one response. */
+export const PLAYER_SUGGESTION_OUTPUT_TOKEN_RESERVE = 16_000;
 /** One additional validated repair/review envelope is reserved against model capacity. */
 export const DIALOGUE_REPAIR_TOKEN_RESERVE = 2_500;
 export const dialogueRequestBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 
 /** Authoritative Responses create body; token counting uses its explicit token-bearing projection. */
 export function buildDialogueResponseBody(stage: Stage, payload: unknown, prompt: PromptSnapshot, model: string): Record<string, unknown> {
-  const body: Record<string,unknown> = { model, store:false, max_output_tokens:DIALOGUE_OUTPUT_TOKEN_RESERVE,
-    reasoning:{effort:stage==='deliberate'||stage==='speak'?'low':'none'},
+  const body: Record<string,unknown> = { model, store:false, max_output_tokens:stage==='player_suggestions' ? PLAYER_SUGGESTION_OUTPUT_TOKEN_RESERVE : DIALOGUE_OUTPUT_TOKEN_RESERVE,
+    reasoning:{effort:stage==='deliberate'||stage==='speak'||stage==='player_suggestions'?'low':'none'},
     input:[{role:'system',content:prompt.body},{role:'user',content:JSON.stringify(payload)}] };
   if(stage==='investigate') {
     body.tools=[{type:'function',name:'request_context',description:'Request scoped NPC knowledge from the game.',strict:true,parameters:schemas.investigate}];
@@ -42,7 +44,7 @@ export function buildDialogueInputTokenBody(createBody: Record<string, unknown>)
   return Object.fromEntries(names.filter(name=>name in createBody).map(name=>[name,createBody[name]]));
 }
 
-async function preflightOpenAiRequest(body: Record<string, unknown>, signal: AbortSignal, apiKey: string, configuredCapacity?: string): Promise<{ inputTokens:number; durationMs:number }> {
+async function preflightOpenAiRequest(body: Record<string, unknown>, signal: AbortSignal, apiKey: string, configuredCapacity?: string, outputReserve=DIALOGUE_OUTPUT_TOKEN_RESERVE): Promise<{ inputTokens:number; durationMs:number }> {
   if (dialogueRequestBytes(body) > DIALOGUE_REQUEST_BYTE_LIMIT) throw new ProviderContextBudgetError('Dialogue request exceeds the transport-byte ceiling.');
   const capacity = Number(configuredCapacity);
   if (!Number.isSafeInteger(capacity) || capacity < 1) throw new ProviderContextBudgetError('The selected dialogue model has no verified input-token capacity.');
@@ -51,7 +53,7 @@ async function preflightOpenAiRequest(body: Record<string, unknown>, signal: Abo
   if(!counted.ok) throw new ProviderContextBudgetError('The selected dialogue model does not support verified input-token counting.');
   const result=await counted.json(); const tokens=result?.input_tokens;
   if(!Number.isSafeInteger(tokens) || tokens < 0) throw new ProviderContextBudgetError('The token-count service returned an invalid count.');
-  if(tokens > DIALOGUE_REQUEST_TOKEN_LIMIT || tokens + DIALOGUE_OUTPUT_TOKEN_RESERVE + DIALOGUE_REPAIR_TOKEN_RESERVE > capacity) throw new ProviderContextBudgetError('Dialogue request exceeds the verified input-token ceiling.');
+  if(tokens > DIALOGUE_REQUEST_TOKEN_LIMIT || tokens + outputReserve + DIALOGUE_REPAIR_TOKEN_RESERVE > capacity) throw new ProviderContextBudgetError('Dialogue request exceeds the verified input-token ceiling.');
   return {inputTokens:tokens,durationMs:Math.round(performance.now()-started)};
 }
 export function createProvider(config: Record<string,string | undefined>): DialogueProvider {
@@ -69,9 +71,10 @@ export function createProvider(config: Record<string,string | undefined>): Dialo
     if (!config.OPENAI_API_KEY) throw new ProviderUnavailable('OpenAI is not configured.');
     if (!prompt || prompt.promptType !== 'text_system') throw new ProviderUnavailable('The pinned dialogue prompt is unavailable.');
     const started=performance.now();
-    const model = npcTextModel(config,stage==='deliberate' || stage==='speak' ? 'character' : 'context');
+    const model = npcTextModel(config,stage==='deliberate' || stage==='speak' || stage==='player_suggestions' ? 'character' : 'context');
     const body = buildDialogueResponseBody(stage,payload,prompt,model);
-    const preflight=await preflightOpenAiRequest(body,signal,config.OPENAI_API_KEY,config.NPC_MODEL_INPUT_CAPACITY);
+    const reserve=stage==='player_suggestions' ? PLAYER_SUGGESTION_OUTPUT_TOKEN_RESERVE : DIALOGUE_OUTPUT_TOKEN_RESERVE;
+    const preflight=await preflightOpenAiRequest(body,signal,config.OPENAI_API_KEY,config.NPC_MODEL_INPUT_CAPACITY,reserve);
     const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${config.OPENAI_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal});
     if(!response.ok) throw new ProviderUnavailable(`OpenAI request failed (${response.status}).`);
     const result=await response.json();

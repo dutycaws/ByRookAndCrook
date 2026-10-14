@@ -20,6 +20,8 @@ export interface DialogueInput {
   expectedConversationSequence: number;
   interactionVersion: 'dialogue-v2';
   intentCardId?: string | null;
+  /** Stable physical copy from the current day's hand. Required by daily-deck admission. */
+  dailyCardId?: string | null;
   offering?: Offering | null;
 }
 export interface DialogueReply {

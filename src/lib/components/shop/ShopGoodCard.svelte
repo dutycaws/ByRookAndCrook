@@ -31,6 +31,7 @@
   data-good-key={item.itemKey}
   data-good-category={category}
   data-garden-seed-card={gardenSeedKey}
+  data-social-seed={['seed_charm_bloom', 'seed_insight_iris', 'seed_rumor_thyme'].includes(item.itemKey) ? item.itemKey : undefined}
 >
   <div class="shop-card-art good-art" aria-hidden="true">
     <span>{icon}</span>

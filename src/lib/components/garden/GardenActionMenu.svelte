@@ -67,6 +67,7 @@ type PreviewRequest = {
     harvestActionId = null,
     harvestRetryAvailable = false,
     onharvest = () => {},
+    onacquired,
     harvestBurnAction = null,
     formMessage = null,
     formError = false,
@@ -97,6 +98,7 @@ type PreviewRequest = {
     harvestActionId?: string | null;
     harvestRetryAvailable?: boolean;
     onharvest?: () => void;
+    onacquired?: (card: import('$lib/game/acquisition').AcquisitionCard) => void;
     harvestBurnAction?: ResolvedBurnAction | null;
     formMessage?: string | null;
     formError?: boolean;
@@ -958,7 +960,7 @@ let canPreview = $derived(!!preview && !!previewPayload
       {/if}
 
       {#if pane === 'apiary'}
-        <GardenProvisionPanel {snapshot} {selected} {burnStyle} {splitTargetId} {onstartsplit} {oncancelsplit} externalHand onworkflowhandchange={(hand) => { apiaryHand = hand; }} />
+        <GardenProvisionPanel {snapshot} {selected} {burnStyle} {splitTargetId} {onstartsplit} {oncancelsplit} {onacquired} externalHand onworkflowhandchange={(hand) => { apiaryHand = hand; }} />
       {:else if pane === 'plant'}
         <section class="action-fields" aria-labelledby="garden-action-title">
           <p class="eyebrow">Seeds · Plot {selected.layoutKey}</p><h2 id="garden-action-title">{selectedSeed?.name ?? 'Plant this plot'}</h2>

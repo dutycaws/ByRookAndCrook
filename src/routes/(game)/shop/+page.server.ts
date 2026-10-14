@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { getSnapshot } from '$lib/server/game';
+import { GameServiceError, getSnapshot, purchaseForgetfulness, useForgetfulness } from '$lib/server/game';
 import { getGeneratedSupplies, purchaseGeneratedSupply } from '$lib/server/evolving-world/generated-supplies';
 import {
   handleGardenCommand,
@@ -26,6 +26,44 @@ export const load: PageServerLoad = async ({ locals, setHeaders }) => {
 };
 
 export const actions: Actions = {
+  purchaseForgetfulness: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    const data = await request.formData();
+    const actionId = String(data.get('actionId') ?? '');
+    const expectedRevision = Number(data.get('expectedRevision'));
+    if (!UUID.test(actionId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      return fail(400, { message: 'The potion purchase was invalid.', error: true });
+    }
+    try {
+      const receipt = await purchaseForgetfulness(locals.supabase, { actionId, expectedRevision });
+      return { success: true, error: false, message: `Potion of Forgetfulness purchased for ${receipt.price} gold.`, receipt };
+    } catch (cause) {
+      if (cause instanceof GameServiceError) return fail(cause.status, { message: cause.message, error: true });
+      console.error('forgetfulness purchase failed', cause);
+      return fail(500, { message: 'The potion purchase outcome is unknown. Retry the same purchase to recover it.', error: true });
+    }
+  },
+
+  forgetfulness: async ({ request, locals }) => {
+    await requireGameUser(locals);
+    const data = await request.formData();
+    const actionId = String(data.get('actionId') ?? '');
+    const cardId = String(data.get('cardId') ?? '');
+    const expectedRevision = Number(data.get('expectedRevision'));
+    if (!UUID.test(actionId) || !UUID.test(cardId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      return fail(400, { message: 'Choose a social copy before using the potion.', error: true });
+    }
+    try {
+      const receipt = await useForgetfulness(locals.supabase, { actionId, cardId, expectedRevision });
+      const card = receipt.dailyDeck.cards.find((candidate) => candidate.id === receipt.cardId);
+      return { success: true, error: false, message: `${card?.displayName ?? 'That social'} copy will leave tomorrow's deck.`, receipt };
+    } catch (cause) {
+      if (cause instanceof GameServiceError) return fail(cause.status, { message: cause.message, error: true });
+      console.error('forgetfulness action failed', cause);
+      return fail(500, { message: 'The potion outcome is unknown. Retry the same use to recover it.', error: true });
+    }
+  },
+
   purchaseGeneratedSupply: async ({ request, locals }) => {
     await requireGameUser(locals);
     const data = await request.formData();

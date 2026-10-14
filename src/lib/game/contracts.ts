@@ -184,7 +184,7 @@ export interface SocialCard {
   createdAt: string;
 }
 
-export type IntentCardKey = 'charm' | 'insight' | 'flirt' | 'rumor';
+export type IntentCardKey = 'charm' | 'insight' | 'rumor';
 
 export interface IntentCard {
   id: string;
@@ -242,6 +242,7 @@ export interface BakeryRules {
 }
 
 export interface GameSnapshot {
+  dailyDeck?: import('./daily-deck').DailyDeckState;
   trinkets?: { collection: import('./trinkets').OwnedTrinket[] };
   save: {
     id: string;

@@ -24,6 +24,7 @@
     disabled?: boolean;
     closeDisabled?: boolean;
     presentation?: ScenePresentation;
+	phase?: 'preparation' | 'service' | 'closed';
   renderInteraction?: boolean;
   renderStatus?: boolean;
     // Kept in the public contract for callers migrating away from the old action buttons.
@@ -51,6 +52,7 @@
     disabled = false,
     closeDisabled = disabled,
     presentation = 'default',
+	phase = 'service',
   renderInteraction = true,
   renderStatus = true,
     composerOpen = false,
@@ -161,7 +163,7 @@
     />
     <div class="scene-vignette" aria-hidden="true"></div>
 
-    {#if renderStatus}<BarStatusRail day={day} gold={gold} disabled={closeDisabled} presentation={selected ? 'player-hand' : 'default'} onclose={onclose} />{/if}
+    {#if renderStatus}<BarStatusRail day={day} gold={gold} {phase} disabled={closeDisabled} presentation={selected ? 'player-hand' : 'default'} onclose={onclose} />{/if}
 
     {#if selected && renderInteraction}
       <button

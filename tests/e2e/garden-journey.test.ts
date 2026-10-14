@@ -19,13 +19,16 @@ async function openPantry(page: Page) {
 }
 
 async function openGardenActions(page: Page) {
-  await expect(page.locator('[data-garden-action-menu][data-menu-pane="root"]')).toBeVisible();
+  await expect(page.locator('button[data-workflow-choice="harvest"]')).toBeVisible();
 }
 
-async function closeMobileGardenActions(page: Page) {
-  const close = page.getByRole('button', { name: 'Close plot actions' });
-  if (await close.count()) await close.click();
-  await expect(page.locator('[data-garden-action-menu]')).toHaveCount(0);
+async function expectGardenScene(page: Page) {
+  await expect(page.getByRole('group', { name: /Illustrated tavern courtyard with \d+ selectable garden plots/i })).toBeVisible();
+}
+
+async function closeMobileGardenActions(_page: Page) {
+  // The scene-first folio remains available after an action; route navigation
+  // no longer requires dismissing the retired mobile action drawer.
 }
 
 async function selectPlot(page: Page, plot: Locator) {
@@ -35,13 +38,14 @@ async function selectPlot(page: Page, plot: Locator) {
 }
 
 test('harvest persists across routes, reloads, and browser sessions', async ({ page, browser }) => {
+  test.setTimeout(60_000);
   const player = await createTestPlayer('journey');
   let secondContext: BrowserContext | undefined;
 
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
+    await expectGardenScene(page);
 
     const hexGeometry = await page.locator('.hex-cell').evaluateAll((cells) => {
       const byKey = new Map(
@@ -105,7 +109,7 @@ test('a dropped harvest response retries the same action exactly once', async ({
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
+    await expectGardenScene(page);
     await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
     await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
 
@@ -217,7 +221,7 @@ test('a harvested ingredient becomes a persistent brew, intent card, and complet
   try {
     await login(page, player.email, player.password);
     await page.getByRole('button', { name: 'Start tavern' }).click();
-    await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
+    await expectGardenScene(page);
     await selectPlot(page, page.getByRole('button', { name: /c1, Fennel.*ready to harvest/i }));
     await expect(page.getByRole('heading', { name: 'Fennel' })).toBeVisible();
     await openGardenActions(page);

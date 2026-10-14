@@ -32,6 +32,7 @@
     GardenInventoryItem
   } from '$lib/game/contracts';
   import { apiarySuccessFeedback, gardenSuccessFeedback } from '$lib/game/garden-feedback';
+  import { claimAcquisitionReceipt, honeyAcquisitionCard, type AcquisitionCard } from '$lib/game/acquisition';
   import WorkflowInspection from '$lib/components/ui/WorkflowInspection.svelte';
 
   let {
@@ -41,6 +42,7 @@
     burnStyle = 'drip',
     externalHand = false,
     onworkflowhandchange,
+    onacquired,
     splitTargetId = null,
     onstartsplit,
     oncancelsplit
@@ -51,10 +53,12 @@
     burnStyle?: BurnStyle;
     externalHand?: boolean;
     onworkflowhandchange?: (hand: ApiaryWorkflowHand | null) => void;
+    onacquired?: (card: AcquisitionCard) => void;
     splitTargetId?: string | null;
     onstartsplit?: () => void | Promise<void>;
     oncancelsplit?: () => void | Promise<void>;
   } = $props();
+  const seenAcquisitionEvents = new Set<string>();
 
   type Scope = 'garden' | 'apiary';
   type Kind = GardenCommandKind | ApiaryCommandKind;
@@ -653,6 +657,7 @@
         pendingAction?: object;
         receipt?: GardenCommandReceipt | ApiaryCommandReceipt;
       } | undefined : undefined;
+      let acquired: AcquisitionCard | null = null;
 
       if (result.type === 'error' || data?.pendingAction) {
         message = data?.message ?? 'The outcome is unknown. Retry to recover the same action.';
@@ -661,6 +666,12 @@
       }
 
       if (result.type === 'success') {
+        if (commandScope === 'apiary' && command.commandKind === 'extract_honey' && data?.receipt) {
+          const receipt = data.receipt as ApiaryCommandReceipt;
+          const card = honeyAcquisitionCard(`honey:${action.actionId}`, receipt);
+          const eventId = card && claimAcquisitionReceipt('honey', receipt.commandKind, action.actionId, receipt.actionId, seenAcquisitionEvents);
+          if (eventId) acquired = card;
+        }
         const cellLabel = (id: string) => snapshot.cells.find((cell) => cell.id === id)?.layoutKey;
         message = data?.receipt
           ? commandScope === 'garden'
@@ -687,7 +698,8 @@
         pendingAction = null;
       }
 
-      await update({ reset: false, invalidateAll: result.type === 'success' || !!data?.conflict });
+      try { await update({ reset: false, invalidateAll: result.type === 'success' || !!data?.conflict }); }
+      finally { if (acquired) onacquired?.(acquired); }
     };
   };
 
