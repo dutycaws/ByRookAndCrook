@@ -32,6 +32,13 @@ function expectedFailure(cause: unknown, fallback: string, pendingAction?: objec
   return fail(500, { message: fallback, pendingAction });
 }
 
+async function requirePreparation(locals: App.Locals, saveId: string) {
+  const snapshot = await getSnapshot(locals.supabase);
+  if (!snapshot || snapshot.save.id !== saveId || (snapshot.dailyDeck && snapshot.dailyDeck.phase !== 'preparation')) {
+    throw new GameServiceError('Brewing is available only during preparation before service opens.', 409, 'DAILY_DECK_PHASE');
+  }
+}
+
 export const load: PageServerLoad = async ({ locals, setHeaders }) => {
   await requireUser(locals);
   setHeaders({ 'cache-control': 'private, no-store' });
@@ -66,6 +73,7 @@ export const actions: Actions = {
     }
 
     try {
+      await requirePreparation(locals, command.saveId);
       await startBrew(locals.supabase, command);
       return { success: true, message: 'The wort is ready. Keep the stir in the sweet spot.' };
     } catch (cause) {
@@ -105,6 +113,7 @@ export const actions: Actions = {
     }
 
     try {
+      await requirePreparation(locals, command.saveId);
       const receipt = await completeBrew(locals.supabase, command);
       return {
         success: true,

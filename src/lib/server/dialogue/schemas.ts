@@ -20,7 +20,8 @@ export const schemas = {
     subject: enumeration(['quest','personal','hospitality']), evidence: string, intention: { anyOf:[intentionSchema,{type:'null'}] } }),
   speak: object({ text: string }),
   review: object({ ok: { type:'boolean' }, issues: array(string) }),
-  remember: object({ memories: array(rememberedMemorySchema) })
+  remember: object({ memories: array(rememberedMemorySchema) }),
+  player_suggestions: object({ suggestions: { ...array(object({ dailyCardId: string, npcId: string, text: string })), maxItems: 500 } })
 };
 export type Stage = keyof typeof schemas;
 
@@ -65,7 +66,7 @@ export function matchesSchema(value: unknown, schema: any): boolean {
   if (schema.type==='integer') return Number.isSafeInteger(value);
   if (schema.type==='string') return typeof value==='string';
   if (schema.type==='boolean') return typeof value==='boolean';
-  if (schema.type==='array') return Array.isArray(value) && value.length<=20 && value.every(v=>matchesSchema(v,schema.items));
+  if (schema.type==='array') return Array.isArray(value) && value.length <= (schema.maxItems ?? 20) && value.every(v=>matchesSchema(v,schema.items));
   if (schema.type==='object') return !!value && typeof value==='object' && !Array.isArray(value)
     && Object.keys(value).every(k=>k in schema.properties)
     && schema.required.every((k:string)=>Object.hasOwn(value,k) && matchesSchema((value as any)[k],schema.properties[k]));

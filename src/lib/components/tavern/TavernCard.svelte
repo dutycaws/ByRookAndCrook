@@ -163,7 +163,6 @@
 	}
 	.card-charm { --card-accent: #e6c17a; }
 	.card-insight { --card-accent: #91c7c5; }
-	.card-flirt { --card-accent: #e39a9f; }
 	.card-rumor { --card-accent: #b6a0d3; }
 	.card-food { --card-accent: #e3a66d; }
 	.card-beverage { --card-accent: #88b8dc; }

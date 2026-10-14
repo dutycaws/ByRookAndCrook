@@ -30,13 +30,16 @@
   let closing = $state(false);
   let continueButton = $state<HTMLButtonElement>();
   let wasOpen = false;
+  let presentedId = '';
   let previousFocus: HTMLElement | null = null;
   let dismissTimer: ReturnType<typeof setTimeout> | undefined;
   const dialogId = $derived(`acquisition-${id.replace(/[^a-z\d_-]/gi, '-')}`);
 
   $effect(() => {
-    if (open && !wasOpen) {
+    if (open && (!wasOpen || id !== presentedId)) {
       wasOpen = true;
+      presentedId = id;
+      if (dismissTimer) clearTimeout(dismissTimer);
       closing = false;
       previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       visible = true;
@@ -84,6 +87,7 @@
 <svelte:window onkeydowncapture={handleKeydown} />
 
 {#if visible}
+  {#key id}
   <div class="acquisition-layer" class:closing aria-live="polite">
     <span class="visually-hidden">Item acquired: {title}{quantityLabel ? `, ${quantityLabel}` : ''}</span>
     <div
@@ -134,6 +138,7 @@
       </CardHandCard>
     </div>
   </div>
+  {/key}
 {/if}
 
 <style>

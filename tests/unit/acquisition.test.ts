@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { bakeAcquisitionCard, brewAcquisitionCard, claimAcquisitionEvent, claimAcquisitionReceipt } from '../../src/lib/game/acquisition';
+import { bakeAcquisitionCard, brewAcquisitionCard, claimAcquisitionEvent, claimAcquisitionReceipt, harvestAcquisitionCard, honeyAcquisitionCard } from '../../src/lib/game/acquisition';
 
 describe('acquisition event presentation', () => {
+  it('shows crop and honey acquisitions only for matching committed receipts, once each', () => {
+    const seen = new Set<string>();
+    expect(claimAcquisitionReceipt('harvest', 'harvest_crop', 'crop-1', 'other', seen)).toBeNull();
+    expect(claimAcquisitionReceipt('harvest', 'harvest_crop', 'crop-1', 'crop-1', seen)).toBe('harvest:crop-1');
+    expect(claimAcquisitionReceipt('harvest', 'harvest_crop', 'crop-1', 'crop-1', seen)).toBeNull();
+    expect(claimAcquisitionReceipt('honey', 'feed', 'honey-1', 'honey-1', seen)).toBeNull();
+    expect(claimAcquisitionReceipt('honey', 'extract_honey', 'honey-1', 'honey-1', seen)).toBe('honey:honey-1');
+    expect(claimAcquisitionReceipt('honey', 'extract_honey', 'honey-1', 'honey-1', seen)).toBeNull();
+  });
+
+  it('presents received crop and honey quantities and rejects non-acquisitions', () => {
+    expect(harvestAcquisitionCard('harvest:crop-1', { quantity: 2, qualityIndex: 4 }, { name: 'Fennel' }))
+      .toMatchObject({ title: 'Fennel', quantityLabel: '2 ingredients', artKind: 'item' });
+    const receipt = { actionId: 'honey-1', commandKind: 'extract_honey' as const,
+      committedRevision: 1, rulesVersion: 'garden-apiary-v1', normalizedPayload: {},
+      result: { quantity: 3, qualityIndex: 5 } };
+    expect(honeyAcquisitionCard('honey:honey-1', receipt)).toMatchObject({ title: 'Honey', quantityLabel: '3 ingredients' });
+    expect(honeyAcquisitionCard('honey:honey-1', { ...receipt, result: { quantity: 0, qualityIndex: 5 } })).toBeNull();
+    expect(honeyAcquisitionCard('honey:honey-1', { ...receipt, commandKind: 'feed' })).toBeNull();
+  });
+
   it('claims an authoritative completed action once, including a replayed retry receipt', () => {
     const seen = new Set<string>();
     expect(claimAcquisitionReceipt('brew', 'complete', 'action-1', 'action-1', seen)).toBe('brew:action-1');

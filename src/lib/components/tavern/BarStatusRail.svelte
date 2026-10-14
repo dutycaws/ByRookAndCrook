@@ -4,6 +4,7 @@
     gold,
     disabled = false,
     presentation = 'default',
+    phase = 'service',
     embedded = false,
     onclose
   }: {
@@ -11,13 +12,14 @@
     gold: number;
     disabled?: boolean;
     presentation?: 'default' | 'player-hand';
+    phase?: 'preparation' | 'service' | 'closed';
     embedded?: boolean;
     onclose: () => void;
   } = $props();
 </script>
 
 <div class="bar-status" class:embedded class:status-only={presentation === 'player-hand'} aria-label="Tavern status">
-  <p class="status-line"><span>Day {day}</span><span aria-hidden="true">·</span><span>{gold} gold</span></p>
+  <p class="status-line"><span>Day {day}</span><span aria-hidden="true">·</span><span>{gold} gold</span>{#if phase !== 'service'}<span aria-hidden="true">·</span><span>{phase === 'preparation' ? 'Preparing' : 'Closed'}</span>{/if}</p>
   {#if presentation === 'default'}
     <button class="end-evening" type="button" {disabled} onclick={onclose}>
       <span aria-hidden="true">☾</span><span>End evening</span>

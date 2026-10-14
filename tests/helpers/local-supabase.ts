@@ -62,6 +62,17 @@ export function getLocalTestDatabaseContainer(): string {
 }
 
 export function getLocalSupabase(): LocalSupabase {
+	// Browser verification may be pointed at an already-running isolated stack.
+	// Do not ask the Supabase CLI for status in that case: it can manage (and
+	// tear down) containers owned by the external fixture process.
+	const externalUrl = process.env.PUBLIC_SUPABASE_URL;
+	const externalPublishableKey = process.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+	const externalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+	if (externalUrl && externalPublishableKey && externalServiceRoleKey) {
+		const url = new URL(externalUrl);
+		if (!['127.0.0.1', 'localhost'].includes(url.hostname)) throw new Error('Browser test Supabase must be local.');
+		return { url: url.toString(), publishableKey: externalPublishableKey, serviceRoleKey: externalServiceRoleKey };
+	}
   const target = isolatedSupabaseTarget();
   const statusArgs = ['status', '-o', 'env'];
   if (target) statusArgs.push('--workdir', target.workdir);

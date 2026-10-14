@@ -186,6 +186,132 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"daily_deck_cards": {
+                  Row: {
+                    "created_at": string,"deck_id": string,"id": string,"pile": string,"position": number | null,"save_id": string,"source_id": string,"source_kind": string,"updated_at": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"deck_id": string,"id"?: string,"pile"?: string,"position"?: number | null,"save_id": string,"source_id": string,"source_kind": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "created_at"?: string,"deck_id"?: string,"id"?: string,"pile"?: string,"position"?: number | null,"save_id"?: string,"source_id"?: string,"source_kind"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_deck_cards_deck_id_fkey"
+      columns: ["deck_id"]
+isOneToOne: false
+      referencedRelation: "daily_decks"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "daily_deck_cards_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: false
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"daily_deck_changes": {
+                  Row: {
+                    "applied_at": string | null,"card_id": string | null,"card_key": string | null,"change_kind": string,"created_at": string,"effective_day": number,"id": string,"save_id": string,"source_action_id": string
+                  }
+                  Insert: {
+                    "applied_at"?: string | null,"card_id"?: string | null,"card_key"?: string | null,"change_kind": string,"created_at"?: string,"effective_day": number,"id"?: string,"save_id": string,"source_action_id": string
+                  }
+                  Update: {
+                    "applied_at"?: string | null,"card_id"?: string | null,"card_key"?: string | null,"change_kind"?: string,"created_at"?: string,"effective_day"?: number,"id"?: string,"save_id"?: string,"source_action_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_deck_changes_card_id_fkey"
+      columns: ["card_id"]
+isOneToOne: false
+      referencedRelation: "daily_deck_cards"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "daily_deck_changes_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: false
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"daily_deck_provisions": {
+                  Row: {
+                    "provision_key": string,"quantity": number,"save_id": string,"updated_at": string
+                  }
+                  Insert: {
+                    "provision_key": string,"quantity"?: number,"save_id": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "provision_key"?: string,"quantity"?: number,"save_id"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_deck_provisions_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: false
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"daily_deck_purchase_actions": {
+                  Row: {
+                    "action_id": string,"created_at": string,"result": NonNullable<Json>,"save_id": string
+                  }
+                  Insert: {
+                    "action_id": string,"created_at"?: string,"result": NonNullable<Json>,"save_id": string
+                  }
+                  Update: {
+                    "action_id"?: string,"created_at"?: string,"result"?: NonNullable<Json>,"save_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_deck_purchase_actions_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: false
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"daily_deck_upgrades": {
+                  Row: {
+                    "applied_at": string,"save_id": string
+                  }
+                  Insert: {
+                    "applied_at"?: string,"save_id": string
+                  }
+                  Update: {
+                    "applied_at"?: string,"save_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_deck_upgrades_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: true
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"daily_decks": {
+                  Row: {
+                    "closed_at": string | null,"created_at": string,"day_number": number,"generation_id": string,"guest_ids": (string)[],"id": string,"opened_at": string | null,"phase": string,"save_id": string
+                  }
+                  Insert: {
+                    "closed_at"?: string | null,"created_at"?: string,"day_number": number,"generation_id"?: string,"guest_ids"?: (string)[],"id"?: string,"opened_at"?: string | null,"phase"?: string,"save_id": string
+                  }
+                  Update: {
+                    "closed_at"?: string | null,"created_at"?: string,"day_number"?: number,"generation_id"?: string,"guest_ids"?: (string)[],"id"?: string,"opened_at"?: string | null,"phase"?: string,"save_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "daily_decks_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: false
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"foods": {
                   Row: {
                     "bake_session_id": string | null,"created_at": string,"day_number": number,"id": string,"ingredient_batch_id": string | null,"name": string,"quality_index": number,"recipe_key": string,"rules_version": string,"save_id": string,"source_action_id": string
@@ -682,6 +808,56 @@ isOneToOne: false
                   Relationships: [
 
                   ]
+                },"player_suggestion_batches": {
+                  Row: {
+                    "claim_expires_at": string | null,"completed_at": string | null,"created_at": string,"frozen_context": NonNullable<Json>,"id": string,"save_id": string,"status": string
+                  }
+                  Insert: {
+                    "claim_expires_at"?: string | null,"completed_at"?: string | null,"created_at"?: string,"frozen_context"?: NonNullable<Json>,"id": string,"save_id": string,"status"?: string
+                  }
+                  Update: {
+                    "claim_expires_at"?: string | null,"completed_at"?: string | null,"created_at"?: string,"frozen_context"?: NonNullable<Json>,"id"?: string,"save_id"?: string,"status"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "player_suggestion_batches_id_fkey"
+      columns: ["id"]
+isOneToOne: true
+      referencedRelation: "daily_decks"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "player_suggestion_batches_save_id_fkey"
+      columns: ["save_id"]
+isOneToOne: false
+      referencedRelation: "tavern_saves"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"player_suggestions": {
+                  Row: {
+                    "created_at": string,"daily_card_id": string,"generation_id": string,"npc_instance_id": string,"source": string,"text": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"daily_card_id": string,"generation_id": string,"npc_instance_id": string,"source": string,"text": string
+                  }
+                  Update: {
+                    "created_at"?: string,"daily_card_id"?: string,"generation_id"?: string,"npc_instance_id"?: string,"source"?: string,"text"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "player_suggestions_daily_card_id_fkey"
+      columns: ["daily_card_id"]
+isOneToOne: false
+      referencedRelation: "daily_deck_cards"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "player_suggestions_generation_id_fkey"
+      columns: ["generation_id"]
+isOneToOne: false
+      referencedRelation: "player_suggestion_batches"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"social_cards": {
                   Row: {
                     "card_key": string,"created_at": string,"display_name": string,"gold_multiplier": number,"id": string,"relationship_gain": number,"save_id": string,"source_beverage_id": string,"tier": string
@@ -749,6 +925,21 @@ isOneToOne: true
                            },
 "create_tavern":
 { Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"daily_deck_close":
+{ Args: { "p_expected_revision": number }; Returns: Json
+                           },
+"daily_deck_open":
+{ Args: { "p_expected_revision": number,"p_guest_ids"?: (string)[] }; Returns: Json
+                           },
+"daily_deck_purchase_provision":
+{ Args: { "p_action_id": string,"p_expected_revision": number }; Returns: Json
+                           },
+"daily_deck_state":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"daily_deck_use_forgetfulness":
+{ Args: { "p_action_id": string,"p_card_id": string,"p_expected_revision": number }; Returns: Json
                            },
 "fold_bake":
 { Args: { "p_action_id": string,"p_distance": number,"p_expected_revision": number,"p_save_id": string,"p_session_id": string }; Returns: Json
@@ -913,7 +1104,7 @@ isOneToOne: true
 { Args: { "p_user": string }; Returns: undefined
                            },
 "npc_dialogue_begin":
-{ Args: { "p_actor": string,"p_expected_sequence": number,"p_intent_card_id"?: string,"p_message": string,"p_npc_id": string,"p_offering_item_id"?: string,"p_offering_kind"?: string,"p_turn_id": string }; Returns: Json
+{ Args: { "p_actor": string,"p_daily_card_id"?: string,"p_expected_sequence": number,"p_intent_card_id"?: string,"p_message": string,"p_npc_id": string,"p_offering_item_id"?: string,"p_offering_kind"?: string,"p_turn_id": string }; Returns: Json
                            },
 "npc_dialogue_checkpoint":
 { Args: { "p_actor": string,"p_fence": string,"p_stage": string,"p_turn_id": string,"p_value"?: Json }; Returns: undefined
@@ -1075,6 +1266,21 @@ isOneToOne: true
                            },
 "npc_update_profile":
 { Args: { "p_attest_adult": boolean,"p_bio": string,"p_creator_terms": boolean,"p_display_name": string,"p_mature": boolean }; Returns: Json
+                           },
+"player_suggestion_batch_claim":
+{ Args: { "p_generation_id": string }; Returns: Json
+                           },
+"player_suggestion_batch_context":
+{ Args: { "p_generation_id": string }; Returns: Json
+                           },
+"player_suggestion_batch_finalize_fallback":
+{ Args: { "p_generation_id": string,"p_suggestions": Json }; Returns: Json
+                           },
+"player_suggestion_batch_get":
+{ Args: { "p_generation_id": string }; Returns: Json
+                           },
+"player_suggestion_batch_upsert":
+{ Args: { "p_generation_id": string,"p_status": string,"p_suggestions": Json }; Returns: Json
                            },
 "preview_apiary_command":
 { Args: { "p_command_kind": string,"p_payload": Json }; Returns: Json

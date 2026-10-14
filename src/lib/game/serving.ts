@@ -55,6 +55,7 @@ export interface ServeReceipt {
 }
 
 export interface BarSnapshot {
+  dailyDeck?: import('./daily-deck').DailyDeckState;
   trinkets?: { collection: OwnedTrinket[] };
   save: { id: string; revision: number; gold: number; currentDay: number };
   patrons: Patron[];
@@ -121,6 +122,7 @@ export function parseBarSnapshot(value: Json): BarSnapshot | null {
   if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid bar snapshot');
   const raw = value as any;
   const candidate = {
+    dailyDeck: raw.dailyDeck,
     trinkets: raw.trinkets ?? { collection: [] },
     save: raw.save,
     roster: raw.roster ?? [], patrons: raw.patrons ?? [],

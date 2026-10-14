@@ -5,7 +5,7 @@ import type { WorkflowChoice } from '$lib/components/ui/workflow';
 
 describe('WorkflowHand card illustrations', () => {
 	it('renders established illustrations for all social card keys', () => {
-		const socialCardKinds = ['charm', 'insight', 'flirt', 'rumor'] as const;
+		const socialCardKinds = ['charm', 'insight', 'rumor'] as const;
 		const items: WorkflowChoice[] = socialCardKinds.map((kind) => ({
 			id: `dialogue:intent:${kind}`,
 			title: kind,
@@ -16,7 +16,7 @@ describe('WorkflowHand card illustrations', () => {
 			props: { items, label: 'Conversation choices', onchoose: () => undefined }
 		});
 
-		expect(body.match(/viewBox="0 0 96 96"/g)).toHaveLength(4);
+		expect(body.match(/viewBox="0 0 96 96"/g)).toHaveLength(3);
 		expect(body).not.toContain('aria-hidden="true">✧</div>');
 	});
 

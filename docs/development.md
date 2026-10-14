@@ -31,6 +31,8 @@ npm run brac-app:dev
 
 The launcher runs unit tests and SQL tests in a fresh disposable project before inspecting or starting this repository's persistent Supabase stack. It then refreshes the local environment, applies pending migrations with `supabase migration up --local` without resetting saves, provisions pilot users, runs RPC integration tests against the populated app database, and starts Vite with hot reload. Open `http://127.0.0.1:3000/login`. It uses real local authentication, migrations, RPCs, and persistent services to keep local behavior close to the future hosted application; production builds remain a CI and `npm run build` check.
 
+Integration test files run sequentially because they share one database and the migration-preservation test temporarily alters table definitions. This prevents schema-lock deadlocks with other RPC fixtures. Explicit concurrent requests within each test still verify replay and command serialization; unit test files retain parallel execution.
+
 ### SQL test isolation
 
 `npm run test:db:isolated` provisions a fresh, uniquely named local Supabase Postgres-only project, applies the repository migrations and seed, and runs the SQL test suite. It uses temporary configuration and ports, then attempts to remove only its own project resources and temporary files on success, test failure, or a handled interrupt. Cleanup failure makes the gate fail, retains the temporary configuration, and prints a recovery command scoped to that project. Its database is discarded, so no backup is needed for this disposable project; the persistent app database and its saves are not copied, reset, or removed. Optional SQL fixture paths can be passed after npm's `--`.

@@ -28,6 +28,7 @@ export function dialogueStatusResponse(value: unknown): unknown {
     expectedConversationSequence: input.expectedConversationSequence as number,
     interactionVersion: 'dialogue-v2',
     intentCardId: input.intentCardId as string | null ?? null,
+    ...(typeof input.dailyCardId === 'string' ? { dailyCardId: input.dailyCardId } : {}),
     offering
   };
   return { ...body, input: restored };

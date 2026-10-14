@@ -1,4 +1,4 @@
-export type TavernCardKind = 'charm' | 'insight' | 'flirt' | 'rumor' | 'food' | 'beverage';
+export type TavernCardKind = 'charm' | 'insight' | 'rumor' | 'food' | 'beverage';
 
 export interface TavernCardChoice {
 	key: string;
@@ -8,4 +8,6 @@ export interface TavernCardChoice {
 	eyebrow: string;
 	detail: string;
 	quantity: number;
+	/** The server-authoritative physical copy in today's daily deck. */
+	dailyCardId?: string;
 }

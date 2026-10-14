@@ -1,6 +1,6 @@
-import { qualityLabel, type CompleteBakeReceipt, type CompleteBrewReceipt } from './contracts';
+import { qualityLabel, type ApiaryCommandReceipt, type CompleteBakeReceipt, type CompleteBrewReceipt, type HarvestReceipt } from './contracts';
 
-export type AcquisitionEventKind = 'brew' | 'bake' | 'purchase';
+export type AcquisitionEventKind = 'brew' | 'bake' | 'purchase' | 'harvest' | 'honey';
 export type AcquisitionArtKind = 'bottle' | 'loaf' | 'item';
 export type AcquisitionDetail = { label: string; value: string };
 export type AcquisitionCard = {
@@ -46,15 +46,52 @@ export function bakeAcquisitionCard(id: string, receipt: Pick<CompleteBakeReceip
   };
 }
 
+export function harvestAcquisitionCard(
+  id: string,
+  receipt: Pick<HarvestReceipt, 'quantity' | 'qualityIndex'>,
+  plant: { name: string; icon?: string | null }
+): AcquisitionCard {
+  return {
+    id,
+    eyebrow: 'Fresh from the garden',
+    title: plant.name,
+    description: 'Added to your tavern pantry.',
+    quantityLabel: `${receipt.quantity} ingredient${receipt.quantity === 1 ? '' : 's'}`,
+    icon: plant.icon ?? '🌿',
+    artKind: 'item',
+    details: [{ label: 'Quality', value: qualityLabel(receipt.qualityIndex) }]
+  };
+}
+
+export function honeyAcquisitionCard(id: string, receipt: ApiaryCommandReceipt): AcquisitionCard | null {
+  const { quantity, qualityIndex } = receipt.result;
+  if (receipt.commandKind !== 'extract_honey' || typeof quantity !== 'number' || quantity < 1 ||
+    !Number.isSafeInteger(quantity) || typeof qualityIndex !== 'number' ||
+    !Number.isInteger(qualityIndex) || qualityIndex < 0 || qualityIndex > 6) return null;
+  return {
+    id,
+    eyebrow: 'Fresh from the apiary',
+    title: 'Honey',
+    description: 'Gathered from the colony’s safe surplus and added to your pantry.',
+    quantityLabel: `${quantity} ingredient${quantity === 1 ? '' : 's'}`,
+    icon: '🍯',
+    artKind: 'item',
+    details: [{ label: 'Quality', value: qualityLabel(qualityIndex) }]
+  };
+}
+
 /** Claims an item receipt only when it belongs to the exact submitted completion command. */
 export function claimAcquisitionReceipt(
-  kind: Extract<AcquisitionEventKind, 'brew' | 'bake' | 'purchase'>,
+  kind: AcquisitionEventKind,
   commandKind: string,
   commandActionId: string,
   receiptActionId: string | null | undefined,
   seenEvents: Set<string>
 ): string | null {
-  const expectedCommand = kind === 'purchase' ? ['purchase', 'expand'] : ['complete'];
+  const expectedCommand = {
+    purchase: ['purchase', 'expand'], brew: ['complete'], bake: ['complete'],
+    harvest: ['harvest_crop'], honey: ['extract_honey']
+  }[kind];
   return claimAcquisitionEvent(
     kind,
     commandActionId,

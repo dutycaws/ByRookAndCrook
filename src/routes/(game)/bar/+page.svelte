@@ -50,6 +50,7 @@
   let dialogueBusy = $state(false);
   let hydrated = $state(false);
   let pending = $state(false);
+	let opening = $state(false);
   let closeDialogOpen = $state(false);
   let closeError = $state<string | null>(null);
   let closeCommand: { actionId: string; saveId: string; revision: number } | null = $state(null);
@@ -59,6 +60,8 @@
   let selectedTrinketId = $state('');
 
   const patrons = $derived(data.snapshot?.patrons ?? []);
+	const dailyDeck = $derived(data.snapshot?.dailyDeck);
+	const serviceOpen = $derived(!dailyDeck || dailyDeck.phase === 'service');
   const collection = $derived(data.snapshot?.trinkets?.collection ?? []);
   const patron = $derived(patrons.find((resident) => resident.instanceId === selectedInstanceId) ?? null);
   const journal = $derived(patron ? data.journals[patron.instanceId] ?? null : null);
@@ -77,6 +80,11 @@
   ];
   const workflowItems = $derived.by((): WorkflowChoice[] => {
     if (!patron) return [];
+		// The service hand is authoritative and contains only physical daily copies.
+		// Navigation remains in the frame rather than looking like a playable card.
+		if (dailyDeck?.phase === 'service' && (workflowMode === 'talk' || workflowMode === 'serve')) {
+			return dialogueHand?.items.filter((item) => item.id !== 'dialogue:start') ?? [];
+		}
     if (workflowMode === 'talk') {
       return [
         ...(dialogueHand?.items.filter((item) => item.id === 'dialogue:start' || item.id.startsWith('dialogue:intent:')) ?? []),
@@ -397,6 +405,16 @@
       pending = false;
     }
   }
+
+	const enhanceOpen: SubmitFunction = ({ formData, cancel }) => {
+		if (!data.snapshot || opening) { cancel(); return; }
+		formData.set('revision', String(data.snapshot.save.revision));
+		opening = true;
+		return async ({ result, update }) => {
+			try { await update({ reset: false, invalidateAll: true }); }
+			finally { opening = false; }
+		};
+	};
 </script>
 
 <svelte:window onkeydown={handleEscape} />
@@ -433,9 +451,9 @@
         location={patron ? 'The tavern · Bar' : 'The tavern · Common room'}
         onback={patron ? handleFrameBack : undefined}
         backLabel={journalOpen ? 'Close journal' : workflowMode === 'actions' ? 'Return to room' : 'Resident actions'}
-        showFolio={patron
+        showFolio={!serviceOpen || (patron
           ? workflowMode === 'actions' || journalOpen || talkOpen || dialogueBusy || Boolean(data.dialogueUnavailable)
-          : patrons.length === 0}
+          : patrons.length === 0)}
         showHand={!!patron && (deckOpen || talkOpen)}
         inspectionMode={!journalOpen && talkOpen ? 'dialogue' : 'folio'}
       >
@@ -451,7 +469,8 @@
             day={data.snapshot?.save.currentDay ?? 1}
             gold={data.snapshot?.save.gold ?? 0}
             archiveHref={codexHref}
-            disabled={!hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand}
+            disabled={!serviceOpen || !hydrated || pending || dialogueBusy || keepsakeBusy || !!closeCommand}
+			phase={dailyDeck?.phase ?? 'service'}
             closeDisabled={!hydrated || pending || dialogueBusy || keepsakeBusy}
             onselect={selectPatron}
             onfocus={(instanceId) => (focusedInstanceId = instanceId)}
@@ -461,7 +480,7 @@
           />
         {/snippet}
         {#snippet status()}
-          <BarStatusRail embedded day={data.snapshot?.save.currentDay ?? 1} gold={data.snapshot?.save.gold ?? 0} disabled={interactionBlocked} presentation={patron ? 'player-hand' : 'default'} onclose={() => { closeError = null; closeDialogOpen = true; }} />
+			<BarStatusRail embedded day={data.snapshot?.save.currentDay ?? 1} gold={data.snapshot?.save.gold ?? 0} phase={dailyDeck?.phase ?? 'service'} disabled={interactionBlocked || !serviceOpen} presentation={patron ? 'player-hand' : 'default'} onclose={() => { closeError = null; closeDialogOpen = true; }} />
         {/snippet}
         {#snippet controls()}
           {#if patron}
@@ -478,6 +497,16 @@
           {/if}
         {/snippet}
         {#snippet folio()}
+			{#if !serviceOpen}
+				<section class="prep-panel" aria-labelledby="prep-title">
+					<p class="eyebrow">Today's guests are here</p>
+					<h2 id="prep-title">Prepare the common room</h2>
+					<p>{patrons.length ? `${patrons.map((guest) => guest.name).join(', ')} ${patrons.length === 1 ? 'is' : 'are'} expected today.` : 'The room is quiet today.'} You may visit the garden or shop, make food or drink, or open now.</p>
+					<nav aria-label="Preparation places"><a href="/garden">Garden</a><a href="/shop">Shop</a><a href="/bakery">Bakery</a><a href="/brewery">Brewery</a></nav>
+					<form method="POST" action="?/open" use:enhance={enhanceOpen}><button class="primary-button" disabled={!hydrated || opening || pending}>{opening ? 'Shuffling the hand…' : 'Open the tavern'}</button></form>
+					{#if form?.message}<p class="form-message" role="status">{form.message}</p>{/if}
+				</section>
+			{:else}
           {#if patron}
             {#if data.snapshot && journal}
               <NpcDialogue
@@ -543,7 +572,8 @@
             {/if}
           {:else if patrons.length === 0}
             <p class="quiet-room" role="status">The common room is quiet. The scene’s keepsake slots still open their manager; past residents are in the Codex.</p>
-          {/if}
+			{/if}
+			{/if}
         {/snippet}
         {#snippet hand()}
           {#if patron && (deckOpen || talkOpen)}
@@ -618,6 +648,14 @@
   .bar-shell { position: relative; min-width: 0; container-type: inline-size; --bar-scene-height: calc(100cqw * 9 / 16); }
   .return-link:focus-visible, .text-button:focus-visible { outline: 2px solid #f0d27a; outline-offset: 3px; }
   .quiet-room { margin: 0; padding: .3rem 0; color: #b9aa88; font-size: .9rem; }
+	.prep-panel { display: grid; gap: .85rem; max-width: 42rem; padding: clamp(1rem, 3vw, 1.6rem); border: 1px solid #6d5328; background: linear-gradient(145deg, rgb(41 30 15 / .94), rgb(18 13 8 / .94)); color: #eadabd; }
+	.prep-panel h2, .prep-panel p { margin: 0; }
+	.prep-panel h2 { color: #f4de9d; font: 600 1.35rem 'Cinzel', Georgia, serif; }
+	.prep-panel p { line-height: 1.5; }
+	.prep-panel nav { display: flex; flex-wrap: wrap; gap: .5rem; }
+	.prep-panel nav a { min-height: 2.6rem; display: inline-flex; align-items: center; padding: .35rem .7rem; border: 1px solid #806631; color: #f0daa1; text-decoration: none; }
+	.prep-panel nav a:hover { border-color: #d2ac5a; background: rgb(111 80 29 / .35); }
+	.prep-panel nav a:focus-visible { outline: 2px solid #ffe49c; outline-offset: 2px; }
   .codex-transfer { display: grid; justify-items: start; gap: .65rem; max-width: 40rem; margin: clamp(2rem, 12vh, 7rem) auto; color: #e8ddc4; }
   .codex-transfer .eyebrow { margin: 0; color: #d3b46d; font: 600 .7rem 'Cinzel', Georgia, serif; letter-spacing: .09em; text-transform: uppercase; }
   .codex-transfer h1 { margin: 0; color: #f0d27a; font: 600 clamp(1.5rem, 4vw, 2.25rem) 'Cinzel', Georgia, serif; }

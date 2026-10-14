@@ -6,6 +6,8 @@ import { presentBarPatrons } from '$lib/game/bar-scene';
 import { parsePublicSettlementStatus } from '$lib/game/evolving-world';
 import { profileBurnStyle } from '$lib/card-effects';
 import { getNpcHistory } from '$lib/server/npc-history';
+import { dialogueRuntime } from '$lib/server/dialogue/runtime';
+import { playerSuggestionStore, preparePlayerSuggestions } from '$lib/server/dialogue/player-suggestions';
 import type { Journal } from '$lib/game/dialogue';
 import type { Actions, PageServerLoad } from './$types';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -31,6 +33,27 @@ export const load: PageServerLoad = async ({locals,setHeaders,url})=>{
 };
 
 export const actions: Actions = {
+	open: async ({ locals, request }) => {
+		if (!await locals.getVerifiedUser()) redirect(303, '/login');
+		const data = await request.formData();
+		const revision = Number(data.get('revision'));
+		if (!data.has('revision') || !Number.isSafeInteger(revision) || revision < 0) return fail(400, { message: 'Invalid tavern opening.' });
+		try {
+			const result = await (locals.supabase.rpc as any)('daily_deck_open', { p_expected_revision: revision });
+			if (result.error) throw new GameServiceError(result.error.message, 409, result.error.code ?? 'DAILY_DECK_OPEN');
+			const dailyDeck = result.data?.dailyDeck ?? result.data;
+			const generationId = dailyDeck?.generationId;
+			if (typeof generationId === 'string') {
+				let provider = null;
+				try { provider = dialogueRuntime().provider; } catch { /* persisted fallback still opens service */ }
+				await preparePlayerSuggestions(playerSuggestionStore(locals.supabase as any), generationId, provider, 12_000);
+			}
+			return { success: true, message: 'The doors open and your prepared hand is ready.' };
+		} catch (cause) {
+			const message = cause instanceof GameServiceError ? cause.message : 'The tavern could not open. Please try again.';
+			return fail(cause instanceof GameServiceError ? cause.status : 500, { message });
+		}
+	},
   close: async({locals,request})=>{
     if(!await locals.getVerifiedUser())redirect(303,'/login');
     const data=await request.formData();

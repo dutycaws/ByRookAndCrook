@@ -6,13 +6,15 @@ import {getLocalTestDatabaseContainer} from '../helpers/local-supabase';
 import {runDialogue} from '../../src/lib/server/dialogue/orchestrator';
 import {fixtureProvider} from '../helpers/dialogue-provider';
 import {fixturePromptRegistry} from '../helpers/prompt-registry-fixture';
+import {openDailyDialogueCard} from '../helpers/daily-deck-fixture';
 const players:Array<Awaited<ReturnType<typeof createBrewedTavern>>>=[];
 afterEach(async()=>{await Promise.all(players.splice(0).map(player=>player.admin.auth.admin.deleteUser(player.userId)));});
 describe('targeted Resolve inventory cleanup',()=>{
  it('executes the migration cleanup against obsolete stock without resetting save, quests, residents or replies',async()=>{
   const player=await createBrewedTavern('resolve-migration-preservation');players.push(player);
   const roster=await (player.client.rpc as any)('npc_roster',{p_limit:20});if(roster.error)throw roster.error;const resident=roster.data[0];
-  await runDialogue(player.admin,player.userId,{turnId:crypto.randomUUID(),npcId:resident.npcId,message:'How are you this evening?',expectedConversationSequence:0,interactionVersion:'dialogue-v2'},fixtureProvider(),{promptRegistry:fixturePromptRegistry()});
+  const {dailyCardId}=await openDailyDialogueCard(player);
+  await runDialogue(player.admin,player.userId,{turnId:crypto.randomUUID(),npcId:resident.npcId,message:'How are you this evening?',expectedConversationSequence:0,interactionVersion:'dialogue-v2',dailyCardId},fixtureProvider(),{promptRegistry:fixturePromptRegistry()});
   const migration=readFileSync(new URL('../../supabase/migrations/20261005130442_issue_37_scene_cards.sql',import.meta.url),'utf8');
   const cleanup=migration.slice(migration.indexOf('-- Old completed receipts'),migration.indexOf('create or replace function public.complete_brew('));
   const sql=`begin;

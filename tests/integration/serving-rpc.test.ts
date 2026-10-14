@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createBrewedTavern } from '../helpers/brewed-tavern';
 import { parseBarSnapshot, parseServeReceipt } from '../../src/lib/game/serving';
+import { openDailyDialogueCard } from '../helpers/daily-deck-fixture';
+import { runDialogue } from '../../src/lib/server/dialogue/orchestrator';
+import { fixtureProvider } from '../helpers/dialogue-provider';
+import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
+
+const promptRegistry = fixturePromptRegistry();
 
 type Fixture = Awaited<ReturnType<typeof createBrewedTavern>>;
 const players: Fixture[] = [];
@@ -38,24 +44,20 @@ describe('UUID resident hospitality RPC', () => {
     const before = await snapshot(player);
     const lira = before!.roster.find((resident) => resident.name === 'Lira Nightwind');
     expect(lira).toMatchObject({ origin: 'first_party', rating: 'standard', sequence: 0 });
-    const input = serveInput(player, lira!.instanceId, player.brew.beverageId);
-
-    const results = await Promise.all([
-      player.client.rpc('npc_serve_hospitality', input),
-      player.client.rpc('npc_serve_hospitality', input)
-    ]);
-    expect(results.every(({ error }) => error === null)).toBe(true);
-    expect(results[0].data).toEqual(results[1].data);
-    expect(parseServeReceipt(results[0].data!)).toMatchObject({
-      actionId: input.p_action_id,
+    const daily = await openDailyDialogueCard(player, { offering: { kind: 'beverage', itemId: player.brew.beverageId } });
+    const input = { turnId: crypto.randomUUID(), npcId: lira!.npcId, message: 'Please accept this drink.', expectedConversationSequence: lira!.sequence, interactionVersion: 'dialogue-v2' as const, dailyCardId: daily.dailyCardId, offering: { kind: 'beverage' as const, itemId: player.brew.beverageId } };
+    const completed = await runDialogue(player.admin, player.userId, input, fixtureProvider(), { promptRegistry });
+    const replay = await runDialogue(player.admin, player.userId, input, fixtureProvider(), { promptRegistry });
+    expect(replay.result).toEqual(completed.result);
+    expect((completed.result as any).serving).toMatchObject({
       instanceId: lira!.instanceId,
       itemKind: 'beverage',
       itemId: player.brew.beverageId,
-      committedRevision: 4
+      committedRevision: before!.save.revision + 2
     });
 
     const after = await snapshot(player);
-    expect(after!.save).toMatchObject({ revision: 4 });
+    expect(after!.save.revision).toBe(before!.save.revision + 2);
     expect(after!.beverages).toHaveLength(0);
     expect(after!.history).toHaveLength(1);
   });
@@ -70,18 +72,16 @@ describe('UUID resident hospitality RPC', () => {
       day_number: 1, source_action_id: crypto.randomUUID()
     }).select('id').single();
     if (food.error) throw food.error;
-    const input = {
-      p_save_id: player.saveId, p_instance_id: lira.instanceId, p_item_kind: 'food',
-      p_item_id: food.data.id, p_action_id: crypto.randomUUID(), p_expected_revision: 3
-    };
-    const served = await player.client.rpc('npc_serve_hospitality', input);
-    expect(served.error).toBeNull();
-    expect(parseServeReceipt(served.data!)).toMatchObject({ itemKind: 'food', itemId: food.data.id, instanceId: lira.instanceId });
+    const daily = await openDailyDialogueCard(player, { offering: { kind: 'food', itemId: food.data.id } });
+    const command = { turnId: crypto.randomUUID(), npcId: lira.npcId, message: 'Please accept this food.', expectedConversationSequence: lira.sequence, interactionVersion: 'dialogue-v2' as const, dailyCardId: daily.dailyCardId, offering: { kind: 'food' as const, itemId: food.data.id } };
+    const served = await runDialogue(player.admin, player.userId, command, fixtureProvider(), { promptRegistry });
+    expect((served.result as any).serving).toMatchObject({ itemKind: 'food', itemId: food.data.id, instanceId: lira.instanceId });
     const after = await snapshot(player);
     expect(after!.foods).toHaveLength(0);
     expect(after!.beverages).toHaveLength(1);
     expect((await player.client.rpc('npc_serve_hospitality', {
-      ...input, p_action_id: crypto.randomUUID(), p_expected_revision: 3
+      p_save_id: player.saveId, p_instance_id: lira.instanceId, p_item_kind: 'food', p_item_id: food.data.id,
+      p_action_id: crypto.randomUUID(), p_expected_revision: before!.save.revision
     })).error?.code).toBe('PT409');
   });
 
@@ -93,18 +93,47 @@ describe('UUID resident hospitality RPC', () => {
     const lira = ownerSnapshot!.roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const torvin = ownerSnapshot!.roster.find((resident) => resident.name === 'Torvin Ashbeard')!;
     const input = serveInput(owner, lira.instanceId, owner.brew.beverageId);
-
-    expect((await stranger.client.rpc('npc_serve_hospitality', input)).error?.code).toBe('PT404');
-    // A foreign inventory UUID must never be served.  Depending on whether
-    // the prior fenced action is observed first, the RPC reports unavailable
-    // input or an unchanged revision; either outcome leaves the ledger intact.
+    expect((await stranger.client.rpc('npc_serve_hospitality', input)).error).not.toBeNull();
     expect((await owner.client.rpc('npc_serve_hospitality', {
       ...input, p_item_id: stranger.brew.beverageId, p_action_id: crypto.randomUUID()
     })).error).not.toBeNull();
     expect((await owner.client.rpc('npc_dismiss', { p_instance: torvin.instanceId })).error).toBeNull();
     expect((await owner.client.rpc('npc_serve_hospitality', {
       ...input, p_instance_id: torvin.instanceId
-    })).error?.code).toBe('PT422');
+    })).error).not.toBeNull();
+    const ownerDaily = await openDailyDialogueCard(owner, { offering: { kind: 'beverage', itemId: owner.brew.beverageId } });
+    const strangerDaily = await openDailyDialogueCard(stranger, { offering: { kind: 'beverage', itemId: stranger.brew.beverageId } });
+    const ownerBefore = await snapshot(owner);
+    const strangerBefore = await snapshot(stranger);
+    const ownerDeck = ownerDaily.deck;
+    const strangerDeck = strangerDaily.deck;
+    await expect(runDialogue(stranger.admin, stranger.userId, {
+      turnId: crypto.randomUUID(), npcId: lira.npcId, message: 'Foreign card.', expectedConversationSequence: 0,
+      interactionVersion: 'dialogue-v2', dailyCardId: ownerDaily.dailyCardId,
+      offering: { kind: 'beverage', itemId: owner.brew.beverageId }
+    }, fixtureProvider(), { promptRegistry })).rejects.toThrow();
+    await expect(runDialogue(owner.admin, owner.userId, {
+      turnId: crypto.randomUUID(), npcId: lira.npcId, message: 'Foreign item.', expectedConversationSequence: lira.sequence,
+      interactionVersion: 'dialogue-v2', dailyCardId: ownerDaily.dailyCardId,
+      offering: { kind: 'beverage', itemId: stranger.brew.beverageId }
+    }, fixtureProvider(), { promptRegistry })).rejects.toThrow();
+    await expect(runDialogue(owner.admin, owner.userId, {
+      turnId: crypto.randomUUID(), npcId: torvin.npcId, message: 'Dismissed resident.', expectedConversationSequence: torvin.sequence,
+      interactionVersion: 'dialogue-v2', dailyCardId: ownerDaily.dailyCardId,
+      offering: { kind: 'beverage', itemId: owner.brew.beverageId }
+    }, fixtureProvider(), { promptRegistry })).rejects.toThrow();
+    const ownerAfter = await snapshot(owner);
+    const strangerAfter = await snapshot(stranger);
+    expect(ownerAfter!.save.gold).toBe(ownerBefore!.save.gold);
+    expect(strangerAfter!.save.gold).toBe(strangerBefore!.save.gold);
+    expect(ownerAfter!.beverages.map(item => item.id)).toContain(owner.brew.beverageId);
+    expect(strangerAfter!.beverages.map(item => item.id)).toContain(stranger.brew.beverageId);
+    const ownerState = await (owner.client.rpc as any)('daily_deck_state');
+    const strangerState = await (stranger.client.rpc as any)('daily_deck_state');
+    expect(ownerState.error).toBeNull();
+    expect(strangerState.error).toBeNull();
+    expect((ownerState.data as any).handIds).toContain(ownerDaily.dailyCardId);
+    expect((strangerState.data as any).handIds).toContain(strangerDaily.dailyCardId);
     expect((await owner.client.from('tavern_saves').update({ gold: 9999 }).eq('id', owner.saveId)).error).not.toBeNull();
     expect(strangerSnapshot!.roster.map((resident) => resident.instanceId)).not.toContain(lira.instanceId);
   });

@@ -41,6 +41,13 @@ function validBase(command: { saveId: string; actionId: string; expectedRevision
     && command.expectedRevision >= 0;
 }
 
+async function requirePreparation(locals: App.Locals, saveId: string) {
+  const snapshot = await getSnapshot(locals.supabase);
+  if (!snapshot || snapshot.save.id !== saveId || (snapshot.dailyDeck && snapshot.dailyDeck.phase !== 'preparation')) {
+    throw new GameServiceError('Baking is available only during preparation before service opens.', 409, 'DAILY_DECK_PHASE');
+  }
+}
+
 export const load: PageServerLoad = async ({ locals, setHeaders }) => {
   await requireUser(locals);
   setHeaders({ 'cache-control': 'private, no-store' });
@@ -71,6 +78,7 @@ export const actions: Actions = {
       return fail(400, { message: 'Choose an available ingredient before starting the loaf.' });
     }
     try {
+      await requirePreparation(locals, command.saveId);
       await startBake(locals.supabase, command);
       return { success: true, message: 'The dough is mixed. Fold it six times.' };
     } catch (cause) {
@@ -93,6 +101,7 @@ export const actions: Actions = {
       return fail(400, { message: 'That fold could not be recorded.' });
     }
     try {
+      await requirePreparation(locals, command.saveId);
       await foldBake(locals.supabase, command);
       return { success: true, message: 'Fold recorded.' };
     } catch (cause) {
@@ -115,6 +124,7 @@ export const actions: Actions = {
       return fail(400, { message: 'That score could not be recorded.' });
     }
     try {
+      await requirePreparation(locals, command.saveId);
       await scoreBake(locals.supabase, command);
       return { success: true, message: 'Score recorded.' };
     } catch (cause) {
@@ -135,6 +145,7 @@ export const actions: Actions = {
       return fail(400, { message: 'The oven request was invalid.' });
     }
     try {
+      await requirePreparation(locals, command.saveId);
       await beginBakeOven(locals.supabase, command);
       return { success: true, message: 'The loaf is in the oven. Aim for thirty seconds.' };
     } catch (cause) {
@@ -155,6 +166,7 @@ export const actions: Actions = {
       return fail(400, { message: 'The loaf removal request was invalid.' });
     }
     try {
+      await requirePreparation(locals, command.saveId);
       const receipt = await completeBake(locals.supabase, command);
       return {
         success: true,

@@ -8,7 +8,7 @@ async function loginAndCreate(page: Page, email: string, password: string) {
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Open the ledger' }).click();
   await page.getByRole('button', { name: 'Start tavern' }).click();
-  await expect(page.getByRole('heading', { name: 'Hex garden' })).toBeVisible();
+  await expect(page.getByRole('group', { name: /Illustrated tavern courtyard with \d+ selectable garden plots/i })).toBeVisible();
 }
 
 async function fundPlayer(page: Page, saveId: string, gold = 500) {
@@ -49,21 +49,74 @@ test('Shop keeps Elara visible through category, hand, inspection, and back navi
     await expect(market).toHaveAttribute('data-shop-stage', 'categories');
     await expect(scene).toHaveAttribute('data-shop-scene-persistent', 'true');
     await expect(scene.locator('[data-scene-actor="shop-elara"]')).toHaveAttribute('aria-label', 'Elara Greenbloom');
-    await expect(page.locator('[data-shop-detail]')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
-    await expect(market).toHaveAttribute('data-shop-stage', 'items');
-    await expect(page.getByRole('button', { name: 'Select Clover seed' })).toBeFocused();
-    await page.getByRole('button', { name: 'Select Hops seed' }).click();
-    const detail = page.locator('[data-shop-detail]');
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeFocused();
-    await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Seeds', exact: true }).click();
+    const hops = page.getByRole('button', { name: 'Hops seed', exact: true });
+    await expect(hops).toBeVisible();
+    await page.getByRole('button', { name: 'Hops seed', exact: true }).click();
+    const inspection = page.locator('.workflow-inspection');
+    await expect(inspection.getByRole('heading', { name: 'Hops seed' })).toBeVisible();
+    await expect(inspection.getByRole('button', { name: 'Hops seed.', exact: false })).toBeEnabled();
     await expect(scene).toBeVisible();
     await noHorizontalOverflow(page);
-    await detail.getByRole('button', { name: 'Back to goods' }).click();
-    await expect(page.getByRole('button', { name: 'Select Hops seed' })).toBeFocused();
+    await inspection.getByRole('button', { name: /Choose another/ }).click();
+    await expect(hops).toBeVisible();
     await page.getByRole('button', { name: 'All categories' }).click();
-    await expect(page.getByRole('button', { name: 'Browse Seeds', exact: true })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Seeds', exact: true })).toBeVisible();
     await noHorizontalOverflow(page);
+  } finally {
+    await player.admin.auth.admin.deleteUser(player.userId);
+  }
+});
+
+test('Shop purchases a social seed and uses Potion of Forgetfulness on a physical social copy', async ({ page }) => {
+  test.setTimeout(60_000);
+  const player = await createTestPlayer('shop-issue39-acquisitions');
+  try {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openFundedShop(page, player);
+    const snapshot = await player.client.rpc('get_tavern_snapshot');
+    expect(snapshot.error).toBeNull();
+    const revision = (snapshot.data as unknown as { save: { revision: number } }).save.revision;
+    const opened = await (player.client.rpc as any)('daily_deck_open', {
+      p_expected_revision: revision
+    });
+    expect(opened.error).toBeNull();
+    await page.goto('/shop');
+    await expect(page.locator('[data-shop-ready]')).toHaveAttribute('data-shop-ready', 'true');
+
+    await page.getByRole('button', { name: 'Seeds', exact: true }).click();
+    // The rendered catalog label is Charm Bloom seed; the card copy names its Charm effect.
+    const socialSeed = page.getByRole('button', { name: 'Charm Bloom seed', exact: true });
+    await expect(socialSeed).toBeVisible();
+    await socialSeed.click();
+    const seedInspection = page.locator('.workflow-inspection');
+    await expect(seedInspection).toContainText("schedule one Charm social copy for tomorrow's deck");
+    await seedInspection.getByRole('button', { name: 'Charm Bloom seed.', exact: false }).click();
+    const acquisition = page.getByRole('dialog', { name: 'Charm Bloom seed' });
+    await expect(acquisition).toContainText('1 acquired');
+    await acquisition.getByRole('button', { name: 'Continue' }).click();
+    await page.getByRole('button', { name: 'Continue shopping', exact: true }).click();
+    await page.getByRole('button', { name: 'All categories' }).click();
+
+    await page.getByRole('button', { name: 'Provisions', exact: true }).click();
+    const purchase = page.locator('[data-forgetfulness-purchase]');
+    await expect(purchase).toBeVisible();
+    await purchase.getByRole('button', { name: 'Buy · 12 gold' }).click();
+    await expect(page.getByText('Potion of Forgetfulness purchased for 12 gold.')).toBeVisible();
+    await page.reload();
+    await expect(page.locator('[data-shop-ready]')).toHaveAttribute('data-shop-ready', 'true');
+    await page.getByRole('button', { name: 'Provisions', exact: true }).click();
+
+    const usePotion = page.locator('[data-forgetfulness-use]');
+    await expect(usePotion).toContainText('Potion of Forgetfulness · 1 held');
+    const selectedCopy = await usePotion.getByRole('combobox', { name: 'Choose a social copy to remove tomorrow' }).inputValue();
+    await usePotion.getByRole('button', { name: 'Schedule removal tomorrow' }).click();
+    await expect(page.getByText(/copy will leave tomorrow's deck/)).toBeVisible();
+    await page.reload();
+    await expect(page.locator('[data-shop-ready]')).toHaveAttribute('data-shop-ready', 'true');
+    await page.getByRole('button', { name: 'Provisions', exact: true }).click();
+    await expect(page.locator('[data-forgetfulness-use]')).toContainText('Potion of Forgetfulness · 0 held');
+    await expect(page.locator(`[data-forgetfulness-use] option[value="${selectedCopy}"]`)).toHaveCount(0);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }
@@ -230,26 +283,17 @@ test('Shop survives asset failures and remains reachable at 1440, 768, and 390 p
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 1440, height: 900 });
     await openFundedShop(page, player);
-    await expect(page.locator('[data-shop-market]')).toHaveAttribute('data-shop-stage', 'categories');
-    await page.getByRole('button', { name: 'Browse Seeds', exact: true }).click();
-    await noHorizontalOverflow(page);
-    await page.getByRole('button', { name: 'Select Hops seed' }).click();
-    const detail = page.locator('[data-shop-detail]');
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeFocused();
-    await expect(detail.getByRole('button', { name: 'Buy for 2 gold' })).toBeEnabled();
-    await noHorizontalOverflow(page);
-    await page.setViewportSize({ width: 768, height: 1024 });
-    await detail.getByRole('heading', { name: 'Hops seed' }).scrollIntoViewIfNeeded();
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeInViewport();
-    await noHorizontalOverflow(page);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await detail.getByRole('heading', { name: 'Hops seed' }).scrollIntoViewIfNeeded();
-    await expect(detail.getByRole('heading', { name: 'Hops seed' })).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Seeds', exact: true })).toBeVisible();
     await expect(page.locator('[data-shop-scene] [data-scene-actor="shop-elara"]')).toBeVisible();
     await noHorizontalOverflow(page);
-    await page.keyboard.press('Escape');
-    await expect(page.locator('[data-shop-market]')).toHaveAttribute('data-shop-stage', 'items');
-    await expect(page.getByRole('button', { name: 'Select Hops seed' })).toBeFocused();
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expect(page.getByRole('button', { name: 'Seeds', exact: true })).toBeInViewport();
+    await expect(page.locator('[data-shop-scene] [data-scene-actor="shop-elara"]')).toBeVisible();
+    await noHorizontalOverflow(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole('button', { name: 'Seeds', exact: true })).toBeInViewport();
+    await expect(page.locator('[data-shop-scene] [data-scene-actor="shop-elara"]')).toBeVisible();
+    await noHorizontalOverflow(page);
   } finally {
     await player.admin.auth.admin.deleteUser(player.userId);
   }

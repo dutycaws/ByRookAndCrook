@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
+import type { ForgetfulnessCommand, ForgetfulnessReceipt, PurchaseForgetfulnessCommand, PurchaseForgetfulnessReceipt } from '$lib/game/daily-deck';
 import {
   parseAdvanceDayReceipt,
   parseApiaryCommandPreview,
@@ -72,6 +73,30 @@ export async function getSnapshot(client: SupabaseClient<Database>): Promise<Gam
   const { data, error } = await client.rpc('get_tavern_snapshot');
   if (error) throw mapDatabaseError(error);
   return parseSnapshot(data);
+}
+
+/** Consumes a provision now; the selected physical social copy leaves next morning. */
+export async function useForgetfulness(
+  client: SupabaseClient<Database>, command: ForgetfulnessCommand
+): Promise<ForgetfulnessReceipt> {
+  const { data, error } = await (client.rpc as any)('daily_deck_use_forgetfulness', {
+    p_expected_revision: command.expectedRevision,
+    p_card_id: command.cardId,
+    p_action_id: command.actionId
+  });
+  if (error) throw mapDatabaseError(error);
+  return data as ForgetfulnessReceipt;
+}
+
+export async function purchaseForgetfulness(
+  client: SupabaseClient<Database>, command: PurchaseForgetfulnessCommand
+): Promise<PurchaseForgetfulnessReceipt> {
+  const { data, error } = await (client.rpc as any)('daily_deck_purchase_provision', {
+    p_expected_revision: command.expectedRevision,
+    p_action_id: command.actionId
+  });
+  if (error) throw mapDatabaseError(error);
+  return data as PurchaseForgetfulnessReceipt;
 }
 
 export async function createTavern(client: SupabaseClient<Database>): Promise<void> {

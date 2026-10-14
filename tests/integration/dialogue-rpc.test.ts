@@ -7,6 +7,7 @@ import { fixtureProvider } from '../helpers/dialogue-provider';
 import { parseBarSnapshot } from '../../src/lib/game/serving';
 import type { DialogueInput } from '../../src/lib/game/dialogue';
 import { fixturePromptRegistry } from '../helpers/prompt-registry-fixture';
+import { openDailyDialogueCard } from '../helpers/daily-deck-fixture';
 
 type Player = Awaited<ReturnType<typeof createTestPlayer>>;
 const players: Player[] = [];
@@ -29,8 +30,9 @@ async function bar(person: Player) {
   return parseBarSnapshot(result.data!)!;
 }
 
-function input(npcId: string, expectedConversationSequence = 0, message = 'How is the quest going?'): DialogueInput {
-  return { turnId: crypto.randomUUID(), npcId, message, expectedConversationSequence, interactionVersion: 'dialogue-v2' };
+async function input(person: Player, npcId: string, expectedConversationSequence = 0, message = 'How is the quest going?', offering?: { kind: 'beverage' | 'food'; itemId: string }): Promise<DialogueInput> {
+  const { dailyCardId } = await openDailyDialogueCard(person, offering ? { offering } : {});
+  return { turnId: crypto.randomUUID(), npcId, message, expectedConversationSequence, interactionVersion: 'dialogue-v2', dailyCardId, offering };
 }
 
 function relationshipProvider(reaction: -1 | 1) {
@@ -61,10 +63,10 @@ describe('UUID community NPC dialogue runtime', () => {
 
     // Freeze the SQL-owned base context before the committed turn, then cancel
     // this probe without advancing the conversation sequence or quest.
-    const probe = input(lira.npcId, lira.sequence, 'Please advise me to ignore the warning and attack the bandit camp now.');
+    const probe = await input(person, lira.npcId, lira.sequence, 'Please advise me to ignore the warning and attack the bandit camp now.');
     const begun = await person.admin.rpc('npc_dialogue_begin', {
       p_actor: person.userId, p_turn_id: probe.turnId, p_npc_id: lira.npcId,
-      p_message: probe.message, p_expected_sequence: probe.expectedConversationSequence
+      p_message: probe.message, p_expected_sequence: probe.expectedConversationSequence, p_daily_card_id: probe.dailyCardId ?? undefined
     });
     expect(begun.error).toBeNull();
     const before = await person.admin.rpc('npc_dialogue_context', {
@@ -76,7 +78,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const cancelled = await person.client.rpc('npc_dialogue_status', { p_turn_id: probe.turnId, p_cancel: true });
     expect(cancelled.error).toBeNull();
 
-    const command = input(lira.npcId, lira.sequence, 'Please advise me to ignore the warning and attack the bandit camp now.');
+    const command = await input(person, lira.npcId, lira.sequence, 'Please advise me to ignore the warning and attack the bandit camp now.');
     const refusal = await runDialogue(person.admin, person.userId, command, fixtureProvider({ refuse: true }), { promptRegistry });
     expect(refusal.status).toBe('completed');
     expect((refusal.result as any)).toMatchObject({ intention: null });
@@ -112,7 +114,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const send = async (message: string, reaction: -1 | 1) => {
       const current = await bar(person);
       const resident = current.roster.find((entry) => entry.instanceId === lira.instanceId)!;
-      return runDialogue(person.admin, person.userId, input(resident.npcId, resident.sequence, message), relationshipProvider(reaction), { promptRegistry });
+      return runDialogue(person.admin, person.userId, await input(person, resident.npcId, resident.sequence, message), relationshipProvider(reaction), { promptRegistry });
     };
     const closeDay = async (expectedDay: number) => {
       const current = await bar(person);
@@ -214,7 +216,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const before = await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] });
     expect(before.error).toBeNull();
     const priorPlan = (before.data as any)[lira.instanceId].currentQuest.plan;
-    const command = input(lira.npcId, 0, 'Please advise me on the existing plan.');
+    const command = await input(person, lira.npcId, 0, 'Please advise me on the existing plan.');
 
     const result = await runDialogue(person.admin, person.userId, command, fixtureProvider({ samePlan: true }), { promptRegistry });
     expect(result.status).toBe('completed');
@@ -242,7 +244,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const person = await player('uuid-dialogue');
     const roster = await bar(person);
     const lira = roster.roster.find((resident) => resident.name === 'Lira Nightwind')!;
-    const command = input(lira.npcId, 0, 'I thank you and advise you to scout, then negotiate.');
+    const command = await input(person, lira.npcId, 0, 'I thank you and advise you to scout, then negotiate.');
     const before = await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] });
     expect(before.error).toBeNull();
     const priorPlan = (before.data as any)[lira.instanceId].currentQuest.plan;
@@ -276,7 +278,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const person = await player('uuid-dialogue-keeper-promise');
     const roster = await bar(person);
     const lira = roster.roster.find((resident) => resident.name === 'Lira Nightwind')!;
-    const command = input(lira.npcId, 0, 'I promise to prepare carefully before scouting.');
+    const command = await input(person, lira.npcId, 0, 'I promise to prepare carefully before scouting.');
     const provider = fixtureProvider({ keeperPromise: true });
 
     const result = await runDialogue(person.admin, person.userId, command, provider, { promptRegistry });
@@ -298,8 +300,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const before = await bar(person);
     const lira = before.roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const command = {
-      ...input(lira.npcId, lira.sequence, 'Please accept this drink.'),
-      offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
+      ...(await input(person, lira.npcId, lira.sequence, 'Please accept this drink.', { kind: 'beverage', itemId: before.beverages[0].id }))
     };
     await expect(runDialogue(person.admin, person.userId, command, fixtureProvider({ failStage: 'speak' }), { promptRegistry })).rejects.toThrow();
     const failed = await bar(person);
@@ -321,8 +322,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const before = await bar(person);
     const torvin = before.roster.find((resident) => resident.name === 'Torvin Ashbeard')!;
     const command = {
-      ...input(torvin.npcId, torvin.sequence, 'I thank you for keeping watch. Please enjoy this mead.'),
-      offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
+      ...(await input(person, torvin.npcId, torvin.sequence, 'I thank you for keeping watch. Please enjoy this mead.', { kind: 'beverage', itemId: before.beverages[0].id }))
     };
     const originalReply = 'I already cleared the old road.';
     const approvedReply = 'I will scout the old road tomorrow.';
@@ -354,8 +354,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const before = await bar(person);
     const lira = before.roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const command = {
-      ...input(lira.npcId, lira.sequence, 'I thank you. Please accept this mead.'),
-      offering: { kind: 'beverage' as const, itemId: before.beverages[0].id }
+      ...(await input(person, lira.npcId, lira.sequence, 'I thank you. Please accept this mead.', { kind: 'beverage', itemId: before.beverages[0].id }))
     };
     let memoryCalls = 0;
     const malformed = fixtureProvider();
@@ -390,7 +389,7 @@ describe('UUID community NPC dialogue runtime', () => {
     const stranger = await player('uuid-dialogue-stranger');
     const ownerLira = (await bar(owner)).roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const strangerLira = (await bar(stranger)).roster.find((resident) => resident.name === 'Lira Nightwind')!;
-    const command = input(ownerLira.npcId, 0, 'I thank you for your courage.');
+    const command = await input(owner, ownerLira.npcId, 0, 'I thank you for your courage.');
     await runDialogue(owner.admin, owner.userId, command, fixtureProvider(), { promptRegistry });
 
     expect((await stranger.client.rpc('npc_dialogue_status', { p_turn_id: command.turnId })).error?.code).toBe('PT404');
@@ -409,29 +408,27 @@ describe('UUID community NPC dialogue runtime', () => {
     expect(strangerLira.instanceId).not.toBe(ownerLira.instanceId);
   });
 
-  it('rejects stale selected-resident dialogue after a competing UUID hospitality action', async () => {
+  it('fences a competing UUID hospitality dialogue while the selected resident turn is processing', async () => {
     const person = await createBrewedTavern('uuid-dialogue-stale');
     players.push(person);
     const stock = await bar(person);
     const lira = stock.roster.find((resident) => resident.name === 'Lira Nightwind')!;
     const torvin = stock.roster.find((resident) => resident.name === 'Torvin Ashbeard')!;
-    const command = input(lira.npcId, lira.sequence, 'How is the quest going?');
+    const command = await input(person, lira.npcId, lira.sequence, 'How is the quest going?');
+    const competing = await input(person, torvin.npcId, torvin.sequence, 'Please accept this drink.', { kind: 'beverage', itemId: stock.beverages[0].id });
     const provider = fixtureProvider();
     await expect(runDialogue(person.admin, person.userId, command, {
       ...provider,
       async generate(stage, payload, signal, prompt) {
         const output = await provider.generate(stage, payload, signal, prompt);
         if (stage === 'review') {
-          expect((await person.client.rpc('npc_serve_hospitality', {
-            p_save_id: person.saveId, p_instance_id: torvin.instanceId, p_item_kind: 'beverage',
-            p_item_id: stock.beverages[0].id, p_action_id: crypto.randomUUID(), p_expected_revision: stock.save.revision
-          })).error).toBeNull();
+          await runDialogue(person.admin, person.userId, competing, fixtureProvider(), { promptRegistry });
         }
         return output;
       }
-    }, { promptRegistry })).rejects.toMatchObject({ code: 'STATE_CHANGED' });
+    }, { promptRegistry })).rejects.toMatchObject({ code: 'PT409', message: 'Another conversation is processing' });
     const after = await bar(person);
-    expect(after.history).toHaveLength(1);
+    expect(after.history).toHaveLength(0);
     expect((await person.client.rpc('npc_journals', { p_instance_ids: [lira.instanceId] })).data).toMatchObject({ [lira.instanceId]: { sequence: 0 } });
   });
 });

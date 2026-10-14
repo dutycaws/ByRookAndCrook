@@ -67,12 +67,6 @@
 		<path d="M48 42c-7 7-6 11 0 15 6-4 7-8 0-15Z" fill="#f3d27b" />
 		<path d="M35 65h26l5 8H30z" fill={`url(#${prefix}-gold)`} stroke="#f3dc9d" stroke-width="1.3" stroke-linejoin="round" />
 		<path d="M34 39h28m-25 24h21" stroke="#eed597" stroke-width="2" stroke-linecap="round" />
-	{:else if kind === 'flirt'}
-		<path d="M49 83c0-20 3-34 11-49" fill="none" stroke="#77905b" stroke-width="3" stroke-linecap="round" />
-		<path d="M50 68c-11-12-20-8-19-2 1 7 12 9 19 8m8-20c9-11 17-7 16-1-1 7-10 10-17 9" fill="#567149" stroke="#c0bd7c" stroke-width="1.4" stroke-linejoin="round" />
-		<path d="M48 38c-7-11 2-20 10-14 5-12 19-7 16 4 11 5 7 17-4 17-2 10-15 9-16 0-10 5-16-3-6-7Z" fill={`url(#${prefix}-rose)`} stroke="#f0c08e" stroke-width="1.8" stroke-linejoin="round" />
-		<path d="M52 38c4-7 12-8 17-5-1 6-6 11-13 11-4-1-6-3-4-6Z" fill="#f0c38b" stroke="#a64744" stroke-width="1.3" />
-		<path d="M39 83h23" stroke="#d1aa62" stroke-width="2" stroke-linecap="round" />
 	{:else if kind === 'rumor'}
 		<path d="M18 71c14-3 24-2 34 0 9 2 17 1 27-4" fill="none" stroke={`url(#${prefix}-gold)`} stroke-width="3" stroke-linecap="round" />
 		<path d="M29 59c2-9 9-15 17-15 5 0 8 3 11 6l8 1-5 5-5 10-6-5-8 2-2-6-9 3z" fill="#17140f" stroke="#c8ad73" stroke-width="1.5" stroke-linejoin="round" />

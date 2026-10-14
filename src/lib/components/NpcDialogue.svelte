@@ -92,17 +92,20 @@
 	const residentHistory = $derived(history ?? stock.history);
 	const messageFieldId = $derived(`npc-message-${safeId(residentKey)}`);
 	const dialogueHeadingId = $derived(`npc-dialogue-heading-${safeId(residentKey)}`);
-	const draftKey = $derived(`byrook:bar-draft:${saveId}:${residentKey}`);
+	const baseDraftKey = $derived(`byrook:bar-draft:${saveId}:${residentKey}`);
 
 	let message = $state('');
 	let intentCardId = $state('');
 	let offeringSelection = $state('');
+	let selectedDailyCardId = $state('');
+	let suggestionLoading = $state(false);
 	let busy = $state(false);
 	let frozen = $state<DialogueInput | null>(null);
 	let notice = $state('');
 	let failure = $state(false);
 	let hydrated = $state(false);
 	let draftLoaded = $state(false);
+	let activeDraftKey = $state('');
 	let restoredTurn = $state<string | null>(null);
 	let cancelling = $state(false);
 	let canRetry = $state(true);
@@ -132,6 +135,10 @@
 		cancelBurn();
 		nextCardFocusIndex = null;
 		lastBurnedTurnId = null;
+		if (!frozen) {
+			clearChoice();
+			activateDraft('');
+		}
 	});
 	$effect(() => { onbusychange?.(busy || frozen !== null); });
 	$effect(() => { onselectionchange?.(!!intentCardId || !!offeringSelection); });
@@ -161,9 +168,18 @@
 			void recover(journal.pending.turnId);
 		}
 	});
-	$effect(() => {
-		const key = draftKey;
-		const draft = message;
+	function draftKeyFor(dailyCardId: string) {
+		const generationId = stock.dailyDeck?.generationId ?? 'no-daily-deck';
+		return `${baseDraftKey}:${generationId}:${dailyCardId || 'uncarded'}`;
+	}
+
+	function readDraft(key: string) {
+		if (typeof window === 'undefined') return '';
+		try { return window.sessionStorage.getItem(key) ?? ''; }
+		catch { return ''; }
+	}
+
+	function saveDraft(key: string, draft: string) {
 		if (!draftLoaded || !key || typeof window === 'undefined') return;
 		try {
 			if (draft) window.sessionStorage.setItem(key, draft);
@@ -171,14 +187,21 @@
 		} catch {
 			// The in-memory draft remains available when browser storage is disabled.
 		}
-	});
+	}
+
+	function activateDraft(dailyCardId: string) {
+		const nextKey = draftKeyFor(dailyCardId);
+		if (activeDraftKey === nextKey) return;
+		saveDraft(activeDraftKey, message);
+		activeDraftKey = nextKey;
+		message = readDraft(nextKey);
+	}
+
+	$effect(() => { saveDraft(activeDraftKey, message); });
 
 	onMount(() => {
-		try {
-			if (!journal.pending) message = window.sessionStorage.getItem(draftKey) ?? '';
-		} catch {
-			// The composer still works without session storage.
-		}
+		activeDraftKey = draftKeyFor(selectedDailyCardId);
+		if (!journal.pending) message = readDraft(activeDraftKey);
 		draftLoaded = true;
 		hydrated = true;
 	});
@@ -213,7 +236,25 @@
 		}));
 	});
 	let serviceStacks = $derived(serviceCardStacks([...stock.beverages, ...stock.foods]));
-	let cardChoices = $derived.by((): TavernCardChoice[] => [
+	let cardChoices = $derived.by((): TavernCardChoice[] => {
+		const dailyDeck = stock.dailyDeck;
+		if (dailyDeck) {
+			if (dailyDeck.phase !== 'service') return [];
+			const cardsById = new Map(dailyDeck.cards.map((card) => [card.id, card]));
+			return dailyDeck.handIds.flatMap<TavernCardChoice>((dailyCardId): TavernCardChoice[] => {
+				const card = cardsById.get(dailyCardId);
+				if (!card || card.pile !== 'hand') return [];
+				if (card.kind === 'social') {
+					const source = stock.intentCards.find((intent) => intent.id === card.sourceId);
+					return [{ key: `daily:${card.id}`, kind: card.cardKey ?? 'charm', itemIds: [card.sourceId], title: card.displayName,
+						eyebrow: titleCase(card.cardKey ?? 'charm'), detail: source?.description ?? `${titleCase(card.cardKey ?? 'charm')} shapes the tone of your words.`, quantity: 1, dailyCardId: card.id }];
+				}
+				const item = [...stock.beverages, ...stock.foods].find((candidate) => candidate.id === card.sourceId);
+				return [{ key: `daily:${card.id}`, kind: card.kind as TavernCardKind, itemIds: [card.sourceId], title: card.displayName,
+					eyebrow: card.kind === 'food' ? 'From the kitchen' : 'From the cellar', detail: item ? `${item.ingredientName} · ${qualityLabel(item.qualityIndex)}` : 'A prepared offering from the house.', quantity: 1, dailyCardId: card.id }];
+			});
+		}
+		return [
 		...intentOptions.map((option) => ({
 			key: `intent:${option.key}`,
 			kind: option.card.cardKey as IntentCardKey,
@@ -232,23 +273,26 @@
 			detail: `${stack.ingredientName} · ${qualityLabel(stack.qualityIndex)}`,
 			quantity: stack.quantity
 		}))
-	]);
+		];
+	});
 	let selectedIntent = $derived(stock.intentCards.find((card) => card.id === intentCardId));
 	let selectedOffering = $derived(offeringSelection
 		? [...stock.beverages, ...stock.foods].find((item) => `${item.kind}:${item.id}` === offeringSelection)
 		: undefined);
 	let selectedItemId = $derived(intentCardId || (offeringSelection ? offeringSelection.slice(offeringSelection.indexOf(':') + 1) : ''));
-	let selectedChoice = $derived(cardChoices.find((choice) => choice.itemIds.includes(selectedItemId)));
+	let selectedChoice = $derived(cardChoices.find((choice) => choice.dailyCardId
+		? choice.dailyCardId === selectedDailyCardId
+		: choice.itemIds.includes(selectedItemId)));
 	let workflowChoices = $derived.by(() => {
 		const items: WorkflowChoice[] = [
-			{
+			...(stock.dailyDeck?.phase === 'service' ? [] : [{
 				id: 'dialogue:start',
 				title: `Talk with ${name}`,
 				description: 'Start a conversation without attaching an item.',
 				eyebrow: 'A quiet word',
 				icon: '“',
 				actionLabel: 'Compose'
-			},
+			}]),
 			...cardChoices.map((choice) => ({
 				id: `dialogue:${choice.key}`,
 				title: choice.title,
@@ -307,6 +351,8 @@
 	function clearChoice() {
 		intentCardId = '';
 		offeringSelection = '';
+		selectedDailyCardId = '';
+		activateDraft('');
 	}
 
 	function finishBurn(turnId: string) {
@@ -459,9 +505,30 @@
 			intentCardId = itemId;
 			offeringSelection = '';
 		}
+		selectedDailyCardId = choice.dailyCardId ?? '';
+		activateDraft(selectedDailyCardId);
+		if (choice.dailyCardId && stock.dailyDeck?.generationId) void loadSuggestion(choice.dailyCardId, stock.dailyDeck.generationId);
 		if (!barHand) setDeckOpen(false);
 		setComposerOpen(true);
 		await focusComposer();
+	}
+
+	/** Suggestions are persisted by the opening batch. Reading them never triggers generation. */
+	async function loadSuggestion(dailyCardId: string, generationId: string) {
+		const selection = dailyCardId;
+		const selectionKey = `${residentKey}:${generationId}:${selection}`;
+		suggestionLoading = true;
+		try {
+			const response = await fetch(`/api/dialogue/suggestions/${encodeURIComponent(generationId)}`);
+			if (!response.ok) return;
+			const body = await response.json() as { suggestions?: Array<{ dailyCardId: string; npcId: string; text: string }> };
+			const suggestion = body.suggestions?.find((candidate) => candidate.dailyCardId === selection && candidate.npcId === residentKey);
+			if (suggestion && `${residentKey}:${stock.dailyDeck?.generationId ?? 'no-daily-deck'}:${selectedDailyCardId}` === selectionKey && !frozen && !message.trim()) message = suggestion.text;
+		} catch {
+			// The opening action persists a fallback batch; retain the editable draft if the read is briefly unavailable.
+		} finally {
+			if (`${residentKey}:${stock.dailyDeck?.generationId ?? 'no-daily-deck'}:${selectedDailyCardId}` === selectionKey) suggestionLoading = false;
+		}
 	}
 
 	async function acceptStatus(body: any, completedNotice = 'Your last reply was saved.') {
@@ -489,6 +556,7 @@
 			frozen = body.input;
 			message = body.input.message;
 			intentCardId = body.input.intentCardId ?? '';
+			selectedDailyCardId = body.input.dailyCardId ?? '';
 			offeringSelection = body.input.offering
 				? `${body.input.offering.kind}:${body.input.offering.itemId}`
 				: '';
@@ -537,6 +605,7 @@
 			expectedConversationSequence: journal.sequence,
 			interactionVersion: 'dialogue-v2',
 			intentCardId: intentCardId || null,
+			dailyCardId: selectedDailyCardId || null,
 			offering
 		};
 		const command = frozen as DialogueInput;
@@ -720,6 +789,9 @@
                 {/if}
 
 			<form onsubmit={send} class="dialogue-form">
+				{#if selectedDailyCardId}
+					<p class="service-consumption-note" role="status">{suggestionLoading ? 'Finding the prepared line…' : 'This exact editable line will be submitted when you confirm.'}</p>
+				{/if}
 				<fieldset disabled={!hydrated || busy || !!unavailable || blocked}>
 					<legend class="sr-only">Compose a message to {name}</legend>
 					<label for={messageFieldId} class="sr-only">Your message to {name}</label>

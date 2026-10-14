@@ -25,7 +25,7 @@ interface BakerySnapshot {
       ovenStartedAt: string | null;
     } | null;
     foods: Array<{ id: string; name: string; qualityIndex: number; bakeSessionId: string }>;
-    intentCards: Array<{ id: string; cardKey: string; tier: string; sourceFoodId: string }>;
+    intentCards: Array<{ id: string; cardKey: string; tier: string; sourceFoodId: string | null }>;
   };
 }
 
@@ -105,7 +105,7 @@ afterEach(async () => {
 });
 
 describe('bakery RPC', () => {
-  it('persists every stage and atomically produces one food plus an independent intent reward', async () => {
+  it('persists every stage and atomically produces one food', async () => {
     const player = await createTestPlayer('bake-replay');
     createdUsers.push(player);
     const { snapshot, ingredient } = await provisionIngredient(player);
@@ -198,9 +198,9 @@ describe('bakery RPC', () => {
     expect(current.bakery.activeSession).toBeNull();
     expect(current.bakery.foods).toHaveLength(1);
     expect(current.bakery.foods[0]).toEqual(expect.objectContaining({ bakeSessionId: sessionId, qualityIndex: 4 }));
-    expect(current.bakery.intentCards).toContainEqual(expect.objectContaining({
-      sourceFoodId: current.bakery.foods[0].id, cardKey: 'charm', tier: 'superior'
-    }));
+    expect(current.bakery.intentCards.filter((card) =>
+      card.sourceFoodId === current.bakery.foods[0].id
+    )).toEqual([]);
     expect(current.ingredients).toEqual([]);
 
     const counts = await Promise.all([
@@ -208,7 +208,7 @@ describe('bakery RPC', () => {
       player.admin.from('intent_cards').select('*', { count: 'exact', head: true }).eq('source_food_id', current.bakery.foods[0].id),
       player.admin.from('bake_actions').select('*', { count: 'exact', head: true }).eq('command_kind', 'complete_bake').eq('save_id', current.save.id)
     ]);
-    expect(counts.map((result) => result.count)).toEqual([1, 1, 1]);
+    expect(counts.map((result) => result.count)).toEqual([1, 0, 1]);
     expect((await player.client.from('foods').insert({
       save_id: current.save.id, name: 'Forged loaf', recipe_key: 'herb-loaf', quality_index: 6,
       day_number: current.save.currentDay, source_action_id: crypto.randomUUID()
